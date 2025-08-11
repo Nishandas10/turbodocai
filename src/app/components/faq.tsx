@@ -35,13 +35,13 @@ export default function FAQ() {
   ]
 
   return (
-    <section className="py-20 bg-white dark:bg-gray-950" id="faq">
+    <section className="py-20 bg-gray-900/30 backdrop-blur-sm" id="faq">
       <div className="container mx-auto px-4">
         <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
             Frequently Asked Questions
           </h2>
-          <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+          <p className="text-lg text-gray-300 max-w-2xl mx-auto">
             Find answers to common questions about our platform.
           </p>
         </div>
@@ -49,11 +49,11 @@ export default function FAQ() {
         <div className="max-w-3xl mx-auto">
           <Accordion type="single" collapsible className="w-full">
             {faqs.map((faq, index) => (
-              <AccordionItem key={index} value={`item-${index}`}>
-                <AccordionTrigger className="text-left text-lg font-medium dark:text-white">
+              <AccordionItem key={index} value={`item-${index}`} className="bg-gray-900/80 backdrop-blur-sm rounded-lg border border-gray-800/50 mb-4 p-4">
+                <AccordionTrigger className="text-left text-lg font-medium text-white hover:text-blue-400 transition-colors">
                   {faq.question}
                 </AccordionTrigger>
-                <AccordionContent className="text-gray-600 dark:text-gray-300">{faq.answer}</AccordionContent>
+                <AccordionContent className="text-gray-300 pt-2">{faq.answer}</AccordionContent>
               </AccordionItem>
             ))}
           </Accordion>

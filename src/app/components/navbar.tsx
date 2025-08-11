@@ -10,12 +10,12 @@ export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   return (
-    <header className="bg-white/80 dark:bg-gray-950/80 backdrop-blur-md sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800">
+    <header className="bg-gray-950/80 backdrop-blur-md sticky top-0 z-50 border-b border-gray-800">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center">
             <Link href="/" className="flex items-center">
-              <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">LearnAI</span>
+              <span className="text-2xl font-bold text-white">Turbonotes AI</span>
             </Link>
           </div>
 
@@ -23,25 +23,25 @@ export default function Navbar() {
           <nav className="hidden md:flex items-center space-x-8">
             <Link
               href="#features"
-              className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="text-gray-300 hover:text-blue-400 transition-colors"
             >
               Features
             </Link>
             <Link
               href="#how-it-works"
-              className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="text-gray-300 hover:text-blue-400 transition-colors"
             >
               How It Works
             </Link>
             <Link
               href="#pricing"
-              className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="text-gray-300 hover:text-blue-400 transition-colors"
             >
               Pricing
             </Link>
             <Link
               href="#faq"
-              className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="text-gray-300 hover:text-blue-400 transition-colors"
             >
               FAQ
             </Link>
@@ -49,13 +49,12 @@ export default function Navbar() {
 
           <div className="hidden md:flex items-center space-x-4">
             <ThemeToggle />
-            <Button
-              variant="outline"
-              className="border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+            <Button 
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              asChild
             >
-              Log In
+              <Link href="/signup">Get Started</Link>
             </Button>
-            <Button className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600">Sign Up</Button>
           </div>
 
           {/* Mobile Menu Button */}
@@ -73,45 +72,42 @@ export default function Navbar() {
 
       {/* Mobile Menu */}
       {isMenuOpen && (
-        <div className="md:hidden bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800">
+        <div className="md:hidden bg-gray-950 border-b border-gray-800">
           <div className="container mx-auto px-4 py-4 space-y-4">
             <Link
               href="#features"
-              className="block text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="block text-gray-300 hover:text-blue-400 transition-colors"
               onClick={() => setIsMenuOpen(false)}
             >
               Features
             </Link>
             <Link
               href="#how-it-works"
-              className="block text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="block text-gray-300 hover:text-blue-400 transition-colors"
               onClick={() => setIsMenuOpen(false)}
             >
               How It Works
             </Link>
             <Link
               href="#pricing"
-              className="block text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="block text-gray-300 hover:text-blue-400 transition-colors"
               onClick={() => setIsMenuOpen(false)}
             >
               Pricing
             </Link>
             <Link
               href="#faq"
-              className="block text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              className="block text-gray-300 hover:text-blue-400 transition-colors"
               onClick={() => setIsMenuOpen(false)}
             >
               FAQ
             </Link>
             <div className="pt-4 flex flex-col space-y-2">
-              <Button
-                variant="outline"
-                className="border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 w-full"
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700 text-white w-full"
+                asChild
               >
-                Log In
-              </Button>
-              <Button className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 w-full">
-                Sign Up
+                <Link href="/signup">Get Started</Link>
               </Button>
             </div>
           </div>

@@ -27,11 +27,11 @@ export default function Testimonials() {
   ]
 
   return (
-    <section className="py-20 bg-white dark:bg-gray-950">
+    <section className="py-20 bg-gray-900/30 backdrop-blur-sm">
       <div className="container mx-auto px-4">
         <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">What Our Users Say</h2>
-          <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+          <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">What Our Users Say</h2>
+          <p className="text-lg text-gray-300 max-w-2xl mx-auto">
             Join thousands of students and professionals who have transformed their learning experience.
           </p>
         </div>
@@ -40,27 +40,31 @@ export default function Testimonials() {
           {testimonials.map((testimonial, index) => (
             <div
               key={index}
-              className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-800"
+              className="bg-gray-900/80 backdrop-blur-sm rounded-xl p-6 shadow-xl border border-gray-800/50 hover:shadow-2xl hover:border-gray-700/50 transition-all duration-300 relative group"
             >
-              <div className="flex items-center mb-4">
-                <Image
-                  src={testimonial.avatar || "/placeholder.svg"}
-                  alt={testimonial.name}
-                  width={48}
-                  height={48}
-                  className="w-12 h-12 rounded-full mr-4"
-                />
-                <div>
-                  <h4 className="font-semibold text-gray-900 dark:text-white">{testimonial.name}</h4>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm">{testimonial.role}</p>
+              {/* Glow Effect */}
+              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-xl blur opacity-0 group-hover:opacity-30 transition-opacity duration-300"></div>
+              <div className="relative">
+                <div className="flex items-center mb-4">
+                  <Image
+                    src={testimonial.avatar || "/placeholder.svg"}
+                    alt={testimonial.name}
+                    width={48}
+                    height={48}
+                    className="w-12 h-12 rounded-full mr-4"
+                  />
+                  <div>
+                    <h4 className="font-semibold text-white">{testimonial.name}</h4>
+                    <p className="text-gray-400 text-sm">{testimonial.role}</p>
+                  </div>
                 </div>
+                <div className="flex mb-4">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className="h-4 w-4 fill-current text-yellow-400" />
+                  ))}
+                </div>
+                <p className="text-gray-300">{testimonial.content}</p>
               </div>
-              <div className="flex mb-4">
-                {[...Array(5)].map((_, i) => (
-                  <Star key={i} className="h-4 w-4 fill-current text-yellow-400" />
-                ))}
-              </div>
-              <p className="text-gray-700 dark:text-gray-300">{testimonial.content}</p>
             </div>
           ))}
         </div>

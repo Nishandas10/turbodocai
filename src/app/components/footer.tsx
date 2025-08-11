@@ -3,11 +3,11 @@ import { Facebook, Twitter, Instagram, Linkedin, Mail, Phone } from "lucide-reac
 
 export default function Footer() {
   return (
-    <footer className="bg-gray-900 dark:bg-gray-950 text-gray-300">
+    <footer className="bg-gray-950 text-gray-300 border-t border-gray-800">
       <div className="container mx-auto px-4 py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
-            <h3 className="text-xl font-bold text-white mb-4">LearnAI</h3>
+            <h3 className="text-xl font-bold text-white mb-4">Turbonotes AI</h3>
             <p className="mb-4">Transforming content into interactive learning experiences with the power of AI.</p>
             <div className="flex space-x-4">
               <Link href="#" className="hover:text-blue-400 transition-colors">
@@ -86,8 +86,8 @@ export default function Footer() {
             <ul className="space-y-2">
               <li className="flex items-center">
                 <Mail className="h-5 w-5 mr-2" />
-                <a href="mailto:info@learnai.com" className="hover:text-blue-400 transition-colors">
-                  info@learnai.com
+                <a href="mailto:info@turbonotes.ai" className="hover:text-blue-400 transition-colors">
+                  info@turbonotes.ai
                 </a>
               </li>
               <li className="flex items-center">
@@ -100,19 +100,8 @@ export default function Footer() {
           </div>
         </div>
 
-        <div className="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row justify-between items-center">
-          <p>&copy; {new Date().getFullYear()} LearnAI. All rights reserved.</p>
-          <div className="flex space-x-6 mt-4 md:mt-0">
-            <Link href="#" className="hover:text-blue-400 transition-colors">
-              Privacy Policy
-            </Link>
-            <Link href="#" className="hover:text-blue-400 transition-colors">
-              Terms of Service
-            </Link>
-            <Link href="#" className="hover:text-blue-400 transition-colors">
-              Cookie Policy
-            </Link>
-          </div>
+        <div className="border-t border-gray-800 mt-8 pt-8 text-center">
+          <p>&copy; 2024 Turbonotes AI. All rights reserved.</p>
         </div>
       </div>
     </footer>
