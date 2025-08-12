@@ -13,6 +13,7 @@ import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPl
 import { TRANSFORMERS } from '@lexical/markdown'
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
+import { ImageNode } from './toolbar/ImageNode'
 
 // Theme styling
 const theme = {
@@ -85,6 +86,7 @@ const nodes = [
   TableRowNode,
   AutoLinkNode,
   LinkNode,
+  ImageNode,
 ]
 
 // Error Boundary Component
@@ -113,14 +115,14 @@ export default function EditorConfig({ children, fontSize = 16, fontFamily = 'in
       <div className="relative min-h-[500px] prose prose-sm max-w-none">
         {/* Render children (toolbar) at the top */}
         {children}
-        
+
         <RichTextPlugin
           contentEditable={
             <ContentEditable
               className="min-h-[500px] outline-none p-6"
-              style={{ 
-                fontSize: `${fontSize}px`, 
-                fontFamily 
+              style={{
+                fontSize: `${fontSize}px`,
+                fontFamily
               }}
             />
           }
