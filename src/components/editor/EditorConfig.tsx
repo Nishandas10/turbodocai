@@ -14,6 +14,12 @@ import { TRANSFORMERS } from '@lexical/markdown'
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { ImageNode } from './toolbar/ImageNode'
+import { HorizontalRuleNode } from './toolbar/HorizontalRuleNode'
+import { HORIZONTAL_RULE } from './toolbar/HorizontalRuleTransformer'
+import CustomTablePlugin from './plugins/TablePlugin'
+import TableContextMenu from './plugins/TableContextMenu'
+import { useTableContextMenu } from './hooks/useTableContextMenu'
+import { useEffect } from 'react'
 
 // Theme styling
 const theme = {
@@ -31,6 +37,7 @@ const theme = {
     listitem: 'mb-1',
   },
   quote: 'border-l-4 border-gray-300 pl-4 italic mb-4',
+  horizontalRule: 'my-6 border-t border-gray-300',
   text: {
     bold: 'font-bold',
     italic: 'italic',
@@ -38,6 +45,10 @@ const theme = {
     strikethrough: 'line-through',
     underlineStrikethrough: 'underline line-through',
   },
+  table: 'min-w-full border-collapse my-4',
+  tableRow: '',
+  tableCell: 'border border-border p-2 min-w-[3rem] min-h-[2rem]',
+  tableCellHeader: '',
   code: 'bg-gray-100 rounded px-2 py-1 font-mono',
   codeHighlight: {
     atrule: 'text-blue-600',
@@ -66,7 +77,7 @@ const theme = {
     regex: 'text-red-600',
     selector: 'text-purple-600',
     string: 'text-green-600',
-    symbol: 'text-purple-600',
+    symbol: 'text-yellow-600',
     tag: 'text-blue-600',
     url: 'text-blue-600',
     variable: 'text-purple-600',
@@ -87,6 +98,7 @@ const nodes = [
   AutoLinkNode,
   LinkNode,
   ImageNode,
+  HorizontalRuleNode,
 ]
 
 // Error Boundary Component
@@ -98,6 +110,70 @@ interface EditorConfigProps {
   children: React.ReactNode
   fontSize?: number
   fontFamily?: string
+}
+
+function EditorContent({ children, fontSize = 16, fontFamily = 'inherit' }: EditorConfigProps) {
+  const { 
+    isMenuOpen, 
+    menuPosition, 
+    selectedTableKey, 
+    selectedCellKey, 
+    handleTableClick, 
+    closeMenu 
+  } = useTableContextMenu()
+
+  // Add click event listener for table cells
+  useEffect(() => {
+    const handleClick = (event: Event) => {
+      if (event instanceof MouseEvent) {
+        handleTableClick(event)
+      }
+    }
+    
+    document.addEventListener('click', handleClick)
+    return () => {
+      document.removeEventListener('click', handleClick)
+    }
+  }, [handleTableClick])
+
+  return (
+    <div className="relative min-h-[500px] prose prose-sm max-w-none">
+      {/* Render children (toolbar) at the top */}
+      {children}
+
+      <RichTextPlugin
+        contentEditable={
+          <ContentEditable
+            className="min-h-[500px] outline-none p-6"
+            style={{
+              fontSize: `${fontSize}px`,
+              fontFamily
+            }}
+          />
+        }
+        placeholder={null}
+        ErrorBoundary={LexicalErrorBoundary}
+      />
+      <HistoryPlugin />
+      <AutoFocusPlugin />
+      <LinkPlugin />
+      <ListPlugin />
+      <TabIndentationPlugin />
+      <CustomTablePlugin />
+      <MarkdownShortcutPlugin transformers={[...TRANSFORMERS, HORIZONTAL_RULE]} />
+
+      {/* Table Context Menu */}
+      {isMenuOpen && (
+        <TableContextMenu
+          isOpen={isMenuOpen}
+          onClose={closeMenu}
+          position={menuPosition}
+          tableNodeKey={selectedTableKey}
+          cellNodeKey={selectedCellKey}
+        />
+      )}
+    </div>
+  )
 }
 
 export default function EditorConfig({ children, fontSize = 16, fontFamily = 'inherit' }: EditorConfigProps) {
@@ -112,30 +188,9 @@ export default function EditorConfig({ children, fontSize = 16, fontFamily = 'in
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <div className="relative min-h-[500px] prose prose-sm max-w-none">
-        {/* Render children (toolbar) at the top */}
+      <EditorContent fontSize={fontSize} fontFamily={fontFamily}>
         {children}
-
-        <RichTextPlugin
-          contentEditable={
-            <ContentEditable
-              className="min-h-[500px] outline-none p-6"
-              style={{
-                fontSize: `${fontSize}px`,
-                fontFamily
-              }}
-            />
-          }
-          placeholder={null}
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-        <HistoryPlugin />
-        <AutoFocusPlugin />
-        <LinkPlugin />
-        <ListPlugin />
-        <TabIndentationPlugin />
-        <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
-      </div>
+      </EditorContent>
     </LexicalComposer>
   )
 } 
