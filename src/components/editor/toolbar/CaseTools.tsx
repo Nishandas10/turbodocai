@@ -17,13 +17,21 @@ export default function CaseTools() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (caseDropdownRef.current && !caseDropdownRef.current.contains(target)) {
-        setShowCaseDropdown(false)
+      // Check if click is outside both the button and any dropdown content
+      if (buttonRef.current && !buttonRef.current.contains(target)) {
+        // Check if click is on dropdown content (which is now in portal)
+        const dropdownElement = document.querySelector('[data-case-dropdown]')
+        if (dropdownElement && !dropdownElement.contains(target)) {
+          // Use setTimeout to allow other click handlers to execute first
+          setTimeout(() => {
+            setShowCaseDropdown(false)
+          }, 0)
+        }
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
   }, [])
 
   const handleCaseChange = (caseType: string) => {
@@ -86,6 +94,7 @@ export default function CaseTools() {
             top: dropdownPosition.top + 4,
             left: dropdownPosition.left
           }}
+          data-case-dropdown
         >
           <button onClick={() => handleCaseChange('uppercase')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
             <span>UPPERCASE</span>

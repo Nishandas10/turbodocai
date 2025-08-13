@@ -1,44 +1,34 @@
 "use client"
 
-import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
   MessageSquare,
   Edit3,
   Mic,
   Paperclip,
-  Send
+  Send,
+  ChevronRight
 } from 'lucide-react'
 
-export default function AIAssistant() {
-  const [isVisible, setIsVisible] = useState(true)
+interface AIAssistantProps {
+  onCollapse?: () => void
+}
 
-  if (!isVisible) {
-    return (
-      <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-        <Button 
-          variant="ghost" 
-          size="sm"
-          onClick={() => setIsVisible(true)}
-          className="text-gray-400 hover:text-white p-2"
-        >
-          <MessageSquare className="h-7 w-7" />
-        </Button>
-      </div>
-    )
-  }
-
+export default function AIAssistant({ onCollapse }: AIAssistantProps) {
   return (
     <div className="w-full h-full bg-gray-900 flex flex-col relative overflow-y-auto">
-      {/* Hide Button */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setIsVisible(false)}
-        className="absolute top-4 right-4 z-10 text-gray-400 hover:text-white hover:bg-gray-800 px-3 py-1.5 text-sm"
-      >
-        Hide →
-      </Button>
+      {/* Collapse Button */}
+      {onCollapse && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onCollapse}
+          className="absolute top-4 right-4 z-10 text-gray-400 hover:text-white hover:bg-gray-800 px-3 py-1.5 text-sm"
+        >
+          <ChevronRight className="h-4 w-4 mr-1" />
+          Collapse
+        </Button>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-16 min-w-0">
@@ -50,9 +40,9 @@ export default function AIAssistant() {
           <p className="text-gray-400 text-lg md:text-xl lg:text-2xl leading-relaxed px-4 max-w-sm mx-auto">
             I can work with you on your doc and answer any questions!
           </p>
-        </div>
+          </div>
 
-        {/* Input Field */}
+          {/* Input Field */}
         <div className="w-full max-w-xs md:max-w-sm lg:max-w-md mb-6 md:mb-8 px-4">
           <div className="relative">
             <input

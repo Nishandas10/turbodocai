@@ -15,10 +15,10 @@ export default function TextFormatting() {
   }
 
   const handleLink = () => {
-    editor.update(() => {
-      const selection = $getSelection()
-      if ($isRangeSelection(selection)) {
-        const selectedText = selection.getTextContent()
+      editor.update(() => {
+        const selection = $getSelection()
+        if ($isRangeSelection(selection)) {
+          const selectedText = selection.getTextContent()
         
         // Check if we already have selected text
         if (selectedText.trim().length > 0) {
@@ -41,15 +41,15 @@ export default function TextFormatting() {
               // Create link node with text
               const linkNode = $createLinkNode(fullUrl)
               const textNode = $createTextNode(linkText)
-              linkNode.append(textNode)
+          linkNode.append(textNode)
               
               // Insert the link node
-              selection.insertNodes([linkNode])
+          selection.insertNodes([linkNode])
             }
           }
         }
-      }
-    })
+        }
+      })
   }
 
   return (

@@ -111,13 +111,21 @@ export default function ParagraphStyle() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (paragraphDropdownRef.current && !paragraphDropdownRef.current.contains(target)) {
-        setShowParagraphDropdown(false)
+      // Check if click is outside both the button and any dropdown content
+      if (buttonRef.current && !buttonRef.current.contains(target)) {
+        // Check if click is on dropdown content (which is now in portal)
+        const dropdownElement = document.querySelector('[data-paragraph-dropdown]')
+        if (dropdownElement && !dropdownElement.contains(target)) {
+          // Use setTimeout to allow other click handlers to execute first
+          setTimeout(() => {
+            setShowParagraphDropdown(false)
+          }, 0)
+        }
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
   }, [])
 
   const handleParagraphStyle = (style: string) => {
@@ -227,6 +235,7 @@ export default function ParagraphStyle() {
             top: dropdownPosition.top + 4,
             left: dropdownPosition.left
           }}
+          data-paragraph-dropdown
         >
           <button onClick={() => handleParagraphStyle('normal')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

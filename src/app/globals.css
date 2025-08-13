@@ -168,3 +168,13 @@
 .animate-scroll-left {
   animation: scroll-left 25s linear infinite;
 }
+
+/* Hide scrollbars globally */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Webkit browsers */
+}

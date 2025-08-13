@@ -164,19 +164,26 @@ export default function RecordPage() {
     <div className="h-screen bg-background flex overflow-hidden">
       {/* Left Sidebar */}
       <div className={`bg-sidebar border-r border-sidebar-border transition-all duration-300 ${sidebarCollapsed ? 'w-16' : 'w-64'} flex flex-col h-full sticky top-0`}>
-        <div className="p-4 flex-1 overflow-y-auto">
+        <div 
+          className="p-4 flex-1 overflow-y-auto" 
+          style={{ 
+            scrollbarWidth: 'none', 
+            msOverflowStyle: 'none'
+          }}
+        >
           {/* App Name and Collapse Button */}
           <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center space-x-2">
-              <PenTool className="h-5 w-5 text-blue-400" />
-              {!sidebarCollapsed && <span className="text-sidebar-foreground font-semibold text-lg">Turbonotes AI</span>}
-            </div>
             <button 
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="text-sidebar-accent-foreground hover:text-sidebar-foreground transition-colors"
+              className="flex items-center space-x-2 hover:bg-sidebar-accent rounded-lg p-2 transition-colors cursor-pointer group"
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              <ChevronLeft className={`h-5 w-5 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} />
+              <PenTool className="h-5 w-5 text-blue-400 group-hover:text-blue-300 transition-colors flex-shrink-0" />
+              {!sidebarCollapsed && <span className="text-sidebar-foreground font-semibold text-lg">Turbonotes AI</span>}
             </button>
+            <div className="text-sidebar-accent-foreground flex-shrink-0">
+              <ChevronLeft className={`h-5 w-5 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} />
+            </div>
           </div>
 
           {/* Navigation */}
@@ -185,21 +192,21 @@ export default function RecordPage() {
               href="/dashboard" 
               className="flex items-center space-x-3 px-3 py-2 text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors"
             >
-              <Home className="h-5 w-5" />
+              <Home className="h-5 w-5 flex-shrink-0" />
               {!sidebarCollapsed && <span>Dashboard</span>}
             </Link>
             <button 
               onClick={openSearchModal}
               className="flex items-center space-x-3 px-3 py-2 text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors w-full text-left"
             >
-              <Search className="h-5 w-5" />
+              <Search className="h-5 w-5 flex-shrink-0" />
               {!sidebarCollapsed && <span>Search</span>}
             </button>
             <Link 
               href="/settings" 
               className="flex items-center space-x-3 px-3 py-2 text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors"
             >
-              <Settings className="h-5 w-5" />
+              <Settings className="h-5 w-5 flex-shrink-0" />
               {!sidebarCollapsed && <span>Settings</span>}
             </Link>
           </nav>

@@ -46,48 +46,48 @@ export default function LexicalToolbar({
         }}
       >
         <div className="flex items-center space-x-4 min-w-max">
-          {/* Paragraph Style Dropdown */}
-          <ParagraphStyle />
+        {/* Paragraph Style Dropdown */}
+        <ParagraphStyle />
 
-          {/* Font Controls */}
-          <FontControls
-            fontSize={fontSize}
-            onFontSizeChange={onFontSizeChange}
-            fontFamily={fontFamily}
-            onFontFamilyChange={onFontFamilyChange}
-          />
+        {/* Font Controls */}
+        <FontControls
+          fontSize={fontSize}
+          onFontSizeChange={onFontSizeChange}
+          fontFamily={fontFamily}
+          onFontFamilyChange={onFontFamilyChange}
+        />
 
-          {/* Vertical Separator */}
+        {/* Vertical Separator */}
           <div className="w-px h-6 bg-border flex-shrink-0"></div>
 
-          {/* Text Formatting */}
-          <TextFormatting />
+        {/* Text Formatting */}
+        <TextFormatting />
 
-          {/* Text Color Dropdown */}
-          <ColorPicker />
+        {/* Text Color Dropdown */}
+        <ColorPicker />
 
-          {/* Highlighter */}
-          <TextHighlighter />
+        {/* Highlighter */}
+        <TextHighlighter />
 
-          {/* Case Change Dropdown */}
-          <CaseTools />
+        {/* Case Change Dropdown */}
+        <CaseTools />
 
-          {/* Vertical Separator */}
+        {/* Vertical Separator */}
           <div className="w-px h-6 bg-border flex-shrink-0"></div>
 
-          {/* Insert Dropdown */}
-          <InsertTools />
+        {/* Insert Dropdown */}
+        <InsertTools />
 
-          {/* Vertical Separator */}
+        {/* Vertical Separator */}
           <div className="w-px h-6 bg-border flex-shrink-0"></div>
 
-          {/* Alignment Dropdown */}
-          <AlignmentTools />
+        {/* Alignment Dropdown */}
+        <AlignmentTools />
 
           {/* Progress bar placeholder - only show when there's enough space */}
           <div className="hidden xl:flex flex-1 mx-4">
-            <div className="w-full bg-muted rounded-full h-1">
-              <div className="bg-blue-600 h-1 rounded-full" style={{ width: '0%' }}></div>
+          <div className="w-full bg-muted rounded-full h-1">
+            <div className="bg-blue-600 h-1 rounded-full" style={{ width: '0%' }}></div>
             </div>
           </div>
         </div>

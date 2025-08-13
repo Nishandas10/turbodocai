@@ -88,13 +88,21 @@ export default function ColorPicker() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (colorDropdownRef.current && !colorDropdownRef.current.contains(target)) {
-        setShowColorDropdown(false)
+      // Check if click is outside both the button and any dropdown content
+      if (buttonRef.current && !buttonRef.current.contains(target)) {
+        // Check if click is on dropdown content (which is now in portal)
+        const dropdownElement = document.querySelector('[data-color-dropdown]')
+        if (dropdownElement && !dropdownElement.contains(target)) {
+          // Use setTimeout to allow other click handlers to execute first
+          setTimeout(() => {
+            setShowColorDropdown(false)
+          }, 0)
+        }
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
   }, [])
 
   const handleTextColor = (color: string) => {
@@ -197,6 +205,7 @@ export default function ColorPicker() {
             top: dropdownPosition.top + 4,
             left: dropdownPosition.left
           }}
+          data-color-dropdown
         >
           <div className="grid grid-cols-6 gap-1 mb-3">
             {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#800000', '#008000', '#000080', '#808000', '#800080', '#008080', '#808080', '#C0C0C0', '#FFFFFF'].map((color) => (

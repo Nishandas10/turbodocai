@@ -37,16 +37,19 @@ export default function TableContextMenu({
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        onClose()
+        // Use setTimeout to allow other click handlers to execute first
+        setTimeout(() => {
+          onClose()
+        }, 0)
       }
     }
 
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('click', handleClickOutside)
     }
 
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('click', handleClickOutside)
     }
   }, [isOpen, onClose])
 
@@ -65,6 +68,9 @@ export default function TableContextMenu({
         const newRow = $createTableRowNode()
         for (let i = 0; i < columnCount; i++) {
           const newCell = $createTableCellNode(0) // Use 0 for normal cell type
+          // Add a paragraph node as initial content for the cell
+          const paragraphNode = $createParagraphNode()
+          newCell.append(paragraphNode)
           newRow.append(newCell)
         }
         
@@ -95,6 +101,9 @@ export default function TableContextMenu({
         const newRow = $createTableRowNode()
         for (let i = 0; i < columnCount; i++) {
           const newCell = $createTableCellNode(0) // Use 0 for normal cell type
+          // Add a paragraph node as initial content for the cell
+          const paragraphNode = $createParagraphNode()
+          newCell.append(paragraphNode)
           newRow.append(newCell)
         }
         
@@ -119,6 +128,9 @@ export default function TableContextMenu({
         children.forEach((row) => {
           if (row instanceof TableRowNode) {
             const newCell = $createTableCellNode(0) // Use 0 for normal cell type
+            // Add a paragraph node as initial content for the cell
+            const paragraphNode = $createParagraphNode()
+            newCell.append(paragraphNode)
             const rowChildren = row.getChildren()
             if (columnIndex === 0) {
               row.insertBefore(newCell)
@@ -146,6 +158,9 @@ export default function TableContextMenu({
         children.forEach((row) => {
           if (row instanceof TableRowNode) {
             const newCell = $createTableCellNode(0) // Use 0 for normal cell type
+            // Add a paragraph node as initial content for the cell
+            const paragraphNode = $createParagraphNode()
+            newCell.append(paragraphNode)
             const rowChildren = row.getChildren()
             const currentCell = rowChildren[columnIndex]
             currentCell.insertAfter(newCell)

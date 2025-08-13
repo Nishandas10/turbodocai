@@ -54,15 +54,23 @@ export default function InsertTools() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (insertDropdownRef.current && !insertDropdownRef.current.contains(target)) {
-        setShowInsertDropdown(false)
-        setShowTablePicker(false)
-        setShowCodeLanguages(false)
+      // Check if click is outside both the button and any dropdown content
+      if (buttonRef.current && !buttonRef.current.contains(target)) {
+        // Check if click is on dropdown content (which is now in portal)
+        const dropdownElement = document.querySelector('[data-insert-dropdown]')
+        if (dropdownElement && !dropdownElement.contains(target)) {
+          // Use setTimeout to allow other click handlers to execute first
+          setTimeout(() => {
+            setShowInsertDropdown(false)
+            setShowTablePicker(false)
+            setShowCodeLanguages(false)
+          }, 0)
+        }
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
   }, [])
 
   const handleButtonClick = () => {
@@ -325,6 +333,7 @@ export default function InsertTools() {
             top: dropdownPosition.top + 4,
             left: dropdownPosition.left
           }}
+          data-insert-dropdown
         >
           <div className="relative">
             <button 
@@ -340,8 +349,18 @@ export default function InsertTools() {
               </div>
               <ChevronDown className="h-3 w-3 rotate-[-90deg]" />
             </button>
-            {showTablePicker && (
-              <TablePicker onSelect={handleTableSelect} maxSize={20} />
+            {showTablePicker && createPortal(
+              <div 
+                className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[200px] p-3"
+                style={{
+                  top: dropdownPosition.top + 4,
+                  left: dropdownPosition.left + 140 // Offset to the right of main dropdown
+                }}
+                data-insert-dropdown
+              >
+                <TablePicker onSelect={handleTableSelect} maxSize={20} />
+              </div>,
+              document.body
             )}
           </div>
           <button onClick={() => handleInsert('image')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
@@ -378,8 +397,15 @@ export default function InsertTools() {
               </div>
               <ChevronRight className="h-3 w-3" />
             </button>
-            {showCodeLanguages && (
-              <div className="absolute right-full top-0 mr-1 bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[160px] max-h-60 overflow-y-auto">
+            {showCodeLanguages && createPortal(
+              <div 
+                className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[160px] max-h-60 overflow-y-auto p-1"
+                style={{
+                  top: dropdownPosition.top + 4,
+                  left: dropdownPosition.left + 140 // Offset to the right of main dropdown
+                }}
+                data-insert-dropdown
+              >
                 <div className="py-1">
                   {/* Line numbers toggle */}
                   <div className="px-3 py-2 border-b border-border">
@@ -406,7 +432,8 @@ export default function InsertTools() {
                     </button>
                   ))}
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>,

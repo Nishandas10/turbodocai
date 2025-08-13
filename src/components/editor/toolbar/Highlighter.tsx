@@ -24,13 +24,21 @@ export default function TextHighlighter() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (highlightDropdownRef.current && !highlightDropdownRef.current.contains(target)) {
-        setShowHighlightDropdown(false)
+      // Check if click is outside both the button and any dropdown content
+      if (buttonRef.current && !buttonRef.current.contains(target)) {
+        // Check if click is on dropdown content (which is now in portal)
+        const dropdownElement = document.querySelector('[data-highlight-dropdown]')
+        if (dropdownElement && !dropdownElement.contains(target)) {
+          // Use setTimeout to allow other click handlers to execute first
+          setTimeout(() => {
+            setShowHighlightDropdown(false)
+          }, 0)
+        }
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
   }, [])
 
   // Global mouse move and up handlers for dragging
@@ -204,6 +212,7 @@ export default function TextHighlighter() {
             top: dropdownPosition.top + 4,
             left: dropdownPosition.left
           }}
+          data-highlight-dropdown
         >
           {/* Hex Input */}
           <div className="mb-3">
@@ -314,4 +323,4 @@ export default function TextHighlighter() {
       )}
     </div>
   )
-} 
+}

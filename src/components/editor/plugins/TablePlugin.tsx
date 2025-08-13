@@ -1,5 +1,5 @@
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
-import { INSERT_TABLE_COMMAND, TableCellNode } from '@lexical/table'
+import { INSERT_TABLE_COMMAND, TableCellNode, TableRowNode } from '@lexical/table'
 import { useEffect } from 'react'
 import { $createParagraphNode, $insertNodes } from 'lexical'
 import { $createTableNodeWithDimensions } from '@lexical/table'
@@ -19,6 +19,20 @@ export default function CustomTablePlugin(): null {
 
         editor.update(() => {
           const tableNode = $createTableNodeWithDimensions(numRows, numColumns)
+          
+          // Ensure each cell has a paragraph node as content
+          const tableRows = tableNode.getChildren()
+          tableRows.forEach((row) => {
+            if (row instanceof TableRowNode) {
+              const cells = row.getChildren()
+              cells.forEach((cell) => {
+                if (cell instanceof TableCellNode && cell.getChildrenSize() === 0) {
+                  const paragraphNode = $createParagraphNode()
+                  cell.append(paragraphNode)
+                }
+              })
+            }
+          })
           
           // Insert table at current selection or at the end
           $insertNodes([tableNode])

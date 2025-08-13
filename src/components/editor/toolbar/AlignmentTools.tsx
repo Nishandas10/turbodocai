@@ -18,13 +18,21 @@ export default function AlignmentTools() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (alignmentDropdownRef.current && !alignmentDropdownRef.current.contains(target)) {
-        setShowAlignmentDropdown(false)
+      // Check if click is outside both the button and any dropdown content
+      if (buttonRef.current && !buttonRef.current.contains(target)) {
+        // Check if click is on dropdown content (which is now in portal)
+        const dropdownElement = document.querySelector('[data-alignment-dropdown]')
+        if (dropdownElement && !dropdownElement.contains(target)) {
+          // Use setTimeout to allow other click handlers to execute first
+          setTimeout(() => {
+            setShowAlignmentDropdown(false)
+          }, 0)
+        }
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
   }, [])
 
   const handleAlignment = (align: ElementFormatType) => {
@@ -90,6 +98,7 @@ export default function AlignmentTools() {
             top: dropdownPosition.top + 4,
             left: dropdownPosition.left
           }}
+          data-alignment-dropdown
         >
           <button onClick={() => handleAlignment('left')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
             <AlignLeft className="h-4 w-4" />
