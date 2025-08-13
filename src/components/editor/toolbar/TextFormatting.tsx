@@ -3,8 +3,9 @@
 import { Bold, Italic, Underline, Link } from 'lucide-react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { FORMAT_TEXT_COMMAND } from 'lexical'
-import { $createLinkNode } from '@lexical/link'
+import { TOGGLE_LINK_COMMAND } from '@lexical/link'
 import { $getSelection, $isRangeSelection, $createTextNode } from 'lexical'
+import { $createLinkNode } from '@lexical/link'
 
 export default function TextFormatting() {
   const [editor] = useLexicalComposerContext()
@@ -14,19 +15,41 @@ export default function TextFormatting() {
   }
 
   const handleLink = () => {
-    const url = prompt('Enter URL:')
-    if (url) {
-      editor.update(() => {
-        const selection = $getSelection()
-        if ($isRangeSelection(selection)) {
-          const selectedText = selection.getTextContent()
-          const linkNode = $createLinkNode(url)
-          const textNode = $createTextNode(selectedText || 'Link')
-          linkNode.append(textNode)
-          selection.insertNodes([linkNode])
+    editor.update(() => {
+      const selection = $getSelection()
+      if ($isRangeSelection(selection)) {
+        const selectedText = selection.getTextContent()
+        
+        // Check if we already have selected text
+        if (selectedText.trim().length > 0) {
+          // If text is selected, prompt for URL and apply link
+          const url = prompt('Enter URL:')
+          if (url) {
+            // Ensure URL has protocol
+            const fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
+            editor.dispatchCommand(TOGGLE_LINK_COMMAND, fullUrl)
+          }
+        } else {
+          // If no text selected, prompt for both text and URL
+          const linkText = prompt('Enter link text:')
+          if (linkText) {
+            const url = prompt('Enter URL:')
+            if (url) {
+              // Ensure URL has protocol
+              const fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
+              
+              // Create link node with text
+              const linkNode = $createLinkNode(fullUrl)
+              const textNode = $createTextNode(linkText)
+              linkNode.append(textNode)
+              
+              // Insert the link node
+              selection.insertNodes([linkNode])
+            }
+          }
         }
-      })
-    }
+      }
+    })
   }
 
   return (

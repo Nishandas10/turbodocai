@@ -10,6 +10,7 @@ interface FloatingToolbarProps {
   show: boolean
   position: { x: number; y: number }
   onFormatting: (format: string) => void
+  onLink: () => void
   onAddComment: () => void
   onAskTurbo: () => void
 }
@@ -18,6 +19,7 @@ export default function FloatingToolbar({
   show,
   position,
   onFormatting,
+  onLink,
   onAddComment,
   onAskTurbo
 }: FloatingToolbarProps) {
@@ -54,6 +56,7 @@ export default function FloatingToolbar({
         U
       </button>
       <button 
+        onClick={onLink}
         className="w-8 h-8 bg-gray-700 hover:bg-gray-600 text-white rounded flex items-center justify-center transition-colors"
         title="Link"
       >

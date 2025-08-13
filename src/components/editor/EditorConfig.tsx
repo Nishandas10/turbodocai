@@ -22,6 +22,29 @@ import TableContextMenu from './plugins/TableContextMenu'
 import { useTableContextMenu } from './hooks/useTableContextMenu'
 import { useEffect } from 'react'
 
+// Custom link click handler
+function CustomLinkPlugin() {
+  useEffect(() => {
+    const handleLinkClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (target.tagName === 'A' || target.closest('a')) {
+        event.preventDefault()
+        const link = target.tagName === 'A' ? target as HTMLAnchorElement : target.closest('a') as HTMLAnchorElement
+        if (link && link.href) {
+          window.open(link.href, '_blank', 'noopener,noreferrer')
+        }
+      }
+    }
+
+    document.addEventListener('click', handleLinkClick)
+    return () => {
+      document.removeEventListener('click', handleLinkClick)
+    }
+  }, [])
+
+  return null
+}
+
 // Theme styling
 const theme = {
   paragraph: 'mb-2',
@@ -39,6 +62,7 @@ const theme = {
   },
   quote: 'border-l-4 border-gray-300 pl-4 italic mb-4',
   horizontalRule: 'my-6 border-t border-gray-300',
+  link: 'text-blue-600 underline hover:text-blue-800 cursor-pointer transition-colors',
   text: {
     bold: 'font-bold',
     italic: 'italic',
@@ -159,6 +183,7 @@ function EditorContent({ children, fontSize = 16, fontFamily = 'inherit' }: Edit
       <HistoryPlugin />
       <AutoFocusPlugin />
       <LinkPlugin />
+      <CustomLinkPlugin />
       <ListPlugin />
       <TabIndentationPlugin />
       <CustomTablePlugin />
