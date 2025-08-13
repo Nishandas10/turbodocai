@@ -15,6 +15,7 @@ import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { ImageNode } from './toolbar/ImageNode'
 import { HorizontalRuleNode } from './toolbar/HorizontalRuleNode'
+import { CodeBlockNode } from './toolbar/CodeBlockNode'
 import { HORIZONTAL_RULE } from './toolbar/HorizontalRuleTransformer'
 import CustomTablePlugin from './plugins/TablePlugin'
 import TableContextMenu from './plugins/TableContextMenu'
@@ -92,11 +93,12 @@ const nodes = [
   ListItemNode,
   CodeNode,
   CodeHighlightNode,
+  CodeBlockNode,
   TableNode,
   TableCellNode,
   TableRowNode,
-  AutoLinkNode,
   LinkNode,
+  AutoLinkNode,
   ImageNode,
   HorizontalRuleNode,
 ]

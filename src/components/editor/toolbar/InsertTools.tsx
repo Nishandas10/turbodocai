@@ -1,23 +1,51 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react'
-import { Plus, ChevronDown, Grid3X3, List, Quote, Code, Image, Minus } from 'lucide-react'
+import { Plus, ChevronDown, Grid3X3, List, Quote, Code, Image, Minus, ChevronRight } from 'lucide-react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { INSERT_TABLE_COMMAND } from '@lexical/table'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { $createQuoteNode } from '@lexical/rich-text'
-import { $createCodeNode } from '@lexical/code'
 import { $getSelection, $isRangeSelection, $createTextNode, $createParagraphNode, $getRoot } from 'lexical'
 import { $createImageNode } from './ImageNode'
 import { $createHorizontalRuleNode } from './HorizontalRuleNode'
+import { $createCodeBlockNode } from './CodeBlockNode'
 import TablePicker from './TablePicker'
+
+// Supported programming languages for code blocks
+const SUPPORTED_LANGUAGES = [
+  { id: 'javascript', label: 'JavaScript', extension: 'js' },
+  { id: 'typescript', label: 'TypeScript', extension: 'ts' },
+  { id: 'python', label: 'Python', extension: 'py' },
+  { id: 'java', label: 'Java', extension: 'java' },
+  { id: 'cpp', label: 'C++', extension: 'cpp' },
+  { id: 'c', label: 'C', extension: 'c' },
+  { id: 'csharp', label: 'C#', extension: 'cs' },
+  { id: 'php', label: 'PHP', extension: 'php' },
+  { id: 'ruby', label: 'Ruby', extension: 'rb' },
+  { id: 'go', label: 'Go', extension: 'go' },
+  { id: 'rust', label: 'Rust', extension: 'rs' },
+  { id: 'sql', label: 'SQL', extension: 'sql' },
+  { id: 'html', label: 'HTML', extension: 'html' },
+  { id: 'css', label: 'CSS', extension: 'css' },
+  { id: 'json', label: 'JSON', extension: 'json' },
+  { id: 'xml', label: 'XML', extension: 'xml' },
+  { id: 'yaml', label: 'YAML', extension: 'yml' },
+  { id: 'bash', label: 'Bash', extension: 'sh' },
+  { id: 'powershell', label: 'PowerShell', extension: 'ps1' },
+  { id: 'dockerfile', label: 'Dockerfile', extension: 'dockerfile' },
+  { id: 'markdown', label: 'Markdown', extension: 'md' },
+  { id: 'plaintext', label: 'Plain Text', extension: 'txt' },
+]
 
 export default function InsertTools() {
   const [editor] = useLexicalComposerContext()
   const [showInsertDropdown, setShowInsertDropdown] = useState(false)
   const [showTablePicker, setShowTablePicker] = useState(false)
-  const insertDropdownRef = useRef<HTMLDivElement>(null)
+  const [showCodeLanguages, setShowCodeLanguages] = useState(false)
+  const [showLineNumbers, setShowLineNumbers] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const insertDropdownRef = useRef<HTMLDivElement>(null)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -26,6 +54,7 @@ export default function InsertTools() {
       if (insertDropdownRef.current && !insertDropdownRef.current.contains(target)) {
         setShowInsertDropdown(false)
         setShowTablePicker(false)
+        setShowCodeLanguages(false)
       }
     }
 
@@ -89,29 +118,30 @@ export default function InsertTools() {
     setShowInsertDropdown(false)
   }
 
-  const handleInsert = (type: string) => {
+  const handleInsert = (type: string, language?: string) => {
     switch (type) {
       case 'table':
-        setShowTablePicker(true)
+        setShowTablePicker(!showTablePicker)
         return // Don't close dropdown yet
+      case 'image':
+        fileInputRef.current?.click()
+        break
       case 'ordered-list':
         editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
         break
       case 'unordered-list':
         editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)
         break
-      case 'image':
-        // Trigger file input
-        fileInputRef.current?.click()
-        return // Don't close dropdown yet, let handleImageUpload handle it
       case 'horizontal-rule':
         editor.update(() => {
           const selection = $getSelection()
           if ($isRangeSelection(selection)) {
+            // Clear any selected text and insert horizontal rule
+            selection.removeText()
             const horizontalRuleNode = $createHorizontalRuleNode()
             selection.insertNodes([horizontalRuleNode])
             
-            // Create a new paragraph after the horizontal rule and position cursor there
+            // Create a new paragraph after the horizontal rule
             const paragraphNode = $createParagraphNode()
             horizontalRuleNode.insertAfter(paragraphNode)
             
@@ -166,46 +196,91 @@ export default function InsertTools() {
         })
         break
       case 'code':
+        // Show language picker instead of directly inserting code
+        setShowCodeLanguages(!showCodeLanguages)
+        return // Don't close dropdown yet
+      case 'code-with-language':
+        const selectedLanguage = language || 'javascript'
         editor.update(() => {
           const selection = $getSelection()
           if ($isRangeSelection(selection)) {
-            // Create a code node with proper structure
-            const codeNode = $createCodeNode('javascript')
-            
-            // If there's selected text, use it as code content
+            // Create a code block node with the selected language
             const selectedText = selection.getTextContent()
-            const textContent = selectedText || '// Code here...'
+            const textContent = selectedText || getLanguageTemplate(selectedLanguage)
             
-            const textNode = $createTextNode(textContent)
-            codeNode.append(textNode)
+            const codeBlockNode = $createCodeBlockNode({
+              language: selectedLanguage,
+              code: textContent,
+              showLineNumbers: showLineNumbers
+            })
             
             // Clear selection and insert the code block
             selection.removeText()
-            selection.insertNodes([codeNode])
+            selection.insertNodes([codeBlockNode])
             
-            // Position cursor at the end of the code text
-            codeNode.selectEnd()
+            // Position cursor after the code block
+            const paragraphNode = $createParagraphNode()
+            codeBlockNode.insertAfter(paragraphNode)
+            paragraphNode.select(0, 0)
           } else {
             // No selection - insert at root level
             const root = $getRoot()
-            const codeNode = $createCodeNode('javascript')
-            const textNode = $createTextNode('// Code here...')
-            codeNode.append(textNode)
-            root.append(codeNode)
+            const textContent = getLanguageTemplate(selectedLanguage)
             
-            // Position cursor at the end of the code text
-            codeNode.selectEnd()
+            const codeBlockNode = $createCodeBlockNode({
+              language: selectedLanguage,
+              code: textContent,
+              showLineNumbers: showLineNumbers
+            })
+            
+            root.append(codeBlockNode)
+            
+            // Position cursor after the code block
+            const paragraphNode = $createParagraphNode()
+            codeBlockNode.insertAfter(paragraphNode)
+            paragraphNode.select(0, 0)
           }
         })
         break
     }
+    
     setShowInsertDropdown(false)
+    setShowTablePicker(false)
+    setShowCodeLanguages(false)
   }
 
   const handleTableSelect = (rows: number, cols: number) => {
     editor.dispatchCommand(INSERT_TABLE_COMMAND, { rows: rows.toString(), columns: cols.toString() })
     setShowInsertDropdown(false)
     setShowTablePicker(false)
+  }
+
+  const getLanguageTemplate = (language: string): string => {
+    const templates: Record<string, string> = {
+      javascript: '// JavaScript code here...\nconsole.log("Hello, World!");',
+      typescript: '// TypeScript code here...\nconst message: string = "Hello, World!";\nconsole.log(message);',
+      python: '# Python code here...\nprint("Hello, World!")',
+      java: '// Java code here...\npublic class HelloWorld {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}',
+      cpp: '// C++ code here...\n#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}',
+      c: '// C code here...\n#include <stdio.h>\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}',
+      csharp: '// C# code here...\nusing System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine("Hello, World!");\n    }\n}',
+      php: '<?php\n// PHP code here...\necho "Hello, World!";\n?>',
+      ruby: '# Ruby code here...\nputs "Hello, World!"',
+      go: '// Go code here...\npackage main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello, World!")\n}',
+      rust: '// Rust code here...\nfn main() {\n    println!("Hello, World!");\n}',
+      sql: '-- SQL code here...\nSELECT "Hello, World!" AS message;',
+      html: '<!-- HTML code here... -->\n<!DOCTYPE html>\n<html>\n<body>\n    <h1>Hello, World!</h1>\n</body>\n</html>',
+      css: '/* CSS code here... */\nbody {\n    font-family: Arial, sans-serif;\n    margin: 0;\n    padding: 20px;\n}',
+      json: '{\n  "message": "Hello, World!",\n  "timestamp": "2024-01-01T00:00:00Z"\n}',
+      xml: '<?xml version="1.0" encoding="UTF-8"?>\n<!-- XML code here... -->\n<root>\n    <message>Hello, World!</message>\n</root>',
+      yaml: '# YAML code here...\nmessage: "Hello, World!"\ntimestamp: "2024-01-01T00:00:00Z"',
+      bash: '#!/bin/bash\n# Bash script here...\necho "Hello, World!"',
+      powershell: '# PowerShell script here...\nWrite-Host "Hello, World!"',
+      dockerfile: '# Dockerfile here...\nFROM node:18-alpine\nWORKDIR /app\nCOPY package*.json .//\nRUN npm install\nCOPY . .\nEXPOSE 3000\nCMD ["npm", "start"]',
+      markdown: '# Markdown content here...\n\nHello, **World**!\n\n- Item 1\n- Item 2\n- Item 3',
+      plaintext: 'Plain text content here...\nHello, World!',
+    }
+    return templates[language] || '// Code here...'
   }
 
   return (
@@ -268,10 +343,51 @@ export default function InsertTools() {
             <Quote className="h-4 w-4" />
             <span>Quote</span>
           </button>
-          <button onClick={() => handleInsert('code')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
-            <Code className="h-4 w-4" />
-            <span>Code Block</span>
-          </button>
+          <div className="relative">
+            <button 
+              onClick={() => handleInsert('code')} 
+              className={`
+                w-full flex items-center justify-between px-3 py-2 text-foreground hover:bg-muted text-sm
+                ${showCodeLanguages ? 'bg-muted' : ''}
+              `}
+            >
+              <div className="flex items-center space-x-3">
+                <Code className="h-4 w-4" />
+                <span>Code Block</span>
+              </div>
+              <ChevronRight className="h-3 w-3" />
+            </button>
+            {showCodeLanguages && (
+              <div className="absolute right-full top-0 mr-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[160px] max-h-60 overflow-y-auto">
+                <div className="py-1">
+                  {/* Line numbers toggle */}
+                  <div className="px-3 py-2 border-b border-border">
+                    <label className="flex items-center space-x-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={showLineNumbers}
+                        onChange={(e) => setShowLineNumbers(e.target.checked)}
+                        className="rounded border-border"
+                      />
+                      <span className="text-foreground">Show line numbers</span>
+                    </label>
+                  </div>
+                  
+                  {/* Language options */}
+                  {SUPPORTED_LANGUAGES.map((language) => (
+                    <button
+                      key={language.id}
+                      onClick={() => handleInsert('code-with-language', language.id)}
+                      className="w-full flex items-center justify-between px-3 py-2 text-foreground hover:bg-muted text-sm"
+                    >
+                      <span>{language.label}</span>
+                      <span className="text-xs text-muted-foreground">{language.extension}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
