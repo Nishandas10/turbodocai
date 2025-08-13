@@ -4,12 +4,15 @@ import { useState, useRef, useEffect } from 'react'
 import { Palette, ChevronDown } from 'lucide-react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $getSelection, $isRangeSelection, $createTextNode, $isTextNode } from 'lexical'
+import { createPortal } from 'react-dom'
 
 export default function ColorPicker() {
   const [editor] = useLexicalComposerContext()
   const [showColorDropdown, setShowColorDropdown] = useState(false)
   const [currentTextColor, setCurrentTextColor] = useState('#000000')
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const colorDropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Listen to editor changes to update current text color based on cursor position
   useEffect(() => {
@@ -160,10 +163,22 @@ export default function ColorPicker() {
     setShowColorDropdown(false)
   }
 
+  const handleButtonClick = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX
+      })
+    }
+    setShowColorDropdown(!showColorDropdown)
+  }
+
   return (
     <div className="relative" ref={colorDropdownRef}>
       <button
-        onClick={() => setShowColorDropdown(!showColorDropdown)}
+        ref={buttonRef}
+        onClick={handleButtonClick}
         className="flex items-center space-x-1 px-2 py-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
         title="Text Color"
       >
@@ -175,9 +190,15 @@ export default function ColorPicker() {
         <ChevronDown className="h-3 w-3" />
       </button>
       
-      {showColorDropdown && (
-        <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[120px] p-2">
-          <div className="grid grid-cols-6 gap-1">
+      {showColorDropdown && createPortal(
+        <div 
+          className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[120px] p-2"
+          style={{
+            top: dropdownPosition.top + 4,
+            left: dropdownPosition.left
+          }}
+        >
+          <div className="grid grid-cols-6 gap-1 mb-3">
             {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#800000', '#008000', '#000080', '#808000', '#800080', '#008080', '#808080', '#C0C0C0', '#FFFFFF'].map((color) => (
               <button
                 key={color}
@@ -188,7 +209,23 @@ export default function ColorPicker() {
               />
             ))}
           </div>
-        </div>
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={currentTextColor}
+              onChange={(e) => setCurrentTextColor(e.target.value)}
+              placeholder="#000000"
+              className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+            />
+            <button
+              onClick={() => handleTextColor(currentTextColor)}
+              className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90"
+            >
+              Apply
+            </button>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )

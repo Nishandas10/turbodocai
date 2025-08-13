@@ -11,6 +11,7 @@ import { $createImageNode } from './ImageNode'
 import { $createHorizontalRuleNode } from './HorizontalRuleNode'
 import { $createCodeBlockNode } from './CodeBlockNode'
 import TablePicker from './TablePicker'
+import { createPortal } from 'react-dom'
 
 // Supported programming languages for code blocks
 const SUPPORTED_LANGUAGES = [
@@ -44,8 +45,10 @@ export default function InsertTools() {
   const [showTablePicker, setShowTablePicker] = useState(false)
   const [showCodeLanguages, setShowCodeLanguages] = useState(false)
   const [showLineNumbers, setShowLineNumbers] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const insertDropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -61,6 +64,17 @@ export default function InsertTools() {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  const handleButtonClick = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX
+      })
+    }
+    setShowInsertDropdown(!showInsertDropdown)
+  }
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -295,7 +309,8 @@ export default function InsertTools() {
       />
       
       <button
-        onClick={() => setShowInsertDropdown(!showInsertDropdown)}
+        ref={buttonRef}
+        onClick={handleButtonClick}
         className="flex items-center space-x-2 px-3 py-2 text-foreground hover:bg-muted rounded border border-border"
       >
         <Plus className="h-4 w-4" />
@@ -303,8 +318,14 @@ export default function InsertTools() {
         <ChevronDown className="h-3 w-3" />
       </button>
       
-      {showInsertDropdown && (
-        <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[140px]">
+      {showInsertDropdown && createPortal(
+        <div 
+          className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[140px]"
+          style={{
+            top: dropdownPosition.top + 4,
+            left: dropdownPosition.left
+          }}
+        >
           <div className="relative">
             <button 
               onClick={() => handleInsert('table')} 
@@ -358,7 +379,7 @@ export default function InsertTools() {
               <ChevronRight className="h-3 w-3" />
             </button>
             {showCodeLanguages && (
-              <div className="absolute right-full top-0 mr-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[160px] max-h-60 overflow-y-auto">
+              <div className="absolute right-full top-0 mr-1 bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[160px] max-h-60 overflow-y-auto">
                 <div className="py-1">
                   {/* Line numbers toggle */}
                   <div className="px-3 py-2 border-b border-border">
@@ -388,7 +409,8 @@ export default function InsertTools() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

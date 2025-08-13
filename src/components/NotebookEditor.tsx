@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { AIAssistant, FloatingToolbar, DocumentOutline } from './editor'
 import EditorConfig from './editor/EditorConfig'
 import LexicalToolbar from './editor/LexicalToolbar'
@@ -87,6 +87,9 @@ export default function NotebookEditor() {
   const [showToolbar, setShowToolbar] = useState(false)
   const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 })
   const [showOutline, setShowOutline] = useState(false)
+  const [aiPanelWidth, setAiPanelWidth] = useState(400)
+  const [isDragging, setIsDragging] = useState(false)
+  const resizeRef = useRef<HTMLDivElement>(null)
 
   // Handle text selection for floating toolbar
   useEffect(() => {
@@ -114,6 +117,43 @@ export default function NotebookEditor() {
       document.removeEventListener('mouseup', handleSelectionChange)
     }
   }, [])
+
+  // Handle resize functionality
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }, [])
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging) return
+    
+    const containerWidth = window.innerWidth
+    const newWidth = containerWidth - e.clientX
+    
+    // Set min and max constraints
+    const minWidth = 300
+    const maxWidth = containerWidth * 0.6
+    
+    if (newWidth >= minWidth && newWidth <= maxWidth) {
+      setAiPanelWidth(newWidth)
+    }
+  }, [isDragging])
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, handleMouseMove, handleMouseUp])
 
   const handleFloatingLink = () => {
     if (window.editorHandlers) {
@@ -145,7 +185,7 @@ export default function NotebookEditor() {
       </div>
 
       {/* Main Document Editor */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Document Content */}
         <div className="flex-1 overflow-y-auto relative">
           {/* Document Outline Panel */}
@@ -154,18 +194,20 @@ export default function NotebookEditor() {
             onClose={() => setShowOutline(false)} 
           />
 
-          <div className="max-w-4xl mx-auto">
-            <EditorConfig fontSize={fontSize} fontFamily={fontFamily}>
-              <LinkHandler onLinkInserted={() => setShowToolbar(false)} />
-              <LexicalToolbar
-                title={title}
-                onTitleChange={setTitle}
-                fontSize={fontSize}
-                onFontSizeChange={setFontSize}
-                fontFamily={fontFamily}
-                onFontFamilyChange={setFontFamily}
-              />
-            </EditorConfig>
+          <div className="w-full px-8 py-4">
+            <div className="mx-auto" style={{ maxWidth: 'min(100%, 1200px)' }}>
+              <EditorConfig fontSize={fontSize} fontFamily={fontFamily}>
+                <LinkHandler onLinkInserted={() => setShowToolbar(false)} />
+                <LexicalToolbar
+                  title={title}
+                  onTitleChange={setTitle}
+                  fontSize={fontSize}
+                  onFontSizeChange={setFontSize}
+                  fontFamily={fontFamily}
+                  onFontFamilyChange={setFontFamily}
+                />
+              </EditorConfig>
+            </div>
           </div>
 
           {/* Floating Toolbar */}
@@ -180,8 +222,27 @@ export default function NotebookEditor() {
         </div>
       </div>
 
+      {/* Resizable Divider */}
+      <div 
+        ref={resizeRef}
+        className={`w-1 bg-gray-600 cursor-col-resize hover:bg-gray-500 transition-colors ${
+          isDragging ? 'bg-purple-500' : ''
+        }`}
+        onMouseDown={handleMouseDown}
+        style={{ cursor: isDragging ? 'col-resize' : 'col-resize' }}
+      >
+        <div className="w-1 h-full flex items-center justify-center">
+          <div className="w-0.5 h-8 bg-gray-400 rounded-full"></div>
+        </div>
+      </div>
+
       {/* Right Sidebar - AI Assistant */}
-      <AIAssistant />
+      <div 
+        className="bg-gray-900 border-l border-gray-700 flex flex-col relative overflow-hidden"
+        style={{ width: `${aiPanelWidth}px` }}
+      >
+        <AIAssistant />
+      </div>
     </div>
   )
 } 

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Type, ChevronDown, Minus, Plus } from 'lucide-react'
+import { createPortal } from 'react-dom'
 
 interface FontControlsProps {
   fontSize: number
@@ -17,7 +18,9 @@ export default function FontControls({
   onFontFamilyChange
 }: FontControlsProps) {
   const [showFontDropdown, setShowFontDropdown] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const fontDropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -32,12 +35,24 @@ export default function FontControls({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  const handleButtonClick = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX
+      })
+    }
+    setShowFontDropdown(!showFontDropdown)
+  }
+
   return (
     <>
       {/* Font Family Dropdown */}
       <div className="relative" ref={fontDropdownRef}>
         <button
-          onClick={() => setShowFontDropdown(!showFontDropdown)}
+          ref={buttonRef}
+          onClick={handleButtonClick}
           className="flex items-center space-x-2 px-3 py-2 text-foreground hover:bg-muted rounded border border-border"
         >
           <Type className="h-4 w-4" />
@@ -45,8 +60,14 @@ export default function FontControls({
           <ChevronDown className="h-3 w-3" />
         </button>
         
-        {showFontDropdown && (
-          <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[140px]">
+        {showFontDropdown && createPortal(
+          <div 
+            className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[140px]"
+            style={{
+              top: dropdownPosition.top + 4,
+              left: dropdownPosition.left
+            }}
+          >
             {['Clarika', 'Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana'].map((font) => (
               <button
                 key={font}
@@ -57,7 +78,8 @@ export default function FontControls({
                 {font}
               </button>
             ))}
-          </div>
+          </div>,
+          document.body
         )}
       </div>
 

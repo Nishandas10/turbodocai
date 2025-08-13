@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Highlighter as HighlighterIcon } from 'lucide-react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $getSelection, $isRangeSelection, $createTextNode, $isTextNode, TextNode } from 'lexical'
+import { createPortal } from 'react-dom'
 
 export default function TextHighlighter() {
   const [editor] = useLexicalComposerContext()
@@ -14,8 +15,10 @@ export default function TextHighlighter() {
   const [lightness, setLightness] = useState(50)
   const [isDraggingSaturation, setIsDraggingSaturation] = useState(false)
   const [isDraggingHue, setIsDraggingHue] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   
   const highlightDropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -172,18 +175,36 @@ export default function TextHighlighter() {
     })
   }
 
+  const handleButtonClick = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX
+      })
+    }
+    setShowHighlightDropdown(!showHighlightDropdown)
+  }
+
   return (
     <div className="relative" ref={highlightDropdownRef}>
       <button 
-        onClick={() => setShowHighlightDropdown(!showHighlightDropdown)}
+        ref={buttonRef}
+        onClick={handleButtonClick}
         className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
         title="Highlight Text"
       >
         <HighlighterIcon className="h-4 w-4" />
       </button>
       
-      {showHighlightDropdown && (
-        <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[280px] p-4">
+      {showHighlightDropdown && createPortal(
+        <div 
+          className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[280px] p-4"
+          style={{
+            top: dropdownPosition.top + 4,
+            left: dropdownPosition.left
+          }}
+        >
           {/* Hex Input */}
           <div className="mb-3">
             <label className="block text-xs text-muted-foreground mb-1">Hex</label>
@@ -288,7 +309,8 @@ export default function TextHighlighter() {
           >
             Apply Highlight
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

@@ -4,12 +4,15 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronDown, AlignLeft, AlignCenter, AlignRight, AlignJustify } from 'lucide-react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { FORMAT_ELEMENT_COMMAND, ElementFormatType } from 'lexical'
+import { createPortal } from 'react-dom'
 
 export default function AlignmentTools() {
   const [editor] = useLexicalComposerContext()
   const [showAlignmentDropdown, setShowAlignmentDropdown] = useState(false)
   const [currentAlignment, setCurrentAlignment] = useState<ElementFormatType>('left')
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const alignmentDropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -56,10 +59,22 @@ export default function AlignmentTools() {
     }
   }
 
+  const handleButtonClick = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX
+      })
+    }
+    setShowAlignmentDropdown(!showAlignmentDropdown)
+  }
+
   return (
     <div className="relative" ref={alignmentDropdownRef}>
       <button
-        onClick={() => setShowAlignmentDropdown(!showAlignmentDropdown)}
+        ref={buttonRef}
+        onClick={handleButtonClick}
         className="flex items-center space-x-2 px-3 py-2 text-foreground hover:bg-muted rounded border border-border"
         title="Text Alignment"
       >
@@ -68,37 +83,32 @@ export default function AlignmentTools() {
         <ChevronDown className="h-3 w-3" />
       </button>
       
-      {showAlignmentDropdown && (
-        <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[140px]">
-          <button 
-            onClick={() => handleAlignment('left')} 
-            className={`w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm ${currentAlignment === 'left' ? 'bg-muted' : ''}`}
-          >
+      {showAlignmentDropdown && createPortal(
+        <div 
+          className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[140px]"
+          style={{
+            top: dropdownPosition.top + 4,
+            left: dropdownPosition.left
+          }}
+        >
+          <button onClick={() => handleAlignment('left')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
             <AlignLeft className="h-4 w-4" />
             <span>Left Align</span>
           </button>
-          <button 
-            onClick={() => handleAlignment('center')} 
-            className={`w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm ${currentAlignment === 'center' ? 'bg-muted' : ''}`}
-          >
+          <button onClick={() => handleAlignment('center')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
             <AlignCenter className="h-4 w-4" />
             <span>Center Align</span>
           </button>
-          <button 
-            onClick={() => handleAlignment('right')} 
-            className={`w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm ${currentAlignment === 'right' ? 'bg-muted' : ''}`}
-          >
+          <button onClick={() => handleAlignment('right')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
             <AlignRight className="h-4 w-4" />
             <span>Right Align</span>
           </button>
-          <button 
-            onClick={() => handleAlignment('justify')} 
-            className={`w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm ${currentAlignment === 'justify' ? 'bg-muted' : ''}`}
-          >
+          <button onClick={() => handleAlignment('justify')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
             <AlignJustify className="h-4 w-4" />
             <span>Justify</span>
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

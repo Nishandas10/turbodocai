@@ -54,6 +54,7 @@ const theme = {
     h3: 'text-xl font-bold mb-2',
     h4: 'text-lg font-bold mb-2',
     h5: 'text-base font-bold mb-2',
+    h6: 'text-sm font-bold mb-2',
   },
   list: {
     ol: 'list-decimal ml-6 mb-2',

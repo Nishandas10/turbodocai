@@ -4,11 +4,14 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $getSelection, $isRangeSelection } from 'lexical'
+import { createPortal } from 'react-dom'
 
 export default function CaseTools() {
   const [editor] = useLexicalComposerContext()
   const [showCaseDropdown, setShowCaseDropdown] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const caseDropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -53,10 +56,22 @@ export default function CaseTools() {
     setShowCaseDropdown(false)
   }
 
+  const handleButtonClick = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX
+      })
+    }
+    setShowCaseDropdown(!showCaseDropdown)
+  }
+
   return (
     <div className="relative" ref={caseDropdownRef}>
       <button
-        onClick={() => setShowCaseDropdown(!showCaseDropdown)}
+        ref={buttonRef}
+        onClick={handleButtonClick}
         className="flex items-center space-x-1 px-2 py-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded"
         title="Change Case"
       >
@@ -64,13 +79,28 @@ export default function CaseTools() {
         <ChevronDown className="h-3 w-3" />
       </button>
       
-      {showCaseDropdown && (
-        <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[140px]">
-          <button onClick={() => handleCaseChange('uppercase')} className="w-full text-left px-3 py-2 text-foreground hover:bg-muted text-sm">UPPERCASE</button>
-          <button onClick={() => handleCaseChange('lowercase')} className="w-full text-left px-3 py-2 text-foreground hover:bg-muted text-sm">lowercase</button>
-          <button onClick={() => handleCaseChange('capitalize')} className="w-full text-left px-3 py-2 text-foreground hover:bg-muted text-sm">Capitalize First Word</button>
-          <button onClick={() => handleCaseChange('sentence')} className="w-full text-left px-3 py-2 text-foreground hover:bg-muted text-sm">Sentence case</button>
-        </div>
+      {showCaseDropdown && createPortal(
+        <div 
+          className="fixed bg-background border border-border rounded-lg shadow-lg z-[9999] min-w-[140px]"
+          style={{
+            top: dropdownPosition.top + 4,
+            left: dropdownPosition.left
+          }}
+        >
+          <button onClick={() => handleCaseChange('uppercase')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
+            <span>UPPERCASE</span>
+          </button>
+          <button onClick={() => handleCaseChange('lowercase')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
+            <span>lowercase</span>
+          </button>
+          <button onClick={() => handleCaseChange('capitalize')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
+            <span>Capitalize Each Word</span>
+          </button>
+          <button onClick={() => handleCaseChange('sentence')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
+            <span>Sentence case</span>
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   )
