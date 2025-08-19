@@ -1,3 +1,8 @@
+"use client"
+
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/contexts/AuthContext"
 import { BookOpen, FileText, MessageSquare, Upload, Video, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Navbar from "./components/navbar"
@@ -10,6 +15,29 @@ import Footer from "./components/footer"
 import Link from "next/link"
 
 export default function Home() {
+  const { user, loading } = useAuth()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!loading && user) {
+      router.push('/dashboard')
+    }
+  }, [user, loading, router])
+
+  // Show loading while checking authentication
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-white text-xl">Loading...</div>
+      </div>
+    )
+  }
+
+  // If user is authenticated, redirect to dashboard
+  if (user) {
+    return null
+  }
+
   return (
     <div className="min-h-screen bg-black relative overflow-hidden">
       {/* Space Background */}
