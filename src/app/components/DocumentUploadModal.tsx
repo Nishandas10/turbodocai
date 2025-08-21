@@ -1,8 +1,10 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { ChevronDown, Cloud, FileText } from "lucide-react"
+import { ChevronDown, Cloud, FileText, Upload, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/contexts/AuthContext"
+import { uploadDocumentFile } from "@/lib/fileUploadService"
 
 interface DocumentUploadModalProps {
   isOpen: boolean
@@ -12,7 +14,9 @@ interface DocumentUploadModalProps {
 export default function DocumentUploadModal({ isOpen, onClose }: DocumentUploadModalProps) {
   const [textContent, setTextContent] = useState("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const { user } = useAuth()
 
   const handleSubmitText = () => {
     if (textContent.trim()) {
@@ -31,7 +35,32 @@ export default function DocumentUploadModal({ isOpen, onClose }: DocumentUploadM
     if (file) {
       setSelectedFile(file)
       console.log('File selected:', file.name)
-      // TODO: Implement file upload logic
+    }
+  }
+
+  const handleFileSubmit = async () => {
+    if (!selectedFile || !user?.uid) return
+
+    setIsUploading(true)
+    try {
+      const result = await uploadDocumentFile(selectedFile, user.uid, {
+        title: selectedFile.name.replace(/\.[^/.]+$/, ""), // Remove file extension
+        tags: ['uploaded']
+      })
+
+      if (result.success) {
+        alert(`File uploaded successfully! Document ID: ${result.documentId}`)
+        console.log('Upload successful:', result)
+        onClose()
+      } else {
+        alert(`Upload failed: ${result.error}`)
+        console.error('Upload failed:', result.error)
+      }
+    } catch (error) {
+      console.error('Upload error:', error)
+      alert('Upload failed. Please try again.')
+    } finally {
+      setIsUploading(false)
     }
   }
 
@@ -109,6 +138,26 @@ export default function DocumentUploadModal({ isOpen, onClose }: DocumentUploadM
                 <p className="text-sm text-card-foreground">
                   <span className="font-medium">Selected file:</span> {selectedFile.name}
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                </p>
+                <Button 
+                  onClick={handleFileSubmit}
+                  disabled={isUploading}
+                  className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload File
+                    </>
+                  )}
+                </Button>
               </div>
             )}
           </div>

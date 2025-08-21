@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { X, Mic, Upload, ChevronRight } from "lucide-react"
+import { X, Mic, Upload, ChevronRight, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/contexts/AuthContext"
+import { uploadAudioFile } from "@/lib/fileUploadService"
 
 interface AudioModalProps {
   isOpen: boolean
@@ -12,8 +14,10 @@ interface AudioModalProps {
 
 export default function AudioModal({ isOpen, onClose }: AudioModalProps) {
   const [audioFile, setAudioFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
+  const { user } = useAuth()
 
   const handleRecordAudio = () => {
     onClose() // Close the modal first
@@ -25,7 +29,6 @@ export default function AudioModal({ isOpen, onClose }: AudioModalProps) {
     if (file) {
       setAudioFile(file)
       console.log('File selected:', file.name)
-      // TODO: Implement file upload logic
     }
   }
 
@@ -39,12 +42,37 @@ export default function AudioModal({ isOpen, onClose }: AudioModalProps) {
     if (file && file.type.startsWith('audio/')) {
       setAudioFile(file)
       console.log('File dropped:', file.name)
-      // TODO: Implement file upload logic
     }
   }
 
   const handleUploadClick = () => {
     fileInputRef.current?.click()
+  }
+
+  const handleAudioSubmit = async () => {
+    if (!audioFile || !user?.uid) return
+
+    setIsUploading(true)
+    try {
+      const result = await uploadAudioFile(audioFile, user.uid, {
+        title: audioFile.name.replace(/\.[^/.]+$/, ""), // Remove file extension
+        tags: ['audio', 'uploaded']
+      })
+
+      if (result.success) {
+        alert(`Audio uploaded successfully! Document ID: ${result.documentId}`)
+        console.log('Audio upload successful:', result)
+        onClose()
+      } else {
+        alert(`Upload failed: ${result.error}`)
+        console.error('Audio upload failed:', result.error)
+      }
+    } catch (error) {
+      console.error('Audio upload error:', error)
+      alert('Audio upload failed. Please try again.')
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   if (!isOpen) return null
@@ -82,7 +110,31 @@ export default function AudioModal({ isOpen, onClose }: AudioModalProps) {
             <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileUpload} className="hidden"/>
             <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
             <p className="text-card-foreground text-sm">Drag .mp3 audio file here, or click to select</p>
-            {audioFile && (<p className="text-blue-500 text-sm mt-2">Selected: {audioFile.name}</p>)}
+            {audioFile && (
+              <div className="mt-3">
+                <p className="text-blue-500 text-sm">Selected: {audioFile.name}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Size: {(audioFile.size / 1024 / 1024).toFixed(2)} MB
+                </p>
+                <Button 
+                  onClick={handleAudioSubmit}
+                  disabled={isUploading}
+                  className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Audio
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </div>

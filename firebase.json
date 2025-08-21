@@ -1,0 +1,10 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json",
+    "database": "turbonotesai"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

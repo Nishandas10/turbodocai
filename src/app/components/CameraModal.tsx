@@ -1,8 +1,10 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { ChevronLeft } from "lucide-react"
+import { ChevronLeft, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/contexts/AuthContext"
+import { uploadCameraSnapshot } from "@/lib/fileUploadService"
 
 interface CameraModalProps {
   isOpen: boolean
@@ -12,7 +14,9 @@ interface CameraModalProps {
 export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const { user } = useAuth()
 
   useEffect(() => {
     if (isOpen) {
@@ -83,6 +87,32 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
     setCapturedImage(null)
   }
 
+  const handleUsePhoto = async () => {
+    if (!capturedImage || !user?.uid) return
+
+    setIsUploading(true)
+    try {
+      const result = await uploadCameraSnapshot(capturedImage, user.uid, {
+        title: `Camera Snapshot ${new Date().toLocaleString()}`,
+        tags: ['camera', 'snapshot']
+      })
+
+      if (result.success) {
+        alert(`Photo uploaded successfully! Document ID: ${result.documentId}`)
+        console.log('Photo upload successful:', result)
+        handleClose()
+      } else {
+        alert(`Upload failed: ${result.error}`)
+        console.error('Photo upload failed:', result.error)
+      }
+    } catch (error) {
+      console.error('Photo upload error:', error)
+      alert('Photo upload failed. Please try again.')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   if (!isOpen) return null
 
   return (
@@ -149,10 +179,18 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
                   Retake
                 </Button>
                 <Button 
-                  onClick={handleClose}
+                  onClick={handleUsePhoto}
+                  disabled={isUploading}
                   className="bg-blue-600 hover:bg-blue-700 text-white"
                 >
-                  Use Photo
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    'Use Photo'
+                  )}
                 </Button>
               </div>
             </div>
