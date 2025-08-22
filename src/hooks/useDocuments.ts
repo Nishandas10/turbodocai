@@ -99,9 +99,11 @@ export function useDocuments(userId: string | null) {
 
   const updateDocumentById = useCallback(
     async (documentId: string, updates: UpdateDocumentData) => {
+      if (!userId) throw new Error("User not authenticated");
+
       try {
         setError(null);
-        await updateDocument(documentId, updates);
+        await updateDocument(documentId, userId, updates);
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to update document";
@@ -109,7 +111,7 @@ export function useDocuments(userId: string | null) {
         throw new Error(errorMessage);
       }
     },
-    []
+    [userId]
   );
 
   const deleteDocumentById = useCallback(
@@ -131,9 +133,11 @@ export function useDocuments(userId: string | null) {
 
   const updateStatus = useCallback(
     async (documentId: string, status: Document["status"]) => {
+      if (!userId) throw new Error("User not authenticated");
+
       try {
         setError(null);
-        await updateDocumentStatus(documentId, status);
+        await updateDocumentStatus(documentId, userId, status);
       } catch (err) {
         const errorMessage =
           err instanceof Error
@@ -143,16 +147,21 @@ export function useDocuments(userId: string | null) {
         throw new Error(errorMessage);
       }
     },
-    []
+    [userId]
   );
 
-  const markAsAccessed = useCallback(async (documentId: string) => {
-    try {
-      await updateDocumentLastAccessed(documentId);
-    } catch (err) {
-      console.error("Failed to update last accessed time:", err);
-    }
-  }, []);
+  const markAsAccessed = useCallback(
+    async (documentId: string) => {
+      if (!userId) throw new Error("User not authenticated");
+
+      try {
+        await updateDocumentLastAccessed(documentId, userId);
+      } catch (err) {
+        console.error("Failed to update last accessed time:", err);
+      }
+    },
+    [userId]
+  );
 
   const getDocumentById = useCallback(
     (documentId: string) => {

@@ -66,6 +66,7 @@ export const uploadDocumentFile = async (
       // Update Firestore with storage information
       await updateDocumentStorageInfo(
         documentId,
+        userId,
         uploadResult.storagePath,
         uploadResult.downloadURL
       );
@@ -127,6 +128,7 @@ export const uploadAudioFile = async (
       // Update Firestore with storage information
       await updateDocumentStorageInfo(
         documentId,
+        userId,
         uploadResult.storagePath,
         uploadResult.downloadURL
       );
@@ -188,6 +190,7 @@ export const uploadRecordingFile = async (
       // Update Firestore with storage information
       await updateDocumentStorageInfo(
         documentId,
+        userId,
         uploadResult.storagePath,
         uploadResult.downloadURL
       );
@@ -249,6 +252,7 @@ export const uploadImageFile = async (
       // Update Firestore with storage information
       await updateDocumentStorageInfo(
         documentId,
+        userId,
         uploadResult.storagePath,
         uploadResult.downloadURL
       );
@@ -317,6 +321,7 @@ export const uploadCameraSnapshot = async (
       // Update Firestore with storage information
       await updateDocumentStorageInfo(
         documentId,
+        userId,
         uploadResult.storagePath,
         uploadResult.downloadURL
       );

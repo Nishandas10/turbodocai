@@ -115,7 +115,14 @@ export const createDocument = async (
     lastAccessed: now,
   };
 
-  const docRef = await addDoc(collection(db, COLLECTIONS.DOCUMENTS), document);
+  // Create document in nested structure: documents/{userId}/{documentId}
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
+  );
+  const docRef = await addDoc(userDocumentsRef, document);
 
   // Update user analytics
   await incrementUserAnalytics(userId, {
@@ -130,9 +137,16 @@ export const createDocument = async (
  * Get document by ID
  */
 export const getDocument = async (
-  documentId: string
+  documentId: string,
+  userId: string
 ): Promise<Document | null> => {
-  const docRef = doc(db, COLLECTIONS.DOCUMENTS, documentId);
+  const docRef = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments",
+    documentId
+  );
   const docSnap = await getDoc(docRef);
 
   if (docSnap.exists()) {
@@ -148,9 +162,15 @@ export const getUserDocuments = async (
   userId: string,
   limitCount: number = 50
 ): Promise<Document[]> => {
+  // Query the nested collection: documents/{userId}/userDocuments
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
+  );
   const q = query(
-    collection(db, COLLECTIONS.DOCUMENTS),
-    where("userId", "==", userId),
+    userDocumentsRef,
     orderBy("createdAt", "desc"),
     limit(limitCount)
   );
@@ -167,9 +187,16 @@ export const getUserDocuments = async (
  */
 export const updateDocument = async (
   documentId: string,
+  userId: string,
   updates: UpdateDocumentData
 ): Promise<void> => {
-  const docRef = doc(db, COLLECTIONS.DOCUMENTS, documentId);
+  const docRef = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments",
+    documentId
+  );
   const updateData = {
     ...updates,
     updatedAt: Timestamp.now(),
@@ -183,9 +210,10 @@ export const updateDocument = async (
  */
 export const updateDocumentStatus = async (
   documentId: string,
+  userId: string,
   status: Document["status"]
 ): Promise<void> => {
-  await updateDocument(documentId, { status });
+  await updateDocument(documentId, userId, { status });
 };
 
 /**
@@ -195,7 +223,13 @@ export const deleteDocument = async (
   documentId: string,
   userId: string
 ): Promise<void> => {
-  const docRef = doc(db, COLLECTIONS.DOCUMENTS, documentId);
+  const docRef = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments",
+    documentId
+  );
   const docSnap = await getDoc(docRef);
 
   if (docSnap.exists()) {
@@ -215,9 +249,16 @@ export const deleteDocument = async (
  * Update document last accessed time
  */
 export const updateDocumentLastAccessed = async (
-  documentId: string
+  documentId: string,
+  userId: string
 ): Promise<void> => {
-  const docRef = doc(db, COLLECTIONS.DOCUMENTS, documentId);
+  const docRef = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments",
+    documentId
+  );
   await updateDoc(docRef, { lastAccessed: Timestamp.now() });
 };
 
@@ -384,11 +425,14 @@ export const listenToUserDocuments = (
   userId: string,
   callback: (documents: Document[]) => void
 ): Unsubscribe => {
-  const q = query(
-    collection(db, COLLECTIONS.DOCUMENTS),
-    where("userId", "==", userId),
-    orderBy("createdAt", "desc")
+  // Listen to the nested collection: documents/{userId}/userDocuments
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
   );
+  const q = query(userDocumentsRef, orderBy("createdAt", "desc"));
 
   return onSnapshot(q, (querySnapshot: QuerySnapshot<DocumentData>) => {
     const documents = querySnapshot.docs.map((doc) => ({
@@ -431,8 +475,14 @@ export const createDocumentWithProcessing = async (
 ): Promise<{ documentId: string; taskId: string }> => {
   const batch = writeBatch(db);
 
-  // Create document
-  const documentRef = doc(collection(db, COLLECTIONS.DOCUMENTS));
+  // Create document in nested structure
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
+  );
+  const documentRef = doc(userDocumentsRef);
   const now = Timestamp.now();
 
   const document: Omit<Document, "id"> = {
@@ -497,10 +547,14 @@ export const createDocumentWithFile = async (
     lastAccessed: now,
   };
 
-  const docRef = await addDoc(
-    collection(db, COLLECTIONS.DOCUMENTS),
-    documentWithFile
+  // Create document in nested structure
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
   );
+  const docRef = await addDoc(userDocumentsRef, documentWithFile);
 
   // Update user analytics
   await incrementUserAnalytics(userId, {
@@ -516,13 +570,30 @@ export const createDocumentWithFile = async (
  */
 export const updateDocumentStorageInfo = async (
   documentId: string,
+  userId: string,
   storagePath: string,
   downloadURL: string
 ): Promise<void> => {
-  const documentRef = doc(db, COLLECTIONS.DOCUMENTS, documentId);
+  const documentRef = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments",
+    documentId
+  );
+
+  // Get the current document to preserve existing metadata
+  const docSnap = await getDoc(documentRef);
+  if (!docSnap.exists()) {
+    throw new Error("Document not found");
+  }
+
+  const currentData = docSnap.data();
+  const currentMetadata = currentData.metadata || {};
 
   await updateDoc(documentRef, {
     metadata: {
+      ...currentMetadata, // Preserve existing metadata (fileSize, fileName, mimeType)
       storagePath,
       downloadURL,
     },

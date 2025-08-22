@@ -7,16 +7,10 @@ service cloud.firestore {
       allow create, read, update: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Documents collection - users can only access their own documents
-    match /documents/{documentId} {
-      allow read: if request.auth != null && (
-        resource.data.userId == request.auth.uid || 
-        resource.data.isPublic == true
-      );
-      allow create: if request.auth != null && 
-        request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null && 
-        resource.data.userId == request.auth.uid;
+    // Documents collection - nested structure: documents/{userId}/userDocuments/{documentId}
+    match /documents/{userId}/userDocuments/{documentId} {
+      // Users can only access documents in their own user folder
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
     
     // Processing queue - users can only access their own tasks

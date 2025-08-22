@@ -12,7 +12,8 @@ User profile information stored directly in the user document:
 - `createdAt`: timestamp
 - `subscription`: 'free' | 'premium'
 
-### 2. Documents Collection (`/documents/{documentId}`)
+### 2. Documents Collection (`/documents/{userId}/userDocuments/{documentId}`)
+Documents are organized by user in a nested structure:
 - `userId`: string (owner)
 - `title`: string
 - `type`: 'text' | 'audio' | 'pdf' | 'docx' | 'ppt' | 'youtube' | 'website' | 'image'
@@ -136,7 +137,7 @@ function DocumentList() {
 
   const handleDeleteDocument = async (documentId: string) => {
     try {
-      await deleteDocument(documentId);
+      await deleteDocument(documentId, user?.uid);
       console.log('Document deleted');
     } catch (error) {
       console.error('Failed to delete document:', error);
