@@ -601,3 +601,123 @@ export const updateDocumentStorageInfo = async (
     updatedAt: Timestamp.now(),
   });
 };
+
+/**
+ * Create a YouTube video document
+ */
+export const createYouTubeDocument = async (
+  userId: string,
+  url: string,
+  title?: string
+): Promise<string> => {
+  const now = Timestamp.now();
+
+  // Extract video ID from YouTube URL for title if not provided
+  const getYouTubeVideoId = (url: string) => {
+    const regex =
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
+    const match = url.match(regex);
+    return match ? match[1] : null;
+  };
+
+  const videoId = getYouTubeVideoId(url);
+  const defaultTitle = videoId ? `YouTube Video - ${videoId}` : "YouTube Video";
+
+  const document: Omit<Document, "id"> = {
+    userId,
+    title: title || defaultTitle,
+    type: "youtube",
+    content: {
+      raw: url,
+      processed: "", // Will be populated after processing
+    },
+    metadata: {
+      url,
+      mimeType: "video/youtube",
+    },
+    status: "processing",
+    tags: ["youtube", "video"],
+    isPublic: false,
+    createdAt: now,
+    updatedAt: now,
+    lastAccessed: now,
+  };
+
+  // Create document in nested structure: documents/{userId}/userDocuments
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
+  );
+  const docRef = await addDoc(userDocumentsRef, document);
+
+  // Update user analytics
+  await incrementUserAnalytics(userId, {
+    documentsCreated: 1,
+    totalStorageUsed: 0, // No file storage for links
+  });
+
+  return docRef.id;
+};
+
+/**
+ * Create a website link document
+ */
+export const createWebsiteDocument = async (
+  userId: string,
+  url: string,
+  title?: string
+): Promise<string> => {
+  const now = Timestamp.now();
+
+  // Extract domain from URL for title if not provided
+  const getDomainFromUrl = (url: string) => {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace("www.", "");
+    } catch {
+      return "Website";
+    }
+  };
+
+  const domain = getDomainFromUrl(url);
+  const defaultTitle = title || `Website - ${domain}`;
+
+  const document: Omit<Document, "id"> = {
+    userId,
+    title: defaultTitle,
+    type: "website",
+    content: {
+      raw: url,
+      processed: "", // Will be populated after processing
+    },
+    metadata: {
+      url,
+      mimeType: "text/html",
+    },
+    status: "processing",
+    tags: ["website", "link"],
+    isPublic: false,
+    createdAt: now,
+    updatedAt: now,
+    lastAccessed: now,
+  };
+
+  // Create document in nested structure: documents/{userId}/userDocuments
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
+  );
+  const docRef = await addDoc(userDocumentsRef, document);
+
+  // Update user analytics
+  await incrementUserAnalytics(userId, {
+    documentsCreated: 1,
+    totalStorageUsed: 0, // No file storage for links
+  });
+
+  return docRef.id;
+};
