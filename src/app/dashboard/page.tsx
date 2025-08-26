@@ -125,27 +125,58 @@ export default function Dashboard() {
   }
 
   const createNewNote = async () => {
-    try {
-      const response = await fetch('/api/notes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: 'Untitled Document',
-          type: 'document'
-        }),
-      })
+    if (!user?.uid) {
+      console.error('User not authenticated')
+      return
+    }
 
-      if (response.ok) {
-        const note = await response.json()
-        // Redirect to the new note
-        window.location.href = `/notes/${note.id}`
-      } else {
-        console.error('Failed to create note')
+    try {
+      // Import Firebase functions directly
+      const { createDocument } = await import('@/lib/firestore')
+      const { uploadDocument } = await import('@/lib/storage')
+      
+      // Create document data
+      const documentData = {
+        title: 'Untitled Document',
+        type: 'text' as const,
+        content: {
+          raw: '',
+          processed: '',
+        },
+        metadata: {
+          fileName: 'Untitled Document.txt',
+          fileSize: 0,
+          mimeType: 'text/plain',
+        },
+        tags: ['blank-document'],
+        isPublic: false,
       }
+
+      // Create document in Firestore first
+      const documentId = await createDocument(user.uid, documentData)
+
+      // Create a .txt file and upload to Firebase Storage
+      const txtFile = new File([''], 'Untitled Document.txt', { type: 'text/plain' })
+      const uploadResult = await uploadDocument(txtFile, user.uid, documentId)
+
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error || 'Failed to upload document to storage')
+      }
+
+      // Update document with storage information
+      const { updateDocumentStorageInfo } = await import('@/lib/firestore')
+      await updateDocumentStorageInfo(
+        documentId,
+        user.uid,
+        uploadResult.storagePath!,
+        uploadResult.downloadURL!
+      )
+
+      // Redirect to the new note
+      window.location.href = `/notes/${documentId}`
     } catch (error) {
       console.error('Error creating note:', error)
+      alert('Error creating document. Please try again.')
     }
   }
 

@@ -13,6 +13,8 @@ import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPl
 import { TRANSFORMERS } from '@lexical/markdown'
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
+import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
+import { $getRoot, EditorState } from 'lexical'
 import { ImageNode } from './toolbar/ImageNode'
 import { HorizontalRuleNode } from './toolbar/HorizontalRuleNode'
 import { CodeBlockNode } from './toolbar/CodeBlockNode'
@@ -137,9 +139,27 @@ interface EditorConfigProps {
   children: React.ReactNode
   fontSize?: number
   fontFamily?: string
+  onContentChange?: (content: string, editorState?: unknown) => void
 }
 
-function EditorContent({ children, fontSize = 16, fontFamily = 'inherit' }: EditorConfigProps) {
+// Content Change Handler Component
+function ContentChangeHandler({ onContentChange }: { onContentChange?: (content: string, editorState?: unknown) => void }) {
+  const handleEditorChange = (editorState: EditorState) => {
+    if (onContentChange) {
+      editorState.read(() => {
+        const root = $getRoot()
+        const content = root.getTextContent()
+        onContentChange(content, editorState.toJSON())
+      })
+    }
+  }
+
+  return <OnChangePlugin onChange={handleEditorChange} />
+}
+
+
+
+function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onContentChange }: EditorConfigProps) {
   const { 
     isMenuOpen, 
     menuPosition, 
@@ -189,6 +209,7 @@ function EditorContent({ children, fontSize = 16, fontFamily = 'inherit' }: Edit
       <TabIndentationPlugin />
       <CustomTablePlugin />
       <MarkdownShortcutPlugin transformers={[...TRANSFORMERS, HORIZONTAL_RULE]} />
+      <ContentChangeHandler onContentChange={onContentChange} />
 
       {/* Table Context Menu */}
       {isMenuOpen && (
@@ -204,7 +225,7 @@ function EditorContent({ children, fontSize = 16, fontFamily = 'inherit' }: Edit
   )
 }
 
-export default function EditorConfig({ children, fontSize = 16, fontFamily = 'inherit' }: EditorConfigProps) {
+export default function EditorConfig({ children, fontSize = 16, fontFamily = 'inherit', onContentChange }: EditorConfigProps) {
   const initialConfig = {
     namespace: 'NotebookEditor',
     theme,
@@ -216,7 +237,7 @@ export default function EditorConfig({ children, fontSize = 16, fontFamily = 'in
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <EditorContent fontSize={fontSize} fontFamily={fontFamily}>
+      <EditorContent fontSize={fontSize} fontFamily={fontFamily} onContentChange={onContentChange}>
         {children}
       </EditorContent>
     </LexicalComposer>
