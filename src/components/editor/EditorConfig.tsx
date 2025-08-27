@@ -14,6 +14,7 @@ import { TRANSFORMERS } from '@lexical/markdown'
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $getRoot, EditorState } from 'lexical'
 import { ImageNode } from './toolbar/ImageNode'
 import { HorizontalRuleNode } from './toolbar/HorizontalRuleNode'
@@ -140,6 +141,7 @@ interface EditorConfigProps {
   fontSize?: number
   fontFamily?: string
   onContentChange?: (content: string, editorState?: unknown) => void
+  initialEditorState?: unknown // Add this prop for restoring editor state
 }
 
 // Content Change Handler Component
@@ -157,9 +159,40 @@ function ContentChangeHandler({ onContentChange }: { onContentChange?: (content:
   return <OnChangePlugin onChange={handleEditorChange} />
 }
 
+// Editor State Restoration Plugin
+function EditorStateRestorationPlugin({ initialEditorState }: { initialEditorState?: unknown }) {
+  const [editor] = useLexicalComposerContext()
+  
+  useEffect(() => {
+    if (initialEditorState && typeof initialEditorState === 'object') {
+      // Add a small delay to ensure editor is fully initialized
+      const timer = setTimeout(() => {
+        try {
+          // Validate that the initialEditorState has the expected structure
+          if (initialEditorState && typeof initialEditorState === 'object' && 'root' in initialEditorState) {
+            // Create a new editor state from the saved data
+            const newEditorState = editor.parseEditorState(JSON.stringify(initialEditorState))
+            editor.setEditorState(newEditorState)
+            console.log('Editor state restored from localStorage successfully')
+          } else {
+            console.warn('Invalid editor state structure, skipping restoration')
+          }
+        } catch (error) {
+          console.error('Error restoring editor state:', error)
+          // Continue with empty editor state
+        }
+      }, 100) // 100ms delay
+
+      return () => clearTimeout(timer)
+    }
+  }, [editor, initialEditorState])
+
+  return null
+}
 
 
-function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onContentChange }: EditorConfigProps) {
+
+function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onContentChange, initialEditorState }: EditorConfigProps) {
   const { 
     isMenuOpen, 
     menuPosition, 
@@ -210,6 +243,7 @@ function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onCont
       <CustomTablePlugin />
       <MarkdownShortcutPlugin transformers={[...TRANSFORMERS, HORIZONTAL_RULE]} />
       <ContentChangeHandler onContentChange={onContentChange} />
+      <EditorStateRestorationPlugin initialEditorState={initialEditorState} />
 
       {/* Table Context Menu */}
       {isMenuOpen && (
@@ -225,7 +259,7 @@ function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onCont
   )
 }
 
-export default function EditorConfig({ children, fontSize = 16, fontFamily = 'inherit', onContentChange }: EditorConfigProps) {
+export default function EditorConfig({ children, fontSize = 16, fontFamily = 'inherit', onContentChange, initialEditorState }: EditorConfigProps) {
   const initialConfig = {
     namespace: 'NotebookEditor',
     theme,
@@ -237,7 +271,7 @@ export default function EditorConfig({ children, fontSize = 16, fontFamily = 'in
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <EditorContent fontSize={fontSize} fontFamily={fontFamily} onContentChange={onContentChange}>
+      <EditorContent fontSize={fontSize} fontFamily={fontFamily} onContentChange={onContentChange} initialEditorState={initialEditorState}>
         {children}
       </EditorContent>
     </LexicalComposer>

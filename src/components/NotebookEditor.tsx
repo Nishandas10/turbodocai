@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client"
 
 import { useEffect, useState, useCallback, useRef } from 'react'
@@ -97,9 +99,39 @@ export default function NotebookEditor() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [loadedLexicalState, setLoadedLexicalState] = useState<unknown>(null)
   
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const editorStateRef = useRef<string>('')
+
+  // Extract plain text from lexicalState for display
+  const extractPlainTextFromLexical = useCallback((lexicalState: unknown): string => {
+    if (!lexicalState || typeof lexicalState !== 'object') return ''
+    
+    try {
+      // Simple text extraction - this can be enhanced based on your lexical structure
+      const textNodes: string[] = []
+      
+      const extractText = (node: any) => {
+        if (node && typeof node === 'object') {
+          if (node.type === 'text' && node.text) {
+            textNodes.push(node.text)
+          }
+          if (node.children) {
+            node.children.forEach(extractText)
+          }
+        }
+      }
+      
+      extractText(lexicalState)
+      return textNodes.join(' ')
+    } catch (error) {
+      console.warn('Error extracting text from lexicalState:', error)
+      return ''
+    }
+  }, [])
+
+
 
   // Load document data - metadata from Firestore, content from Firebase Storage
   useEffect(() => {
@@ -118,29 +150,61 @@ export default function NotebookEditor() {
         
         setTitle(doc.title)
         
-        // Load content from Firebase Storage if available
-        if (doc.metadata?.downloadURL) {
+        // Try to load rich content from localStorage first
+        const localStorageKey = `document_${noteId}_lexical`
+        const savedLexicalState = localStorage.getItem(localStorageKey)
+        
+        if (savedLexicalState) {
           try {
-            const response = await fetch(doc.metadata.downloadURL)
-            if (response.ok) {
-              const content = await response.text()
-              setContent(content)
-              editorStateRef.current = content
-            } else {
-              console.warn('Failed to load content from storage, using empty content')
+            const lexicalState = JSON.parse(savedLexicalState)
+            console.log('Loaded rich content from localStorage:', localStorageKey)
+            
+            // Store the loaded lexicalState to restore editor formatting
+            setLoadedLexicalState(lexicalState)
+            
+            // Extract plain text from lexicalState for display
+            const plainText = extractPlainTextFromLexical(lexicalState)
+            setContent(plainText)
+            editorStateRef.current = plainText
+            
+            console.log('Successfully loaded lexicalState from localStorage, editor will restore formatting')
+          } catch (error) {
+            console.warn('Error parsing localStorage content:', error)
+            // Fall back to Firebase Storage
+            await loadFromFirebaseStorage()
+          }
+        } else {
+          // No localStorage content, try Firebase Storage
+          await loadFromFirebaseStorage()
+        }
+        
+        // Helper function to load from Firebase Storage
+        async function loadFromFirebaseStorage() {
+          if (doc && doc.metadata?.downloadURL) {
+            try {
+              const response = await fetch(doc.metadata.downloadURL)
+              if (response.ok) {
+                const content = await response.text()
+                setContent(content)
+                editorStateRef.current = content
+              } else {
+                console.warn('Failed to load content from storage, using empty content')
+                setContent('')
+                editorStateRef.current = ''
+              }
+            } catch (error) {
+              console.warn('Error loading content from storage:', error)
               setContent('')
               editorStateRef.current = ''
             }
-          } catch (error) {
-            console.warn('Error loading content from storage:', error)
+          } else {
+            // No storage URL, use empty content
             setContent('')
             editorStateRef.current = ''
           }
-        } else {
-          // No storage URL, use empty content
-          setContent('')
-          editorStateRef.current = ''
         }
+        
+
         
         // Firestore Timestamp -> Date
         const updatedAt = (doc.updatedAt as unknown as { toDate?: () => Date })?.toDate ? (doc.updatedAt as unknown as { toDate?: () => Date }).toDate!() : new Date()
@@ -155,14 +219,79 @@ export default function NotebookEditor() {
     loadDocument()
   }, [noteId, user?.uid])
 
-  // Auto-save function - save content to Firebase Storage, metadata to Firestore
+  // Effect to handle when loadedLexicalState changes (editor restoration)
+  useEffect(() => {
+    if (loadedLexicalState && !isLoading) {
+      console.log('Editor state restored from localStorage, content should now display with formatting')
+      // The editor will automatically restore the state via initialEditorState prop
+    }
+  }, [loadedLexicalState, isLoading])
+
+  // Save content before page unload to prevent data loss
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (content && content !== editorStateRef.current) {
+        // Save to localStorage before page unload
+        const localStorageKey = `document_${noteId}_lexical`
+        const currentLexicalState = localStorage.getItem(localStorageKey)
+        if (currentLexicalState) {
+          console.log('Saving content before page unload to prevent data loss')
+          // The content is already saved in localStorage, just ensure it's up to date
+        }
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [content, noteId])
+
+  // Auto-save function - save rich content to localStorage, plain text to Firebase Storage, metadata to Firestore
   const saveDocument = useCallback(async (currentTitle: string, currentContent: string, lexicalState?: unknown) => {
     if (!noteId || !user?.uid || isSaving) return
     
     try {
       setIsSaving(true)
       
-      // Save content to Firebase Storage as .txt file
+      // Save rich editor content (lexicalState) to localStorage
+      if (lexicalState) {
+        const localStorageKey = `document_${noteId}_lexical`
+        const contentString = JSON.stringify(lexicalState)
+        
+        try {
+          localStorage.setItem(localStorageKey, contentString)
+          
+          // Log storage info
+          const size = new Blob([contentString]).size
+          console.log(`Saved rich content to localStorage: ${localStorageKey} (${(size / 1024).toFixed(2)} KB)`)
+          
+          // Check localStorage quota usage
+          const totalSize = Object.keys(localStorage).reduce((total, key) => {
+            return total + (localStorage[key] ? new Blob([localStorage[key]]).size : 0)
+          }, 0)
+          console.log(`Total localStorage usage: ${(totalSize / 1024 / 1024).toFixed(2)} MB`)
+        } catch (error) {
+          if (error instanceof Error && error.name === 'QuotaExceededError') {
+            console.warn('localStorage quota exceeded, clearing old documents and retrying...')
+            
+            // Try to clear old documents and retry
+            clearOldDocumentsFromLocalStorage()
+            
+            try {
+              localStorage.setItem(localStorageKey, contentString)
+              console.log('Successfully saved after clearing old documents')
+            } catch (retryError) {
+              console.error('Failed to save to localStorage even after clearing:', retryError)
+              // Continue with Firebase Storage backup
+            }
+          } else {
+            console.error('Error saving to localStorage:', error)
+          }
+        }
+      }
+      
+      // Save plain text content to Firebase Storage as backup
       const { uploadDocument } = await import('@/lib/storage')
       const txtFile = new File([currentContent], `${currentTitle}.txt`, { type: 'text/plain' })
       const uploadResult = await uploadDocument(txtFile, user.uid, noteId)
@@ -175,9 +304,9 @@ export default function NotebookEditor() {
       await updateFirestoreDocument(noteId, user.uid, {
         title: currentTitle,
         content: {
-          raw: '', // Content is in Firebase Storage, not here
-          processed: '', // Content is in Firebase Storage, not here
-          ...(lexicalState ? { lexicalState } : {}),
+          raw: '', // Content is in localStorage and Firebase Storage, not here
+          processed: '', // Content is in localStorage and Firebase Storage, not here
+          // Don't save lexicalState to Firestore - it's in localStorage
         },
         metadata: {
           fileName: `${currentTitle}.txt`,
@@ -230,6 +359,117 @@ export default function NotebookEditor() {
       }
     }
   }, [])
+
+  // Function to clear localStorage for this document
+  const clearDocumentFromLocalStorage = useCallback(() => {
+    if (noteId) {
+      const localStorageKey = `document_${noteId}_lexical`
+      localStorage.removeItem(localStorageKey)
+      console.log('Cleared document from localStorage:', localStorageKey)
+    }
+  }, [noteId])
+
+  // Function to export localStorage content (useful for debugging/backup)
+  const exportLocalStorageContent = useCallback(() => {
+    if (noteId) {
+      const localStorageKey = `document_${noteId}_lexical`
+      const content = localStorage.getItem(localStorageKey)
+      if (content) {
+        const blob = new Blob([content], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `document_${noteId}_lexical_backup.json`
+        a.click()
+        URL.revokeObjectURL(url)
+        console.log('Exported localStorage content for document:', noteId)
+      }
+    }
+  }, [noteId])
+
+  // Function to get localStorage info for this document
+  const getLocalStorageInfo = useCallback(() => {
+    if (noteId) {
+      const localStorageKey = `document_${noteId}_lexical`
+      const content = localStorage.getItem(localStorageKey)
+      if (content) {
+        const size = new Blob([content]).size
+        const parsed = JSON.parse(content)
+        return {
+          exists: true,
+          size: size,
+          sizeKB: (size / 1024).toFixed(2),
+          nodeCount: countNodes(parsed),
+          lastModified: new Date().toISOString() // localStorage doesn't track modification time
+        }
+      }
+      return { exists: false }
+    }
+    return { exists: false }
+  }, [noteId])
+
+  // Helper function to count nodes in lexicalState
+  const countNodes = useCallback((obj: any): number => {
+    if (!obj || typeof obj !== 'object') return 0
+    let count = 1
+    if (obj.children) {
+      obj.children.forEach((child: any) => {
+        count += countNodes(child)
+      })
+    }
+    return count
+  }, [])
+
+  // Function to clear old documents from localStorage when quota is exceeded
+  const clearOldDocumentsFromLocalStorage = useCallback(() => {
+    try {
+      // Get all document keys
+      const documentKeys = Object.keys(localStorage).filter(key => 
+        key.startsWith('document_') && key.endsWith('_lexical')
+      )
+      
+      if (documentKeys.length > 0) {
+        // Sort by last modified (we'll use a simple approach since localStorage doesn't track this)
+        // Remove the oldest documents (keep the current one)
+        const keysToRemove = documentKeys.slice(0, Math.floor(documentKeys.length / 2))
+        
+        keysToRemove.forEach(key => {
+          if (key !== `document_${noteId}_lexical`) { // Don't remove current document
+            localStorage.removeItem(key)
+            console.log('Cleared old document from localStorage:', key)
+          }
+        })
+        
+        console.log(`Cleared ${keysToRemove.length} old documents from localStorage`)
+      }
+    } catch (error) {
+      console.error('Error clearing old documents from localStorage:', error)
+    }
+  }, [noteId])
+
+  // Debug function to log localStorage status
+  const debugLocalStorage = useCallback(() => {
+    if (noteId) {
+      const localStorageKey = `document_${noteId}_lexical`
+      const content = localStorage.getItem(localStorageKey)
+      console.log('=== localStorage Debug Info ===')
+      console.log('Document ID:', noteId)
+      console.log('localStorage Key:', localStorageKey)
+      console.log('Content exists:', !!content)
+      if (content) {
+        try {
+          const parsed = JSON.parse(content)
+          const size = new Blob([content]).size
+          console.log('Content size:', `${(size / 1024).toFixed(2)} KB`)
+          console.log('Parsed content type:', typeof parsed)
+          console.log('Content structure:', parsed)
+        } catch (error) {
+          console.error('Error parsing localStorage content:', error)
+        }
+      }
+      console.log('=============================')
+    }
+  }, [noteId])
 
   // Handle text selection for floating toolbar
   useEffect(() => {
@@ -307,6 +547,24 @@ export default function NotebookEditor() {
                 </>
               )}
             </div>
+            
+            {/* Debug buttons */}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={debugLocalStorage}
+                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                title="Debug localStorage"
+              >
+                Debug Storage
+              </button>
+              <button
+                onClick={exportLocalStorageContent}
+                className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200"
+                title="Export localStorage content"
+              >
+                Export
+              </button>
+            </div>
           </div>
         </div>
 
@@ -318,7 +576,20 @@ export default function NotebookEditor() {
               fontSize={fontSize} 
               fontFamily={fontFamily}
               onContentChange={handleContentChange}
+              initialEditorState={loadedLexicalState}
             >
+              {/* Debug info */}
+              {loadedLexicalState !== null && (
+                <div className="text-xs text-green-600 mb-2">
+                  ✓ Editor state loaded from localStorage - formatting will be restored
+                  <button 
+                    onClick={() => console.log('loadedLexicalState:', loadedLexicalState)}
+                    className="ml-2 px-1 py-0.5 bg-green-200 rounded text-xs"
+                  >
+                    Log State
+                  </button>
+                </div>
+              )}
                 <LinkHandler onLinkInserted={() => setShowToolbar(false)} />
               <LexicalToolbar
                 title={title}

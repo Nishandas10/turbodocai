@@ -22,13 +22,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create document data for Firestore
+    // Create document data for Firestore (metadata only, rich content goes to localStorage, plain text to Firebase Storage)
     const documentData = {
       title,
       type: "text" as const,
       content: {
-        raw: content,
-        processed: content,
+        raw: "", // Content is in localStorage and Firebase Storage, not here
+        processed: "", // Content is in localStorage and Firebase Storage, not here
       },
       metadata: {
         fileName: `${title}.txt`,

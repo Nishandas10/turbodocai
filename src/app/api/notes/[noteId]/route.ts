@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from "next/server";
 import { getDocument, updateDocument } from "@/lib/firestore";
 import { uploadDocument } from "@/lib/storage";
@@ -57,9 +58,9 @@ export async function PUT(
     const updateData = {
       title,
       content: {
-        raw: content,
-        processed: content,
-        lexicalState: lexicalState || null,
+        raw: "", // Content is in localStorage and Firebase Storage, not here
+        processed: "", // Content is in localStorage and Firebase Storage, not here
+        // Don't save lexicalState to Firestore - it's in localStorage
       },
       metadata: {
         fileName: `${title}.txt`,
