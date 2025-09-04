@@ -29,6 +29,18 @@ export interface GenerateSummaryParams {
   maxLength?: number;
 }
 
+export interface Flashcard {
+  front: string;
+  back: string;
+  category: string;
+}
+
+export interface GenerateFlashcardsParams {
+  documentId: string;
+  userId: string;
+  count?: number;
+}
+
 /**
  * Query documents using the RAG system
  */
@@ -80,6 +92,26 @@ export const generateDocumentSummary = async (
   } catch (error) {
     console.error("Error generating summary:", error);
     throw error;
+  }
+};
+
+/** Generate flashcards for a document */
+export const generateFlashcards = async (
+  params: GenerateFlashcardsParams
+): Promise<Flashcard[]> => {
+  const fn = httpsCallable(functions, "generateFlashcards");
+  try {
+    const result = await fn(params);
+    const data = result.data as {
+      success: boolean;
+      data?: { flashcards: Flashcard[] };
+      error?: string;
+    };
+    if (data.success && data.data) return data.data.flashcards || [];
+    throw new Error(data.error || "Failed to generate flashcards");
+  } catch (e) {
+    console.error("Error generating flashcards", e);
+    throw e;
   }
 };
 

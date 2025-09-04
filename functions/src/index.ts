@@ -160,6 +160,8 @@ export const processDocument = onDocumentWritten(
         });
       };
 
+      let processedChars = 0;
+      const totalChars = workingText.length;
       for (const chunk of generateChunks(workingText, 300, 20)) {
         const i = chunkCount;
         chunkCount++;
@@ -183,6 +185,31 @@ export const processDocument = onDocumentWritten(
         } catch (chunkError) {
           logger.error(`Error processing chunk ${chunkCount}`, chunkError);
         }
+        processedChars += chunk.length;
+        // Periodic progress update (every 25 chunks) capped below 100 until completion
+        if (chunkCount % 25 === 0) {
+          const progressPct = Math.min(
+            99,
+            Math.round((processedChars / totalChars) * 100)
+          );
+          try {
+            await db
+              .collection("documents")
+              .doc(userId)
+              .collection("userDocuments")
+              .doc(documentId)
+              .set(
+                {
+                  processingProgress: progressPct,
+                  processingStatus: "processing",
+                  chunkCount,
+                },
+                { merge: true }
+              );
+          } catch (progressErr) {
+            logger.warn("Progress update failed", progressErr);
+          }
+        }
         if (global.gc) global.gc();
         if (chunkCount % 10 === 0) memLog();
         // Tiny delay to yield event loop & allow GC
@@ -205,6 +232,7 @@ export const processDocument = onDocumentWritten(
           chunkCount,
           characterCount: workingText.length,
           truncated,
+          processingProgress: 100,
         });
 
       logger.info(
@@ -308,6 +336,36 @@ export const generateSummary = onCall(
       return { success: true, data: { summary } };
     } catch (error) {
       logger.error("Error in generateSummary:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+);
+
+/**
+ * Callable function to generate flashcards for a document
+ */
+export const generateFlashcards = onCall(
+  {
+    enforceAppCheck: false,
+  },
+  async (request) => {
+    try {
+      const { documentId, userId, count } = request.data || {};
+      if (!documentId || !userId) {
+        throw new Error("Missing required parameters: documentId and userId");
+      }
+      const { queryService } = createServices();
+      const cards = await queryService.generateFlashcards(
+        documentId,
+        userId,
+        count || 12
+      );
+      return { success: true, data: { flashcards: cards } };
+    } catch (error) {
+      logger.error("Error in generateFlashcards:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",

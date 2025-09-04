@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateSummary = exports.queryDocuments = exports.processDocument = void 0;
+exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.processDocument = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -126,6 +126,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 external: mu.external,
             });
         };
+        let processedChars = 0;
+        const totalChars = workingText.length;
         for (const chunk of generateChunks(workingText, 300, 20)) {
             const i = chunkCount;
             chunkCount++;
@@ -142,6 +144,26 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             }
             catch (chunkError) {
                 firebase_functions_1.logger.error(`Error processing chunk ${chunkCount}`, chunkError);
+            }
+            processedChars += chunk.length;
+            // Periodic progress update (every 25 chunks) capped below 100 until completion
+            if (chunkCount % 25 === 0) {
+                const progressPct = Math.min(99, Math.round((processedChars / totalChars) * 100));
+                try {
+                    await db
+                        .collection("documents")
+                        .doc(userId)
+                        .collection("userDocuments")
+                        .doc(documentId)
+                        .set({
+                        processingProgress: progressPct,
+                        processingStatus: "processing",
+                        chunkCount,
+                    }, { merge: true });
+                }
+                catch (progressErr) {
+                    firebase_functions_1.logger.warn("Progress update failed", progressErr);
+                }
             }
             if (global.gc)
                 global.gc();
@@ -164,6 +186,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             chunkCount,
             characterCount: workingText.length,
             truncated,
+            processingProgress: 100,
         });
         firebase_functions_1.logger.info(`Successfully processed document ${documentId} with ${chunkCount} chunks`);
     }
@@ -239,6 +262,29 @@ exports.generateSummary = (0, https_1.onCall)({
     }
     catch (error) {
         firebase_functions_1.logger.error("Error in generateSummary:", error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+        };
+    }
+});
+/**
+ * Callable function to generate flashcards for a document
+ */
+exports.generateFlashcards = (0, https_1.onCall)({
+    enforceAppCheck: false,
+}, async (request) => {
+    try {
+        const { documentId, userId, count } = request.data || {};
+        if (!documentId || !userId) {
+            throw new Error("Missing required parameters: documentId and userId");
+        }
+        const { queryService } = createServices();
+        const cards = await queryService.generateFlashcards(documentId, userId, count || 12);
+        return { success: true, data: { flashcards: cards } };
+    }
+    catch (error) {
+        firebase_functions_1.logger.error("Error in generateFlashcards:", error);
         return {
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",
