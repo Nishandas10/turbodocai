@@ -1,14 +1,44 @@
 "use client"
 
-import { useState, useRef } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Volume2, Headphones } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Play, Pause, SkipBack, SkipForward, Volume2, Headphones, Loader2 } from 'lucide-react'
+import { useParams } from 'next/navigation'
+import { useAuth } from '@/contexts/AuthContext'
+import { generatePodcast as generatePodcastApi } from '@/lib/ragService'
 
 export default function PodcastPage() {
+  const params = useParams()
+  const { user } = useAuth()
+  const noteId = params?.noteId as string
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(1)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [summary, setSummary] = useState<string>("")
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+
+  useEffect(() => {
+    if (!noteId || !user?.uid) return
+    const run = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const res = await generatePodcastApi({ documentId: noteId, userId: user.uid })
+        setAudioUrl(res.audioUrl)
+        setSummary(res.summary)
+      } catch (e) {
+        console.error('Podcast generation failed', e)
+        setError('Failed to generate podcast audio')
+      } finally {
+        setLoading(false)
+      }
+    }
+    run()
+  }, [noteId, user?.uid])
 
   const handlePlayPause = () => {
     if (audioRef.current) {
@@ -92,12 +122,21 @@ export default function PodcastPage() {
 
         {/* Audio Controls */}
         <div className="bg-muted rounded-lg p-6">
-          <audio
-            ref={audioRef}
-            onTimeUpdate={handleTimeUpdate}
-            onLoadedMetadata={handleLoadedMetadata}
-            className="hidden"
-          />
+          {loading ? (
+            <div className="flex items-center justify-center h-24 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" /> Preparing audio...
+            </div>
+          ) : error ? (
+            <div className="text-red-600 text-center py-4">{error}</div>
+          ) : (
+            <audio
+              ref={audioRef}
+              src={audioUrl || undefined}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              className="hidden"
+            />
+          )}
           
           {/* Progress Bar */}
           <div className="mb-4">
@@ -122,7 +161,8 @@ export default function PodcastPage() {
             </button>
             <button
               onClick={handlePlayPause}
-              className="w-16 h-16 bg-purple-600 hover:bg-purple-700 rounded-full flex items-center justify-center transition-colors"
+              disabled={!audioUrl}
+              className="w-16 h-16 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-full flex items-center justify-center transition-colors"
             >
               {isPlaying ? (
                 <Pause className="h-8 w-8 text-white" />
@@ -153,28 +193,17 @@ export default function PodcastPage() {
           </div>
         </div>
 
-        {/* Episode Notes */}
+        {/* Episode Notes / Summary */}
         <div className="mt-6">
           <h3 className="text-lg font-semibold text-foreground mb-3">Episode Notes</h3>
           <div className="bg-muted rounded-lg p-4 space-y-3">
-            <div className="flex items-start space-x-3">
-              <div className="w-2 h-2 bg-purple-500 rounded-full mt-2 flex-shrink-0"></div>
-              <p className="text-sm text-foreground">
-                Introduction to the main topics covered in your notes
-              </p>
-            </div>
-            <div className="flex items-start space-x-3">
-              <div className="w-2 h-2 bg-purple-500 rounded-full mt-2 flex-shrink-0"></div>
-              <p className="text-sm text-foreground">
-                Key concepts and important points highlighted
-              </p>
-            </div>
-            <div className="flex items-start space-x-3">
-              <div className="w-2 h-2 bg-purple-500 rounded-full mt-2 flex-shrink-0"></div>
-              <p className="text-sm text-foreground">
-                Summary and actionable insights from your notes
-              </p>
-            </div>
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Generating summary...</div>
+            ) : summary ? (
+              <p className="text-sm text-foreground whitespace-pre-wrap">{summary}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">No summary available.</p>
+            )}
           </div>
         </div>
       </div>

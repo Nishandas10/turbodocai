@@ -5,6 +5,8 @@ import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { getFirestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
+import { OpenAI } from "openai";
+import { randomUUID } from "crypto";
 import {
   DocumentProcessor,
   EmbeddingService,
@@ -366,6 +368,316 @@ export const generateFlashcards = onCall(
       return { success: true, data: { flashcards: cards } };
     } catch (error) {
       logger.error("Error in generateFlashcards:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+);
+
+/**
+ * Callable function to generate quiz questions for a document
+ */
+export const generateQuiz = onCall(
+  {
+    enforceAppCheck: false,
+  },
+  async (request) => {
+    try {
+      const { documentId, userId, count, difficulty } = request.data || {};
+      if (!documentId || !userId) {
+        throw new Error("Missing required parameters: documentId and userId");
+      }
+      const { queryService } = createServices();
+      const questions = await queryService.generateQuiz(
+        documentId,
+        userId,
+        count || 10,
+        difficulty || "mixed"
+      );
+      return { success: true, data: { quiz: questions } };
+    } catch (error) {
+      logger.error("Error in generateQuiz:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+);
+
+/**
+ * Callable function to fetch full raw document text from Pinecone (ordered by chunk index)
+ * Falls back to Firestore stored raw content if vectors are not available.
+ */
+export const getDocumentText = onCall(
+  {
+    enforceAppCheck: false,
+  },
+  async (request) => {
+    try {
+      const { documentId, userId, limitChars } = request.data || {};
+      if (!documentId || !userId) {
+        throw new Error("Missing required parameters: documentId and userId");
+      }
+
+      const { pineconeService } = createServices();
+
+      // Try to read document metadata (including chunkCount) from Firestore
+      let chunkCount = 0;
+      let title: string | undefined;
+      let fileName: string | undefined;
+      try {
+        const snap = await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .get();
+        if (snap.exists) {
+          const data = snap.data() as any;
+          chunkCount = Number(data?.chunkCount || 0);
+          title = data?.title;
+          fileName = data?.metadata?.fileName;
+        }
+      } catch {
+        /* ignore */
+      }
+
+      // If chunkCount unknown, attempt a cheap probe
+      if (!chunkCount) {
+        try {
+          const probe = await pineconeService.querySimilarChunks(
+            new Array(1024).fill(0),
+            userId,
+            50,
+            documentId
+          );
+          const indices = probe
+            .map((m) => parseInt(String(m.id).split("_").pop() || "0", 10))
+            .filter((n) => !isNaN(n));
+          if (indices.length) chunkCount = Math.max(...indices) + 1;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      let text = "";
+      let source: "pinecone" | "firestore" = "pinecone";
+      if (chunkCount > 0) {
+        const ordered = await pineconeService.fetchDocumentChunks(
+          documentId,
+          userId,
+          chunkCount
+        );
+        text = ordered.map((c) => c.chunk).join("\n\n");
+      }
+
+      // Fallback to Firestore stored raw content
+      if (!text || text.length < 10) {
+        source = "firestore";
+        try {
+          const snap = await db
+            .collection("documents")
+            .doc(userId)
+            .collection("userDocuments")
+            .doc(documentId)
+            .get();
+          if (snap.exists) {
+            const data = snap.data() as any;
+            title = title || data?.title;
+            fileName = fileName || data?.metadata?.fileName;
+            text =
+              data?.content?.raw ||
+              data?.content?.processed ||
+              data?.summary ||
+              "";
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const totalChars = text.length;
+      const max =
+        Number(limitChars) && Number(limitChars) > 0
+          ? Number(limitChars)
+          : totalChars;
+      const sliced = text.slice(0, max);
+      const truncated = sliced.length < totalChars;
+
+      return {
+        success: true,
+        data: {
+          text: sliced,
+          title,
+          fileName,
+          chunkCount: chunkCount || undefined,
+          characterCount: totalChars,
+          source,
+          truncated,
+        },
+      };
+    } catch (error) {
+      logger.error("Error in getDocumentText:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+);
+
+/**
+ * Callable function: Generate or fetch podcast audio (MP3) for a document's summary using OpenAI TTS.
+ * Caches result under documents/{userId}/userDocuments/{documentId}/aiArtifacts/podcast_v1
+ * Stores audio at gs://<bucket>/podcasts/{userId}/{documentId}/{voice or default}.mp3
+ */
+export const generatePodcast = onCall(
+  {
+    enforceAppCheck: false,
+  },
+  async (request) => {
+    try {
+      const { documentId, userId, voice, force } = request.data || {};
+      if (!documentId || !userId) {
+        throw new Error("Missing required parameters: documentId and userId");
+      }
+
+      const { queryService } = createServices();
+      const dbRef = db
+        .collection("documents")
+        .doc(userId)
+        .collection("userDocuments")
+        .doc(documentId)
+        .collection("aiArtifacts")
+        .doc("podcast_v1");
+
+      // Attempt cache
+      if (!force) {
+        const cache = await dbRef.get();
+        if (cache.exists) {
+          const data = cache.data() as any;
+          const audioPath: string | undefined = data?.audioPath;
+          if (audioPath) {
+            const file = storage.bucket().file(audioPath);
+            const [exists] = await file.exists();
+            if (exists) {
+              // Build Firebase download token URL
+              let token: string | undefined = data?.downloadToken;
+              const [meta] = await file.getMetadata();
+              const bucketName = storage.bucket().name;
+              const metaToken =
+                (meta?.metadata?.firebaseStorageDownloadTokens as string) || "";
+              if (!token) {
+                token = metaToken?.split(",")[0] || undefined;
+              }
+              if (!token) {
+                token = randomUUID();
+                await file.setMetadata({
+                  metadata: { firebaseStorageDownloadTokens: token },
+                });
+              }
+              const mediaUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(
+                audioPath
+              )}?alt=media&token=${token}`;
+              return {
+                success: true,
+                data: {
+                  audioUrl: mediaUrl,
+                  audioPath,
+                  voice: data?.voice || "alloy",
+                  model: data?.model || "gpt-4o-mini-tts",
+                  summary: data?.summary || "",
+                },
+              };
+            }
+          }
+        }
+      }
+
+      // Fetch summary: prefer stored summary, else generate
+      let summary = "";
+      try {
+        const docSnap = await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .get();
+        if (docSnap.exists) {
+          const data = docSnap.data() as any;
+          summary = (data?.summary as string) || "";
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!summary || summary.trim().length < 40) {
+        summary = await queryService.generateDocumentSummary(
+          documentId,
+          userId,
+          500
+        );
+      }
+      // Limit input length for TTS to keep under model limits
+      const ttsInput = summary.trim().slice(0, 4000);
+
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const ttsModel = "gpt-4o-mini-tts"; // compact, good quality
+      const ttsVoice =
+        typeof voice === "string" && voice.trim() ? voice.trim() : "alloy";
+
+      // Create speech audio (mp3)
+      const speech = await openai.audio.speech.create({
+        model: ttsModel,
+        voice: ttsVoice as any,
+        input: ttsInput,
+      });
+      const arrayBuf = await speech.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+
+      // Save to Storage
+      const audioPath = `podcasts/${userId}/${documentId}/${ttsVoice}.mp3`;
+      const file = storage.bucket().file(audioPath);
+      await file.save(buffer, { contentType: "audio/mpeg", resumable: false });
+      // Set cache control and Firebase download token for public access via URL
+      const token = randomUUID();
+      await file.setMetadata({
+        cacheControl: "public, max-age=3600",
+        metadata: { firebaseStorageDownloadTokens: token },
+        contentType: "audio/mpeg",
+      });
+      const bucketName = storage.bucket().name;
+      const mediaUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(
+        audioPath
+      )}?alt=media&token=${token}`;
+
+      // Cache metadata
+      await dbRef.set(
+        {
+          audioPath,
+          voice: ttsVoice,
+          model: ttsModel,
+          summary: ttsInput,
+          downloadToken: token,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+
+      return {
+        success: true,
+        data: {
+          audioUrl: mediaUrl,
+          audioPath,
+          voice: ttsVoice,
+          model: ttsModel,
+          summary: ttsInput,
+        },
+      };
+    } catch (error) {
+      logger.error("Error in generatePodcast:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",

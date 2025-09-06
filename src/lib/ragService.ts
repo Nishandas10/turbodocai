@@ -41,6 +41,54 @@ export interface GenerateFlashcardsParams {
   count?: number;
 }
 
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation: string;
+  category: string;
+  difficulty: "easy" | "medium" | "hard";
+}
+
+export interface GenerateQuizParams {
+  documentId: string;
+  userId: string;
+  count?: number;
+  difficulty?: "mixed" | "easy" | "medium" | "hard";
+}
+
+export interface GetDocumentTextParams {
+  documentId: string;
+  userId: string;
+  limitChars?: number;
+}
+
+export interface DocumentTextResponse {
+  text: string;
+  title?: string;
+  fileName?: string;
+  chunkCount?: number;
+  characterCount: number;
+  source: "pinecone" | "firestore";
+  truncated: boolean;
+}
+
+export interface GeneratePodcastParams {
+  documentId: string;
+  userId: string;
+  voice?: string;
+  force?: boolean;
+}
+
+export interface PodcastResponse {
+  audioUrl: string;
+  audioPath: string;
+  voice: string;
+  model: string;
+  summary: string;
+}
+
 /**
  * Query documents using the RAG system
  */
@@ -95,6 +143,41 @@ export const generateDocumentSummary = async (
   }
 };
 
+/** Generate or retrieve podcast audio for a document summary */
+export const generatePodcast = async (
+  params: GeneratePodcastParams
+): Promise<PodcastResponse> => {
+  const fn = httpsCallable(functions, "generatePodcast");
+  const result = await fn(params);
+  const data = result.data as {
+    success: boolean;
+    data?: PodcastResponse;
+    error?: string;
+  };
+  if (data.success && data.data) return data.data;
+  throw new Error(data.error || "Failed to generate podcast");
+};
+
+/** Fetch full raw text of a document (concatenated from Pinecone or Firestore fallback) */
+export const getDocumentText = async (
+  params: GetDocumentTextParams
+): Promise<DocumentTextResponse> => {
+  const fn = httpsCallable(functions, "getDocumentText");
+  try {
+    const result = await fn(params);
+    const data = result.data as {
+      success: boolean;
+      data?: DocumentTextResponse;
+      error?: string;
+    };
+    if (data.success && data.data) return data.data;
+    throw new Error(data.error || "Failed to fetch document text");
+  } catch (e) {
+    console.error("Error fetching document text", e);
+    throw e;
+  }
+};
+
 /** Generate flashcards for a document */
 export const generateFlashcards = async (
   params: GenerateFlashcardsParams
@@ -111,6 +194,26 @@ export const generateFlashcards = async (
     throw new Error(data.error || "Failed to generate flashcards");
   } catch (e) {
     console.error("Error generating flashcards", e);
+    throw e;
+  }
+};
+
+/** Generate quiz questions for a document */
+export const generateQuiz = async (
+  params: GenerateQuizParams
+): Promise<QuizQuestion[]> => {
+  const fn = httpsCallable(functions, "generateQuiz");
+  try {
+    const result = await fn(params);
+    const data = result.data as {
+      success: boolean;
+      data?: { quiz: QuizQuestion[] };
+      error?: string;
+    };
+    if (data.success && data.data) return data.data.quiz || [];
+    throw new Error(data.error || "Failed to generate quiz");
+  } catch (e) {
+    console.error("Error generating quiz", e);
     throw e;
   }
 };

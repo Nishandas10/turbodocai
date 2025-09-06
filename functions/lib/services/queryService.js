@@ -420,6 +420,251 @@ Answer:`;
             throw new Error("Failed to generate flashcards");
         }
     }
+    /**
+     * Generate quiz questions for a document.
+     * Similar strategy to flashcards but generates multiple choice questions with explanations.
+     */
+    async generateQuiz(documentId, userId, count = 10, difficulty = "mixed") {
+        var _a, _b, _c, _d, _e, _f;
+        try {
+            const db = (0, firestore_1.getFirestore)();
+            // Cache lookup first
+            const cacheKey = `quiz_v1_${difficulty}_${count}`;
+            try {
+                const cacheDoc = await db
+                    .collection("documents")
+                    .doc(userId)
+                    .collection("userDocuments")
+                    .doc(documentId)
+                    .collection("aiArtifacts")
+                    .doc(cacheKey)
+                    .get();
+                if (cacheDoc.exists) {
+                    const data = cacheDoc.data();
+                    if (data.quiz && data.quiz.length) {
+                        firebase_functions_1.logger.info("Serving quiz from cache", {
+                            len: data.quiz.length,
+                            difficulty,
+                        });
+                        return data.quiz.slice(0, count);
+                    }
+                }
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("Quiz cache read failed", e);
+            }
+            firebase_functions_1.logger.info("Quiz generation start", {
+                userId,
+                documentId,
+                requested: count,
+                difficulty,
+            });
+            // Estimate chunk count (reuse probe logic from flashcards)
+            let chunkCount = 0;
+            try {
+                const probe = await this.pineconeService.querySimilarChunks(new Array(1024).fill(0), userId, 1, documentId);
+                if (probe.length) {
+                    const broader = await this.pineconeService.querySimilarChunks(new Array(1024).fill(0), userId, 50, documentId);
+                    const indices = broader
+                        .map((m) => parseInt(m.id.split("_").pop() || "0", 10))
+                        .filter((n) => !isNaN(n));
+                    if (indices.length)
+                        chunkCount = Math.max(...indices) + 1;
+                }
+            }
+            catch (e) {
+                // ignore probe failures
+            }
+            if (chunkCount === 0)
+                chunkCount = 300;
+            const MAX_CHUNKS_FOR_QUIZ = 100; // tuneable cost/performance knob
+            const ordered = await this.pineconeService.fetchDocumentChunks(documentId, userId, chunkCount, MAX_CHUNKS_FOR_QUIZ);
+            if (!ordered.length) {
+                firebase_functions_1.logger.warn("No vectors found for document. Falling back to Firestore raw content", { documentId });
+                try {
+                    const docSnap = await db
+                        .collection("documents")
+                        .doc(userId)
+                        .collection("userDocuments")
+                        .doc(documentId)
+                        .get();
+                    if (docSnap.exists) {
+                        const data = docSnap.data();
+                        const sourceText = (data.summary ||
+                            ((_a = data.content) === null || _a === void 0 ? void 0 : _a.raw) ||
+                            ((_b = data.content) === null || _b === void 0 ? void 0 : _b.processed) ||
+                            "").slice(0, 18000);
+                        if (sourceText.length > 120) {
+                            const quizPrompt = `Generate ${count} multiple-choice quiz questions from the following text. Return as JSON array with id, question, options (4 choices), correctAnswer (0-3 index), explanation, category, and difficulty. Text:\n\n${sourceText}`;
+                            const resp = await this.openai.chat.completions.create({
+                                model: "gpt-4o-mini",
+                                messages: [
+                                    {
+                                        role: "system",
+                                        content: "You produce educational quiz questions as valid JSON array only. Each question should have 4 options with one correct answer.",
+                                    },
+                                    { role: "user", content: quizPrompt },
+                                ],
+                                temperature: 0.4,
+                                max_tokens: 2000,
+                            });
+                            const rawAlt = ((_d = (_c = resp.choices[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content) || "";
+                            const start = rawAlt.indexOf("[");
+                            const end = rawAlt.lastIndexOf("]");
+                            if (start !== -1 && end !== -1) {
+                                try {
+                                    const parsedAlt = JSON.parse(rawAlt.slice(start, end + 1));
+                                    const questionsAlt = parsedAlt
+                                        .filter((q) => q &&
+                                        q.question &&
+                                        q.options &&
+                                        Array.isArray(q.options) &&
+                                        q.options.length === 4)
+                                        .slice(0, count)
+                                        .map((q, index) => ({
+                                        id: String(index + 1),
+                                        question: String(q.question).trim().slice(0, 300),
+                                        options: q.options.map((opt) => String(opt).trim().slice(0, 150)),
+                                        correctAnswer: Math.max(0, Math.min(3, parseInt(q.correctAnswer) || 0)),
+                                        explanation: String(q.explanation || "")
+                                            .trim()
+                                            .slice(0, 400),
+                                        category: (q.category ? String(q.category) : "General")
+                                            .trim()
+                                            .slice(0, 40),
+                                        difficulty: (["easy", "medium", "hard"].includes(q.difficulty)
+                                            ? q.difficulty
+                                            : "medium"),
+                                    }));
+                                    if (questionsAlt.length) {
+                                        firebase_functions_1.logger.info("Quiz generated via raw-content fallback", {
+                                            len: questionsAlt.length,
+                                        });
+                                        // cache
+                                        db.collection("documents")
+                                            .doc(userId)
+                                            .collection("userDocuments")
+                                            .doc(documentId)
+                                            .collection("aiArtifacts")
+                                            .doc(cacheKey)
+                                            .set({
+                                            quiz: questionsAlt,
+                                            updatedAt: new Date(),
+                                            fallback: true,
+                                        }, { merge: true })
+                                            .catch((err) => firebase_functions_1.logger.warn("Cache write fail (fallback)", err));
+                                        return questionsAlt;
+                                    }
+                                }
+                                catch (e) {
+                                    firebase_functions_1.logger.warn("Fallback quiz parse failed", e);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (rawErr) {
+                    firebase_functions_1.logger.warn("Raw content fallback failed", rawErr);
+                }
+                return [];
+            }
+            // Build context (limit to ~20k chars to control tokens)
+            const rawContext = ordered.map((c) => c.chunk).join("\n\n");
+            const context = rawContext.slice(0, 20000);
+            firebase_functions_1.logger.info("Quiz doc stats", {
+                estimatedChunks: chunkCount,
+                usedVectors: ordered.length,
+                contextChars: context.length,
+            });
+            const difficultyInstruction = difficulty === "mixed"
+                ? "Mix difficulty levels (easy, medium, hard) across questions."
+                : `Focus on ${difficulty} difficulty level questions.`;
+            const systemPrompt = `You are an expert educator generating high-quality multiple-choice quiz questions from source material. Guidelines:\n- Produce exactly ${count} diverse quiz questions unless material is too small (then produce as many as reasonable, minimum 3).\n- Each question must have exactly 4 options (A, B, C, D) with only one correct answer.\n- Vary categories among Definition, Concept, Process, Fact, Application, Analysis, Synthesis, Evaluation.\n- ${difficultyInstruction}\n- Questions should be clear and unambiguous (max 200 chars).\n- Options should be plausible but only one correct (max 120 chars each).\n- Explanations should clarify why the answer is correct and others are wrong (max 300 chars).\n- Avoid trivial questions; focus on understanding, application, and critical thinking.\n- Output ONLY raw JSON array, no commentary, no code fences.\n- Format: [{"id":"1","question":"...","options":["A","B","C","D"],"correctAnswer":0,"explanation":"...","category":"...","difficulty":"easy|medium|hard"}]`;
+            const userPrompt = `Source Content (truncated):\n${context}\n\nGenerate quiz questions now.`;
+            const response = await this.openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt },
+                ],
+                temperature: 0.3,
+                max_tokens: 2200,
+            });
+            const raw = ((_f = (_e = response.choices[0]) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.content) || "";
+            let jsonText = raw.trim();
+            // Attempt to salvage JSON if model added prose
+            const firstBracket = jsonText.indexOf("[");
+            const lastBracket = jsonText.lastIndexOf("]");
+            if (firstBracket !== -1 && lastBracket !== -1) {
+                jsonText = jsonText.slice(firstBracket, lastBracket + 1);
+            }
+            let parsed = [];
+            try {
+                parsed = JSON.parse(jsonText);
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("Quiz JSON parse failed", { raw: raw.slice(0, 500) });
+                return [];
+            }
+            // Normalize & validate
+            const questions = parsed
+                .filter((q) => typeof q === "object" &&
+                q !== null &&
+                typeof q.question === "string" &&
+                Array.isArray(q.options) &&
+                q.options.length === 4 &&
+                typeof q.correctAnswer === "number" &&
+                q.correctAnswer >= 0 &&
+                q.correctAnswer <= 3)
+                .slice(0, count)
+                .map((q, index) => ({
+                id: String(q.id || index + 1),
+                question: String(q.question)
+                    .trim()
+                    .slice(0, 300),
+                options: q.options.map((opt) => String(opt).trim().slice(0, 150)),
+                correctAnswer: Math.max(0, Math.min(3, Number(q.correctAnswer))),
+                explanation: String(q.explanation || "")
+                    .trim()
+                    .slice(0, 400),
+                category: (q.category
+                    ? String(q.category)
+                    : "General")
+                    .trim()
+                    .slice(0, 40),
+                difficulty: (["easy", "medium", "hard"].includes(q.difficulty)
+                    ? q.difficulty
+                    : "medium"),
+            }));
+            firebase_functions_1.logger.info("Quiz generated (vector pathway)", {
+                count: questions.length,
+            });
+            // Persist cache asynchronously
+            if (questions.length) {
+                db.collection("documents")
+                    .doc(userId)
+                    .collection("userDocuments")
+                    .doc(documentId)
+                    .collection("aiArtifacts")
+                    .doc(cacheKey)
+                    .set({
+                    quiz: questions,
+                    updatedAt: new Date(),
+                    size: questions.length,
+                    model: "gpt-4o-mini",
+                    version: 1,
+                    difficulty,
+                    fallback: false,
+                }, { merge: true })
+                    .catch((err) => firebase_functions_1.logger.warn("Failed to cache quiz", err));
+            }
+            return questions;
+        }
+        catch (error) {
+            firebase_functions_1.logger.error("Error generating quiz:", error);
+            throw new Error("Failed to generate quiz");
+        }
+    }
 }
 exports.QueryService = QueryService;
 //# sourceMappingURL=queryService.js.map

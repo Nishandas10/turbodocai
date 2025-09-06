@@ -1,119 +1,58 @@
 "use client"
 
-import { useState } from 'react'
-import { FileText, Edit3, Save, Copy, Download, Search, Filter } from 'lucide-react'
-
-interface TranscriptSection {
-  id: string
-  timestamp: string
-  speaker: string
-  content: string
-  category: string
-}
+import { useEffect, useMemo, useState } from 'react'
+import { FileText, Copy, Download, Search, Loader2 } from 'lucide-react'
+import { useParams } from 'next/navigation'
+import { useAuth } from '@/contexts/AuthContext'
+import { getDocumentText } from '@/lib/ragService'
 
 export default function TranscriptPage() {
-  const [transcript, setTranscript] = useState<TranscriptSection[]>([
-    {
-      id: '1',
-      timestamp: '00:00',
-      speaker: 'AI Narrator',
-      content: 'Welcome to this AI-generated transcript of your notes. Today we\'ll be covering the main concepts and key points that you\'ve documented.',
-      category: 'Introduction'
-    },
-    {
-      id: '2',
-      timestamp: '00:15',
-      speaker: 'AI Narrator',
-      content: 'The first concept we\'ll explore is understanding the fundamental principles. This forms the foundation for all subsequent applications.',
-      category: 'Concept Understanding'
-    },
-    {
-      id: '3',
-      timestamp: '00:32',
-      speaker: 'AI Narrator',
-      content: 'Key point number one: Always start with the basics. Don\'t rush into complex scenarios without mastering the fundamentals.',
-      category: 'Key Points'
-    },
-    {
-      id: '4',
-      timestamp: '00:48',
-      speaker: 'AI Narrator',
-      content: 'Key point number two: Follow the step-by-step process outlined in your notes. This ensures proper implementation and reduces errors.',
-      category: 'Key Points'
-    },
-    {
-      id: '5',
-      timestamp: '01:05',
-      speaker: 'AI Narrator',
-      content: 'When applying this knowledge, remember to pay attention to the guidelines. Common mistakes often occur when these are overlooked.',
-      category: 'Application'
-    },
-    {
-      id: '6',
-      timestamp: '01:22',
-      speaker: 'AI Narrator',
-      content: 'In conclusion, the main takeaway is that success comes from understanding the principles, following the process, and avoiding common pitfalls.',
-      category: 'Summary'
-    }
-  ])
-  
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editContent, setEditContent] = useState('')
+  const params = useParams()
+  const { user } = useAuth()
+  const noteId = params?.noteId as string
+
+  const [rawText, setRawText] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('All')
-  const [showFilters, setShowFilters] = useState(false)
 
-  const categories = ['All', 'Introduction', 'Concept Understanding', 'Key Points', 'Application', 'Summary']
-
-  const handleEdit = (section: TranscriptSection) => {
-    setEditingId(section.id)
-    setEditContent(section.content)
-  }
-
-  const handleSave = () => {
-    if (editingId) {
-      setTranscript(prev => prev.map(section => 
-        section.id === editingId 
-          ? { ...section, content: editContent }
-          : section
-      ))
-      setEditingId(null)
-      setEditContent('')
+  useEffect(() => {
+    if (!noteId || !user?.uid) return
+    const run = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const res = await getDocumentText({ documentId: noteId, userId: user.uid })
+        setRawText(res.text || '')
+      } catch (e) {
+        console.error('Transcript load failed', e)
+        setError('Failed to load transcript text')
+      } finally {
+        setLoading(false)
+      }
     }
-  }
+    run()
+  }, [noteId, user?.uid])
 
-  const handleCancel = () => {
-    setEditingId(null)
-    setEditContent('')
-  }
+  const filtered = useMemo(() => {
+    if (!searchTerm) return rawText
+    // Simple highlight via splitting; we'll render with <mark>
+    return rawText
+  }, [rawText, searchTerm])
 
   const handleCopy = () => {
-    const fullTranscript = transcript.map(section => 
-      `[${section.timestamp}] ${section.speaker}: ${section.content}`
-    ).join('\n\n')
-    navigator.clipboard.writeText(fullTranscript)
+    navigator.clipboard.writeText(rawText)
   }
 
   const handleDownload = () => {
-    const fullTranscript = transcript.map(section => 
-      `[${section.timestamp}] ${section.speaker}: ${section.content}`
-    ).join('\n\n')
-    
-    const blob = new Blob([fullTranscript], { type: 'text/plain' })
+    const blob = new Blob([rawText], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'transcript.txt'
+    a.download = 'document.txt'
     a.click()
     URL.revokeObjectURL(url)
   }
-
-  const filteredTranscript = transcript.filter(section => {
-    const matchesSearch = section.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         section.speaker.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = selectedCategory === 'All' || section.category === selectedCategory
-    return matchesSearch && matchesCategory
-  })
 
   return (
     <div className="h-full flex flex-col bg-background">
@@ -124,52 +63,24 @@ export default function TranscriptPage() {
           <h1 className="text-xl font-semibold text-foreground">Transcript</h1>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          AI-generated transcript of your notes with editing capabilities
+          Raw text reconstructed from your uploaded PDF (Pinecone vectors or Firestore fallback)
         </p>
       </div>
 
       {/* Controls */}
       <div className="border-b border-border p-4 space-y-4">
-        {/* Search and Filters */}
+        {/* Search */}
         <div className="flex items-center space-x-4">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search transcript..."
+              placeholder="Search text..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
-          
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center space-x-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <Filter className="h-4 w-4" />
-            <span>Filter</span>
-          </button>
-        </div>
-
-        {/* Category Filter */}
-        {showFilters && (
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-600">Category:</span>
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              {categories.map(category => (
-                <option key={category} value={category}>{category}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* Action Buttons */}
-        <div className="flex items-center space-x-3">
           <button
             onClick={handleCopy}
             className="flex items-center space-x-2 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
@@ -187,79 +98,49 @@ export default function TranscriptPage() {
         </div>
       </div>
 
-      {/* Transcript Content */}
+      {/* Body */}
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="max-w-4xl mx-auto space-y-4">
-          {filteredTranscript.map((section) => (
-            <div
-              key={section.id}
-              className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-3">
-                  <span className="text-sm font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                    {section.timestamp}
-                  </span>
-                  <span className="text-sm font-medium text-indigo-600">
-                    {section.speaker}
-                  </span>
-                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                    {section.category}
-                  </span>
-                </div>
-                
-                <button
-                  onClick={() => handleEdit(section)}
-                  className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                  title="Edit"
-                >
-                  <Edit3 className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Content */}
-              {editingId === section.id ? (
-                <div className="space-y-3">
-                  <textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    rows={3}
-                  />
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={handleSave}
-                      className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-                    >
-                      <Save className="h-4 w-4" />
-                      <span>Save</span>
-                    </button>
-                    <button
-                      onClick={handleCancel}
-                      className="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
+        <div className="max-w-4xl mx-auto">
+          {loading ? (
+            <div className="flex items-center justify-center h-64 text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading transcript...
+            </div>
+          ) : error ? (
+            <div className="text-center py-12 text-red-600">{error}</div>
+          ) : rawText ? (
+            <article className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+              {/* Render with search highlight */}
+              {searchTerm ? (
+                <HighlightedText text={filtered} query={searchTerm} />
               ) : (
-                <p className="text-gray-700 leading-relaxed">{section.content}</p>
+                <pre className="whitespace-pre-wrap text-gray-800 leading-relaxed">{rawText}</pre>
               )}
-            </div>
-          ))}
-
-          {filteredTranscript.length === 0 && (
-            <div className="text-center py-12">
-              <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-600 mb-2">No transcript sections found</h3>
-              <p className="text-gray-500">
-                Try adjusting your search terms or category filter
-              </p>
-            </div>
+            </article>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">No transcript text available.</div>
           )}
         </div>
       </div>
     </div>
   )
-} 
+}
+
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <pre className="whitespace-pre-wrap text-gray-800 leading-relaxed">{text}</pre>
+  const parts = text.split(new RegExp(`(${escapeRegExp(query)})`, 'gi'))
+  return (
+    <pre className="whitespace-pre-wrap text-gray-800 leading-relaxed">
+      {parts.map((part, i) => (
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="bg-yellow-200 text-black px-0.5 rounded-sm">{part}</mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      ))}
+    </pre>
+  )
+}
+
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
