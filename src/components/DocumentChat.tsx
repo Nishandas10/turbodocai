@@ -27,6 +27,24 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
 
+  // Simple client-side streaming helper
+  const streamText = async (
+    full: string,
+    onChunk: (partial: string) => void,
+    opts?: { step?: number; delayMs?: number }
+  ) => {
+    const step = Math.max(1, opts?.step ?? 2);
+    const delay = Math.max(6, opts?.delayMs ?? 16);
+    let i = 0;
+    while (i < full.length) {
+      i += step;
+      onChunk(full.slice(0, i));
+      // Scroll as we stream
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  };
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,6 +78,18 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
     setIsLoading(true);
 
     try {
+      // Create placeholder assistant message that we'll stream into
+      const assistantId = (Date.now() + 1).toString();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantId,
+          type: "assistant",
+          content: "",
+          timestamp: new Date(),
+        },
+      ]);
+
       const result = await queryDocuments({
         question: inputValue.trim(),
         userId: user.uid,
@@ -67,16 +97,27 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
         topK: 5,
       });
 
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        type: "assistant",
-        content: result.answer,
-        timestamp: new Date(),
-        sources: result.sources,
-        confidence: result.confidence,
-      };
+      // Stop spinner and stream the answer text into the placeholder message
+      setIsLoading(false);
+      await streamText(result.answer || "", (partial) => {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: partial } : m))
+        );
+      });
 
-      setMessages(prev => [...prev, assistantMessage]);
+      // Attach sources and confidence once streaming is done
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content: result.answer,
+                sources: result.sources,
+                confidence: result.confidence,
+              }
+            : m
+        )
+      );
     } catch (error) {
       console.error("Error querying documents:", error);
       
@@ -89,6 +130,7 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
 
       setMessages(prev => [...prev, errorMessage]);
     } finally {
+      // If we already turned it off for streaming, this is a no-op
       setIsLoading(false);
     }
   };
