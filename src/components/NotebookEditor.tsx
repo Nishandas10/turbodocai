@@ -18,6 +18,25 @@ declare global {
     editorHandlers?: {
       handleLink: () => void
       handleFormatting: (format: string) => void
+      // Insert plain text at the current cursor or end
+      insertText?: (text: string) => void
+      // Replace current selection with text (non-streaming)
+      replaceSelection?: (text: string) => void
+      // Type text with a cursor-like streaming effect at the end of the doc
+      typeText?: (text: string, options?: { delayMs?: number }) => void
+  // Type text with a cursor-like streaming effect at a specified placement
+  typeTextAtPlacement?: (text: string, placement: 'beginning' | 'end' | 'after-heading' | 'replace-selection', options?: { delayMs?: number }) => void
+      // Get current document structure for AI context
+      getDocumentStructure?: () => {
+        headings: Array<{ level: number; text: string; position: number }>
+        paragraphs: string[]
+        totalLength: number
+        structure: string
+      }
+      // Insert at specific locations
+      insertAtBeginning?: (text: string) => void
+      insertAtEnd?: (text: string) => void
+      insertAfterLastHeading?: (text: string) => void
     }
   }
 }
@@ -60,8 +79,248 @@ function LinkHandler({ onLinkInserted }: { onLinkInserted: () => void }) {
   }, [editor])
 
   useEffect(() => {
-    window.editorHandlers = { handleLink, handleFormatting }
+  const prev = (window.editorHandlers || {}) as any
+  window.editorHandlers = { ...prev, handleLink, handleFormatting }
   }, [handleLink, handleFormatting])
+
+  return null
+}
+
+// Exposes agent-friendly editor functions on window.editorHandlers
+function EditorAgentBridge() {
+  const [editor] = useLexicalComposerContext()
+  const typingAbortRef = useRef<{ abort: boolean } | null>(null)
+
+  const insertText = useCallback((text: string) => {
+    if (!text) return
+    editor.update(() => {
+      const selection = $getSelection()
+      if ($isRangeSelection(selection)) {
+        selection.insertText(text)
+      } else {
+        const root = $getRoot()
+        const p = $createParagraphNode()
+        p.append($createTextNode(text))
+        root.append(p)
+      }
+    })
+  }, [editor])
+
+  const replaceSelection = useCallback((text: string) => {
+    editor.update(() => {
+      const selection = $getSelection()
+      if ($isRangeSelection(selection)) {
+        selection.insertText(text)
+      } else {
+        const root = $getRoot()
+        const p = $createParagraphNode()
+        p.append($createTextNode(text))
+        root.append(p)
+      }
+    })
+  }, [editor])
+
+  // Low-level streaming that uses the CURRENT selection; does not change it
+  const streamTypeWithCurrentSelection = useCallback((text: string, options?: { delayMs?: number }) => {
+    const delayMs = Math.max(5, Math.min(options?.delayMs ?? 20, 200))
+    if (!text) return
+    if (typingAbortRef.current) typingAbortRef.current.abort = true
+    typingAbortRef.current = { abort: false }
+
+    try { editor.focus(); editor.getRootElement()?.focus() } catch { /* ignore */ }
+
+    let idx = 0
+    const step = () => {
+      if (typingAbortRef.current?.abort) return
+      const char = text.charAt(idx)
+      editor.update(() => {
+        const root = $getRoot()
+        try {
+          let selection = $getSelection()
+          if (!$isRangeSelection(selection)) {
+            // Fallback to end if no valid selection exists
+            root.selectEnd()
+            selection = $getSelection()
+          }
+          if ($isRangeSelection(selection)) {
+            selection.insertText(char)
+          } else {
+            const p = $createParagraphNode()
+            p.append($createTextNode(char))
+            root.append(p)
+          }
+        } catch { /* ignore */ }
+      })
+      idx++
+      if (idx < text.length) setTimeout(step, delayMs)
+    }
+    setTimeout(step, delayMs)
+  }, [editor])
+
+  const typeText = useCallback((text: string, options?: { delayMs?: number }) => {
+    // Ensure caret at end then stream type
+    editor.update(() => { try { $getRoot().selectEnd() } catch { /* ignore */ } })
+    streamTypeWithCurrentSelection(text, options)
+  }, [editor, streamTypeWithCurrentSelection])
+
+  const typeTextAtPlacement = useCallback((text: string, placement: 'beginning' | 'end' | 'after-heading' | 'replace-selection', options?: { delayMs?: number }) => {
+    if (!text) return
+    // Position the selection according to placement, then stream
+    editor.update(() => {
+      const root = $getRoot()
+      const children = root.getChildren()
+      try {
+        if (placement === 'beginning') {
+          if (children.length === 0) {
+            const p = $createParagraphNode(); p.append($createTextNode('')); root.append(p); p.selectStart()
+          } else {
+            const first = children[0] as any
+            if (typeof first.selectStart === 'function') first.selectStart()
+            else if (typeof (root as any).selectStart === 'function') (root as any).selectStart()
+            else root.selectStart?.()
+          }
+        } else if (placement === 'end') {
+          root.selectEnd()
+        } else if (placement === 'after-heading') {
+          let lastHeadingIndex = -1
+          children.forEach((child, idx) => { try { if ((child as any).getType?.() === 'heading') lastHeadingIndex = idx } catch {} })
+          if (lastHeadingIndex >= 0) {
+            const p = $createParagraphNode(); p.append($createTextNode(''))
+            children[lastHeadingIndex].insertAfter(p)
+            p.selectStart()
+          } else {
+            root.selectEnd()
+          }
+        } else if (placement === 'replace-selection') {
+          // Keep current selection as is; streaming will replace via insertText
+        }
+      } catch { /* ignore */ }
+    })
+    // now stream at positioned selection
+    streamTypeWithCurrentSelection(text, options)
+  }, [editor, streamTypeWithCurrentSelection])
+
+  // Get document structure for AI context
+  const getDocumentStructure = useCallback(() => {
+    const structure = {
+      headings: [] as Array<{ level: number; text: string; position: number }>,
+      paragraphs: [] as string[],
+      totalLength: 0,
+      structure: 'rich'
+    }
+
+    editor.getEditorState().read(() => {
+      const root = $getRoot()
+      const children = root.getChildren()
+      let position = 0
+
+      children.forEach((child) => {
+        try {
+          const text = child.getTextContent()
+          if (child.getType() === 'heading') {
+            const level = (child as any).getTag()?.replace('h', '') || '1'
+            structure.headings.push({
+              level: parseInt(level),
+              text: text.trim(),
+              position
+            })
+          } else if (text.trim()) {
+            structure.paragraphs.push(text.trim())
+          }
+          position += text.length
+        } catch { /* ignore malformed nodes */ }
+      })
+      
+      structure.totalLength = position
+    })
+
+    return structure
+  }, [editor])
+
+  // Insert at beginning of document
+  const insertAtBeginning = useCallback((text: string) => {
+    editor.update(() => {
+      const root = $getRoot()
+      const p = $createParagraphNode()
+      p.append($createTextNode(text))
+      
+      const children = root.getChildren()
+      if (children.length > 0) {
+        children[0].insertBefore(p)
+      } else {
+        root.append(p)
+      }
+    })
+  }, [editor])
+
+  // Insert at end of document
+  const insertAtEnd = useCallback((text: string) => {
+    editor.update(() => {
+      const root = $getRoot()
+      const p = $createParagraphNode()
+      p.append($createTextNode(text))
+      root.append(p)
+    })
+  }, [editor])
+
+  // Insert after the last heading
+  const insertAfterLastHeading = useCallback((text: string) => {
+    editor.update(() => {
+      const root = $getRoot()
+      const children = root.getChildren()
+      let lastHeadingIndex = -1
+
+      // Find the last heading
+      children.forEach((child, index) => {
+        try {
+          if (child.getType() === 'heading') {
+            lastHeadingIndex = index
+          }
+        } catch { /* ignore */ }
+      })
+
+      const p = $createParagraphNode()
+      p.append($createTextNode(text))
+
+      if (lastHeadingIndex >= 0 && lastHeadingIndex < children.length - 1) {
+        // Insert after the last heading
+        children[lastHeadingIndex].insertAfter(p)
+      } else {
+        // No headings found, append at end
+        root.append(p)
+      }
+    })
+  }, [editor])
+
+  useEffect(() => {
+    const prev = (window.editorHandlers || {}) as any
+    window.editorHandlers = {
+      handleLink: prev.handleLink || (() => {}),
+      handleFormatting: prev.handleFormatting || (() => {}),
+      ...prev,
+      insertText,
+      replaceSelection,
+      typeText,
+      typeTextAtPlacement,
+      getDocumentStructure,
+      insertAtBeginning,
+      insertAtEnd,
+      insertAfterLastHeading,
+    }
+    return () => {
+      // do not remove other handlers
+      if (window.editorHandlers) {
+        delete window.editorHandlers.insertText
+        delete window.editorHandlers.replaceSelection
+        delete window.editorHandlers.typeText
+        delete window.editorHandlers.typeTextAtPlacement
+        delete window.editorHandlers.getDocumentStructure
+        delete window.editorHandlers.insertAtBeginning
+        delete window.editorHandlers.insertAtEnd
+        delete window.editorHandlers.insertAfterLastHeading
+      }
+    }
+  }, [insertText, replaceSelection, typeText, typeTextAtPlacement, getDocumentStructure, insertAtBeginning, insertAtEnd, insertAfterLastHeading])
 
   return null
 }
@@ -359,8 +618,8 @@ export default function NotebookEditor() {
         {summaryError && <p className="text-sm text-red-500">{summaryError}</p>}
       </div>
       {/* Editor */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex-1 overflow-y-auto relative">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden relative">
           <div className="w-full px-8 py-4">
             <div className="mx-auto" style={{ maxWidth: 'min(100%, 1200px)' }}>
               <EditorConfig
@@ -379,6 +638,7 @@ export default function NotebookEditor() {
                   </div>
                 )}
                 <LinkHandler onLinkInserted={() => setShowToolbar(false)} />
+                <EditorAgentBridge />
                 <SummaryInjector summary={summary} />
                 <LexicalToolbar
                   title={title}
