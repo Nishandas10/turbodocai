@@ -131,3 +131,36 @@ export interface UpdateDocumentData {
   summary?: string;
   summaryUpdatedAt?: Timestamp;
 }
+
+// Mind Map Types
+export interface MindMap {
+  id: string;
+  userId: string;
+  title: string;
+  prompt: string;
+  language: string;
+  mode: string; // input mode used to create
+  structure: unknown | null; // JSON structure of the mind map (TBD)
+  status: "generating" | "ready" | "error";
+  errorMessage?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  lastAccessed: Timestamp;
+}
+
+export interface CreateMindMapData {
+  title: string;
+  prompt: string;
+  language: string;
+  mode: string;
+}
+
+export interface UpdateMindMapData {
+  title?: string;
+  prompt?: string;
+  language?: string;
+  mode?: string;
+  structure?: unknown;
+  status?: MindMap["status"];
+  errorMessage?: string;
+}

@@ -19,7 +19,8 @@ import {
   Search,
   Globe,
   Camera,
-  LogOut
+  LogOut,
+  GitBranch
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
@@ -215,6 +216,13 @@ export default function Dashboard() {
               >
                 <Home className="h-5 w-5 flex-shrink-0" />
                 {!sidebarCollapsed && <span>Dashboard</span>}
+              </Link>
+              <Link 
+                href="/mindmaps" 
+                className="flex items-center space-x-3 px-3 py-2 text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors"
+              >
+                <GitBranch className="h-5 w-5 flex-shrink-0" />
+                {!sidebarCollapsed && <span>Mind Maps</span>}
               </Link>
               <button 
                 onClick={openSearchModal}

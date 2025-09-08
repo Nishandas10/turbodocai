@@ -26,6 +26,9 @@ import {
   UserAnalytics,
   CreateDocumentData,
   UpdateDocumentData,
+  MindMap,
+  CreateMindMapData,
+  UpdateMindMapData,
 } from "./types";
 
 // Collection names
@@ -34,6 +37,7 @@ const COLLECTIONS = {
   DOCUMENTS: "documents",
   PROCESSING_QUEUE: "processing_queue",
   USER_ANALYTICS: "user_analytics",
+  MINDMAPS: "mindmaps",
 } as const;
 
 // ===== USER OPERATIONS =====
@@ -474,6 +478,86 @@ export const listenToProcessingQueue = (
       ...doc.data(),
     })) as ProcessingTask[];
     callback(tasks);
+  });
+};
+
+// ===== MIND MAP OPERATIONS =====
+
+/**
+ * Create a new mind map entry (initially with status generating)
+ */
+export const createMindMap = async (
+  userId: string,
+  data: CreateMindMapData
+): Promise<string> => {
+  const now = Timestamp.now();
+  const collectionRef = collection(
+    db,
+    COLLECTIONS.MINDMAPS,
+    userId,
+    "userMindMaps"
+  );
+  const map: Omit<MindMap, "id"> = {
+    userId,
+    title: data.title,
+    prompt: data.prompt,
+    language: data.language,
+    mode: data.mode,
+    structure: null,
+    status: "generating",
+    createdAt: now,
+    updatedAt: now,
+    lastAccessed: now,
+  };
+  const ref = await addDoc(collectionRef, map);
+  return ref.id;
+};
+
+export const updateMindMap = async (
+  userId: string,
+  mindMapId: string,
+  updates: UpdateMindMapData
+): Promise<void> => {
+  const ref = doc(db, COLLECTIONS.MINDMAPS, userId, "userMindMaps", mindMapId);
+  await updateDoc(ref, { ...updates, updatedAt: Timestamp.now() });
+};
+
+export const getMindMaps = async (
+  userId: string,
+  limitCount: number = 100
+): Promise<MindMap[]> => {
+  const collectionRef = collection(
+    db,
+    COLLECTIONS.MINDMAPS,
+    userId,
+    "userMindMaps"
+  );
+  const q = query(
+    collectionRef,
+    orderBy("createdAt", "desc"),
+    limit(limitCount)
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as MindMap[];
+};
+
+export const listenToMindMaps = (
+  userId: string,
+  callback: (maps: MindMap[]) => void
+): Unsubscribe => {
+  const collectionRef = collection(
+    db,
+    COLLECTIONS.MINDMAPS,
+    userId,
+    "userMindMaps"
+  );
+  const q = query(collectionRef, orderBy("createdAt", "desc"));
+  return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+    const maps = snapshot.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    })) as MindMap[];
+    callback(maps);
   });
 };
 

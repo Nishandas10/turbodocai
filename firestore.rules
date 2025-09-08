@@ -26,5 +26,19 @@ service cloud.firestore {
       allow create: if request.auth != null && request.auth.uid == userId;
       allow read, update: if request.auth != null && request.auth.uid == userId;
     }
+
+    // Mind maps collection - nested structure: mindmaps/{userId}/userMindMaps/{mindMapId}
+    match /mindmaps/{userId}/userMindMaps/{mindMapId} {
+      // Create: authenticated user creating under their own userId and userId field matches
+      allow create: if request.auth != null
+                     && request.auth.uid == userId
+                     && request.resource.data.userId == userId;
+      // Read: owner only
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Update/Delete: owner only and stored userId matches path
+      allow update, delete: if request.auth != null
+                             && request.auth.uid == userId
+                             && resource.data.userId == userId;
+    }
   }
 }
