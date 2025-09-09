@@ -575,7 +575,7 @@ exports.generateMindMap = (0, firestore_1.onDocumentWritten)("mindmaps/{mindMapI
         if (!prompt || !userId)
             return;
         const openai = new openai_1.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const system = `You create hierarchical JSON mind map structures. Return STRICT JSON only in this shape: {"root": {"title": string, "children": [{"title": string, "children": [...] }]}}. Depth max 4, each node max 6 words. No extraneous fields.`;
+        const system = `You create hierarchical JSON mind map structures. Return STRICT JSON only in this shape: {"root": {"title": string, "children": [{"title": string, "children": [...] }]}}. Depth max 6, each node max 6 words. No extraneous fields.`;
         const userPrompt = `Prompt: ${prompt}\nLanguage: ${language || "English"}\nMode: ${mode}`;
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",

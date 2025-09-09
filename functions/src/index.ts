@@ -700,7 +700,7 @@ export const generateMindMap = onDocumentWritten(
       const { prompt, language, userId, mode } = after;
       if (!prompt || !userId) return;
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const system = `You create hierarchical JSON mind map structures. Return STRICT JSON only in this shape: {"root": {"title": string, "children": [{"title": string, "children": [...] }]}}. Depth max 4, each node max 6 words. No extraneous fields.`;
+      const system = `You create hierarchical JSON mind map structures. Return STRICT JSON only in this shape: {"root": {"title": string, "children": [{"title": string, "children": [...] }]}}. Depth max 6, each node max 6 words. No extraneous fields.`;
       const userPrompt = `Prompt: ${prompt}\nLanguage: ${
         language || "English"
       }\nMode: ${mode}`;

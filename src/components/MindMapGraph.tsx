@@ -1,114 +1,194 @@
 "use client";
 
-import React, { useMemo, useEffect } from "react";
-import ReactFlow, { Background, Controls, useNodesState, useEdgesState, NodeTypes, NodeProps, Handle, Position } from "reactflow";
+import React, { useMemo, useEffect, useState, useCallback } from "react";
+import ReactFlow, { Background, Controls, useNodesState, useEdgesState, NodeTypes, NodeProps, ReactFlowInstance, EdgeTypes, EdgeProps, BaseEdge, Handle, Position } from "reactflow";
 import type { Node, Edge } from "reactflow";
 import "reactflow/dist/style.css";
 import { hierarchy, tree } from "d3-hierarchy";
 
-interface MindMapStructureNode {
-	title: string;
-	children?: MindMapStructureNode[];
-	id?: string;
-}
-
+interface MindMapStructureNode { title: string; children?: MindMapStructureNode[]; id?: string }
 interface MindMapData { root?: MindMapStructureNode }
-interface Props {
-	structure: MindMapData | null;
-	loading?: boolean;
-	error?: string | null;
+interface Props { structure: MindMapData | null; loading?: boolean; error?: string | null }
+
+type LayoutMode = "logical" | "logical-left" | "mindmap" | "organization" | "catalog" | "timeline" | "vertical-timeline" | "fishbone";
+
+const COLOR_PALETTES: string[][] = [
+	["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#0ea5e9","#14b8a6","#f43f5e"],
+	["#1d4ed8","#9333ea","#db2777","#ea580c","#059669","#0284c7","#0d9488","#dc2626"],
+	["#334155","#2563eb","#0891b2","#16a34a","#ca8a04","#dc2626","#9333ea","#4f46e5"],
+	["#0ea5e9","#6366f1","#10b981","#f59e0b","#f472b6","#8b5cf6","#ef4444","#84cc16"],
+	["#6d28d9","#9333ea","#c026d3","#db2777","#e11d48","#f43f5e","#f59e0b","#0ea5e9"],
+];
+
+interface NodeData { label: string; color?: string; depth?: number; isRoot?: boolean }
+function tint(hex: string | undefined, alpha: number) {
+	if (!hex) return `rgba(255,255,255,${alpha})`;
+	const h = hex.replace('#', '');
+	const bigint = parseInt(h.length === 3 ? h.split('').map(c=>c+c).join('') : h, 16);
+	const r = (bigint >> 16) & 255; const g = (bigint >> 8) & 255; const b = bigint & 255;
+	return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// Custom node component for mind map nodes (kept lean for performance)
-const handleStyle: React.CSSProperties = {
-	width: 8,
-	height: 8,
-	background: 'var(--primary)',
-	border: '1px solid var(--border)',
+const MindMapNode: React.FC<NodeProps<NodeData>> = ({ data }) => {
+	const depth = data.depth ?? 0;
+	const branchColor = data.color || '#6366f1';
+	let background: string; let border: string; let color = '#fff'; let fontWeight = 400; let extraShadow = '';
+	if (data.isRoot) {
+		background = `linear-gradient(135deg,#111827,#1f2937)`;
+		border = '1px solid #1e293b'; color = '#fff'; fontWeight = 600; extraShadow = '0 4px 8px -2px rgba(0,0,0,0.35)';
+	} else if (depth === 1) {
+		background = branchColor; border = `1px solid ${branchColor}`; color = '#fff'; fontWeight = 500; extraShadow = `0 2px 6px -1px ${tint(branchColor,0.6)}`;
+	} else if (depth === 2) {
+		background = tint(branchColor, 0.18); border = `1px solid ${tint(branchColor,0.55)}`; fontWeight = 500; color = '#fff';
+	} else {
+		background = tint(branchColor, 0.10); border = `1px solid ${tint(branchColor,0.4)}`; color = '#fff';
+	}
+	const style: React.CSSProperties = {
+		padding: depth === 0 ? 12 : 6,
+		borderRadius: depth <= 1 ? 14 : 10,
+		background,
+		border,
+		fontSize: 12,
+		fontWeight,
+		minWidth: depth === 0 ? 180 : depth === 1 ? 140 : 120,
+		textAlign: 'center',
+		boxShadow: extraShadow || '0 1px 2px rgba(0,0,0,0.08)',
+		lineHeight: 1.25,
+		color,
+		backdropFilter: depth > 1 ? 'blur(4px)' : undefined,
+		WebkitBackdropFilter: depth > 1 ? 'blur(4px)' : undefined,
+		transition: 'background .25s, box-shadow .25s, border-color .25s'
+	};
+	return <div style={style}>
+		{/* invisible handles for edges */}
+		<Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+		<Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+		{data.label}
+	</div>;
 };
 
-const MindMapNode: React.FC<NodeProps<{ label: string }>> = ({ data }) => (
-	<div
-		style={{
-			padding: 8,
-			borderRadius: 12,
-			background: "var(--background)",
-			border: "1px solid var(--border)",
-			fontSize: 12,
-			minWidth: 140,
-			textAlign: "center",
-			boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
-			lineHeight: 1.3,
-			position: 'relative'
-		}}
-	>
-		<Handle type="target" position={Position.Top} style={handleStyle} />
-		{data.label}
-		<Handle type="source" position={Position.Bottom} style={handleStyle} />
-	</div>
-);
+const CurvedEdge: React.FC<EdgeProps> = ({ id, sourceX, sourceY, targetX, targetY, data }) => {
+	const dx = targetX - sourceX;
+	const dy = targetY - sourceY;
+	const dist = Math.max(Math.hypot(dx, dy), 1);
+	const curvature = 0.55;
+	const cx1 = sourceX + dx * curvature;
+	const cy1 = sourceY + dy * 0.05; // slight vertical easing
+	const cx2 = targetX - dx * curvature;
+	const cy2 = targetY - dy * 0.05;
+	const path = `M ${sourceX},${sourceY} C ${cx1},${cy1} ${cx2},${cy2} ${targetX},${targetY}`;
+	const stroke = data?.color || '#64748b';
+	return <BaseEdge id={id} path={path} style={{ stroke, strokeWidth: dist < 40 ? 1.5 : 2.5, fill: 'none', strokeLinecap: 'round', filter: 'url(#mindmapEdgeGlow)' }} />;
+};
 
-// Stable nodeTypes outside the component to avoid React Flow warning
 const nodeTypes: NodeTypes = { mindMapNode: MindMapNode };
+const edgeTypes: EdgeTypes = { curved: CurvedEdge };
 
 export const MindMapGraph: React.FC<Props> = ({ structure, loading, error }) => {
-	const { nodes: computedNodes, edges: computedEdges } = useMemo(() => {
-		if (!structure?.root) return { nodes: [] as Node[], edges: [] as Edge[] };
-		const rootData = structure.root;
+	const [layoutMode, setLayoutMode] = useState<LayoutMode>("logical");
+	const [rf, setRf] = useState<ReactFlowInstance | null>(null);
+	const [paletteIndex, setPaletteIndex] = useState(0);
+	const [showStyle, setShowStyle] = useState(false);
+
+	const normalized = useMemo(() => {
+		if (!structure?.root) return null;
 		let counter = 0;
 		const assign = (n: MindMapStructureNode): MindMapStructureNode => ({
 			...n,
 			id: n.id || `n_${counter++}`,
 			children: (n.children || []).map(assign)
 		});
-		const cloned = assign(rootData);
-		const h = hierarchy(cloned, d => d.children || []);
-		const layout = tree<MindMapStructureNode>().nodeSize([140, 160])(h);
-		const builtNodes: Node[] = layout.descendants().map(d => ({
-			id: d.data.id!,
-			position: { x: d.x, y: d.y },
-			data: { label: d.data.title },
-			type: "mindMapNode"
-		}));
-		const minX = Math.min(...builtNodes.map(n => n.position.x));
-		const minY = Math.min(...builtNodes.map(n => n.position.y));
-		builtNodes.forEach(n => { n.position.x -= minX - 80; n.position.y -= minY - 80; });
-		const builtEdges: Edge[] = layout.links().map((l, i) => ({
-			id: `e_${i}`,
-			source: (l.source.data as { id: string }).id,
-			target: (l.target.data as { id: string }).id,
-			type: "smoothstep"
-		}));
-		return { nodes: builtNodes, edges: builtEdges };
- 	}, [structure]);
+		return assign(structure.root);
+	}, [structure]);
 
-	// Initialize state with empty arrays, then update when computation changes
-	const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<Node[]>([]);
-	const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+	interface Positioned { id: string; title: string; x: number; y: number; parentId?: string; depth: number; branch?: string }
 
-	useEffect(() => {
-		setFlowNodes(computedNodes);
-		setFlowEdges(computedEdges);
-	}, [computedNodes, computedEdges, setFlowNodes, setFlowEdges]);
+	function buildLogical(root: MindMapStructureNode, mirror = false): Positioned[] {
+		const rootH = hierarchy(root, d => d.children || []);
+		const t = tree<MindMapStructureNode>().nodeSize([80, 200])(rootH);
+		const nodes: Positioned[] = t.descendants().map(d => {
+			const depthDist = d.depth * 220;
+			return { id: d.data.id!, title: d.data.title, x: mirror ? -depthDist : depthDist, y: d.x, parentId: d.parent?.data.id, depth: d.depth };
+		});
+		const minX = Math.min(...nodes.map(n => n.x)); const minY = Math.min(...nodes.map(n => n.y));
+		nodes.forEach(n => { n.x = n.x - minX + 80; n.y = n.y - minY + 40; });
+		return nodes;
+	}
+	function buildRadial(root: MindMapStructureNode): Positioned[] {
+		const size = (n: MindMapStructureNode): number => 1 + (n.children?.reduce((a, c) => a + size(c), 0) || 0);
+		const nodes: Positioned[] = []; const radiusStep = 140;
+		const place = (n: MindMapStructureNode, start: number, end: number, depth: number, parentId?: string) => {
+			const angle = (start + end) / 2; const r = depth * radiusStep;
+			nodes.push({ id: n.id!, title: n.title, x: Math.cos(angle) * r, y: Math.sin(angle) * r, parentId, depth });
+			if (!n.children?.length) return; const span = end - start; let acc = start; const tot = n.children.reduce((a,c)=>a+size(c),0);
+			n.children.forEach(c=>{ const s=size(c); const portion=span*(s/tot); place(c,acc,acc+portion,depth+1,n.id!); acc+=portion; });
+		}; place(root,0,Math.PI*2,0);
+		const minX = Math.min(...nodes.map(n => n.x)); const minY = Math.min(...nodes.map(n => n.y));
+		nodes.forEach(n=>{ n.x = n.x - minX + 60; n.y = n.y - minY + 60; }); return nodes; }
+	function buildOrganization(root: MindMapStructureNode): Positioned[] {
+		const hRoot = hierarchy(root,d=>d.children||[]); const t = tree<MindMapStructureNode>().nodeSize([160,120])(hRoot);
+		const nodes: Positioned[] = t.descendants().map(d=>({ id:d.data.id!, title:d.data.title, x:d.x, y:d.depth*140, parentId:d.parent?.data.id, depth:d.depth }));
+		const minX = Math.min(...nodes.map(n=>n.x)); nodes.forEach(n=>{ n.x = n.x - minX + 80; n.y += 40; }); return nodes; }
+	function buildCatalog(root: MindMapStructureNode): Positioned[] {
+		const nodes: Positioned[] = []; const colWidth=220; const rowGap=60; nodes.push({ id:root.id!, title:root.title, x:40, y:40, depth:0 });
+		(root.children||[]).forEach((c,i)=>{ const colX=40+i*colWidth; nodes.push({ id:c.id!, title:c.title, x:colX, y:140, parentId:root.id, depth:1 }); (c.children||[]).forEach((g,j)=>{ nodes.push({ id:g.id!, title:g.title, x:colX, y:140+100+j*rowGap, parentId:c.id, depth:2 }); }); }); return nodes; }
+	function buildTimeline(root: MindMapStructureNode, vertical=false): Positioned[] {
+		const events=root.children||[]; const nodes: Positioned[]=[{ id:root.id!, title:root.title, x:40, y:40, depth:0 }]; events.forEach((e,i)=>{ if(!vertical){ nodes.push({ id:e.id!, title:e.title, x:140+i*180, y:140+(i%2===0?-40:60), parentId:root.id, depth:1 }); } else { nodes.push({ id:e.id!, title:e.title, x:140+(i%2===0?-40:60), y:140+i*140, parentId:root.id, depth:1 }); } (e.children||[]).forEach((sub,j)=>{ if(!vertical){ nodes.push({ id:sub.id!, title:sub.title, x:140+i*180, y:140+(i%2===0?-80-j*60:120+j*60), parentId:e.id, depth:2 }); } else { nodes.push({ id:sub.id!, title:sub.title, x:140+(i%2===0?-120-j*60:140+j*60), y:140+i*140, parentId:e.id, depth:2 }); } }); }); return nodes; }
+	function buildFishbone(root: MindMapStructureNode): Positioned[] { const nodes: Positioned[]=[]; const spineY=300; nodes.push({ id:root.id!, title:root.title, x:80, y:spineY, depth:0 }); const branches=root.children||[]; let up=0,down=0; const branchSpacing=200, minorSpacing=55; branches.forEach((b,i)=>{ const upward=i%2===0; const offset=upward?-(up++*120):down++*120; const bx=80+(i+1)*branchSpacing; const by=spineY+offset; nodes.push({ id:b.id!, title:b.title, x:bx, y:by, parentId:root.id, depth:1 }); (b.children||[]).forEach((c,j)=>{ const cx=bx+140; const cy=by+(upward?-1:1)*(60+j*minorSpacing); nodes.push({ id:c.id!, title:c.title, x:cx, y:cy, parentId:b.id, depth:2 }); }); }); return nodes; }
 
-	if (error) return <div className="p-4 text-sm text-red-500">{error}</div>;
-	if (loading) return <div className="p-4 text-sm text-muted-foreground animate-pulse">Generating mind map...</div>;
-	if (!structure) return <div className="p-4 text-sm text-muted-foreground">No structure yet.</div>;
-	return (
-		<div className="w-full h-full border rounded-lg bg-card/40 backdrop-blur-sm relative">
-			<ReactFlow
-				nodes={flowNodes}
-				edges={flowEdges}
-				onNodesChange={onNodesChange}
-				onEdgesChange={onEdgesChange}
-				nodeTypes={nodeTypes}
-				fitView
-			>
-				<Background gap={24} size={1} />
-				<Controls />
-			</ReactFlow>
+	const { nodes: computedNodes, edges: computedEdges } = useMemo(()=>{ if(!normalized) return { nodes:[] as Node[], edges:[] as Edge[] }; let positioned: Positioned[]=[]; switch(layoutMode){ case"logical": positioned=buildLogical(normalized,false); break; case"logical-left": positioned=buildLogical(normalized,true); break; case"mindmap": positioned=buildRadial(normalized); break; case"organization": positioned=buildOrganization(normalized); break; case"catalog": positioned=buildCatalog(normalized); break; case"timeline": positioned=buildTimeline(normalized,false); break; case"vertical-timeline": positioned=buildTimeline(normalized,true); break; case"fishbone": positioned=buildFishbone(normalized); break; default: positioned=buildLogical(normalized,false); } const map=new Map(positioned.map(p=>[p.id,p] as const)); positioned.forEach(p=>{ if(p.depth>1){ let curr: any = p; while(curr && curr.depth>1) curr = map.get(curr.parentId!); if(curr && curr.depth===1) p.branch = curr.id; } else if(p.depth===1){ p.branch = p.id; } }); const palette = COLOR_PALETTES[paletteIndex % COLOR_PALETTES.length]; const firstLevel = positioned.filter(p=>p.depth===1); const colorMap = new Map<string,string>(); firstLevel.forEach((b,i)=>colorMap.set(b.id,palette[i%palette.length])); const nodes: Node[] = positioned.map(p=>({ id:p.id, position:{ x:p.x, y:p.y }, data:{ label:p.title, color: p.depth===1? colorMap.get(p.id): colorMap.get(p.branch||''), depth:p.depth, isRoot:p.depth===0 }, type:'mindMapNode' })); const edges: Edge[] = positioned.filter(p=>p.parentId).map((p,i)=>({ id:`e_${i}`, source:p.parentId!, target:p.id, type:'curved', data:{ color: p.depth===1? colorMap.get(p.id): colorMap.get(p.branch||'') } })); return { nodes, edges }; },[normalized, layoutMode, paletteIndex]);
+
+	const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<Node[]>([]); const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+	useEffect(()=>{ setFlowNodes(computedNodes); setFlowEdges(computedEdges); },[computedNodes, computedEdges, setFlowNodes, setFlowEdges]);
+	useEffect(()=>{ if(rf){ const t=setTimeout(()=> rf.fitView({ padding:0.2 }), 40); return ()=> clearTimeout(t);} },[rf, layoutMode, computedNodes.length]);
+	const onInit = useCallback((inst: ReactFlowInstance)=> setRf(inst), []);
+
+	if(error) return <div className="p-4 text-sm text-red-500">{error}</div>;
+	if(loading) return <div className="p-4 text-sm text-muted-foreground animate-pulse">Generating mind map...</div>;
+	if(!structure) return <div className="p-4 text-sm text-muted-foreground">No structure yet.</div>;
+
+	return <div className="w-full h-full border rounded-xl bg-gradient-to-br from-background via-background to-muted/40 relative overflow-hidden">
+		<ReactFlow onInit={onInit} nodes={flowNodes} edges={flowEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView>
+			{/* Edge glow filter */}
+			<svg style={{position:'absolute', width:0, height:0}}>
+				<defs>
+					<filter id="mindmapEdgeGlow" x="-50%" y="-50%" width="200%" height="200%">
+						<feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="blur" />
+						<feMerge>
+							<feMergeNode in="blur" />
+							<feMergeNode in="SourceGraphic" />
+						</feMerge>
+					</filter>
+				</defs>
+			</svg>
+			<Background gap={56} size={1} color="#e2e8f0" />
+			<Controls position="bottom-right" />
+		</ReactFlow>
+		<div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-background/80 backdrop-blur px-3 py-1.5 rounded-full border shadow-sm">
+			<button onClick={()=>setShowStyle(s=>!s)} className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted transition">Style</button>
+			<button onClick={()=>rf?.fitView({padding:0.2})} className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted">Fit</button>
+			<select value={layoutMode} onChange={e=>setLayoutMode(e.target.value as LayoutMode)} className="text-[11px] px-2 py-1 rounded-md border bg-transparent">
+				<option value="logical">Logical</option>
+				<option value="logical-left">Logical (Left)</option>
+				<option value="mindmap">Mind Map</option>
+				<option value="organization">Org</option>
+				<option value="catalog">Catalog</option>
+				<option value="timeline">Timeline</option>
+				<option value="vertical-timeline">Vertical Timeline</option>
+				<option value="fishbone">Fishbone</option>
+			</select>
 		</div>
-	);
+		{showStyle && <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-[520px] max-w-[92%] bg-background/95 backdrop-blur-xl rounded-2xl border shadow-xl p-5">
+			<h4 className="text-xs font-semibold mb-3 tracking-wide text-muted-foreground">Style</h4>
+			<div className="mb-4">
+				<p className="text-[11px] font-medium mb-2 uppercase text-muted-foreground">Color Palette</p>
+				<div className="grid grid-cols-5 gap-3">
+					{COLOR_PALETTES.map((p,i)=> <button key={i} onClick={()=>setPaletteIndex(i)} className={`flex gap-0.5 p-1 rounded-md border hover:shadow transition ${paletteIndex===i?'ring-2 ring-offset-2 ring-indigo-500':''}`}>{p.slice(0,6).map(c=> <span key={c} style={{background:c}} className="w-3 h-3 rounded-sm" />)}</button>)}
+				</div>
+			</div>
+			<div className="flex justify-end"><button onClick={()=>setShowStyle(false)} className="text-[11px] px-3 py-1 rounded-md border hover:bg-muted">Close</button></div>
+		</div>}
+	</div>;
 };
 
 export default MindMapGraph;
