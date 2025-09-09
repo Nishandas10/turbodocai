@@ -491,12 +491,7 @@ export const createMindMap = async (
   data: CreateMindMapData
 ): Promise<string> => {
   const now = Timestamp.now();
-  const collectionRef = collection(
-    db,
-    COLLECTIONS.MINDMAPS,
-    userId,
-    "userMindMaps"
-  );
+  const collectionRef = collection(db, COLLECTIONS.MINDMAPS);
   const map: Omit<MindMap, "id"> = {
     userId,
     title: data.title,
@@ -518,22 +513,22 @@ export const updateMindMap = async (
   mindMapId: string,
   updates: UpdateMindMapData
 ): Promise<void> => {
-  const ref = doc(db, COLLECTIONS.MINDMAPS, userId, "userMindMaps", mindMapId);
-  await updateDoc(ref, { ...updates, updatedAt: Timestamp.now() });
+  const ref = doc(db, COLLECTIONS.MINDMAPS, mindMapId);
+  await updateDoc(ref, {
+    ...updates,
+    updatedAt: Timestamp.now(),
+    lastAccessed: Timestamp.now(),
+  });
 };
 
 export const getMindMaps = async (
   userId: string,
   limitCount: number = 100
 ): Promise<MindMap[]> => {
-  const collectionRef = collection(
-    db,
-    COLLECTIONS.MINDMAPS,
-    userId,
-    "userMindMaps"
-  );
+  const collectionRef = collection(db, COLLECTIONS.MINDMAPS);
   const q = query(
     collectionRef,
+    where("userId", "==", userId),
     orderBy("createdAt", "desc"),
     limit(limitCount)
   );
@@ -543,22 +538,58 @@ export const getMindMaps = async (
 
 export const listenToMindMaps = (
   userId: string,
-  callback: (maps: MindMap[]) => void
+  callback: (maps: MindMap[]) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe => {
-  const collectionRef = collection(
-    db,
-    COLLECTIONS.MINDMAPS,
-    userId,
-    "userMindMaps"
+  const collectionRef = collection(db, COLLECTIONS.MINDMAPS);
+  const q = query(
+    collectionRef,
+    where("userId", "==", userId),
+    orderBy("createdAt", "desc")
   );
-  const q = query(collectionRef, orderBy("createdAt", "desc"));
-  return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
-    const maps = snapshot.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    })) as MindMap[];
-    callback(maps);
-  });
+  // NOTE: Requires composite index on (userId ASC, createdAt DESC) in firestore.indexes.json
+  return onSnapshot(
+    q,
+    (snapshot: QuerySnapshot<DocumentData>) => {
+      const maps = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as MindMap[];
+      callback(maps);
+    },
+    (err) => {
+      if (onError) onError(err);
+      else console.error("listenToMindMaps error", err);
+    }
+  );
+};
+
+export const getMindMap = async (
+  mindMapId: string
+): Promise<MindMap | null> => {
+  const ref = doc(db, COLLECTIONS.MINDMAPS, mindMapId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as MindMap;
+};
+
+export const listenToMindMap = (
+  mindMapId: string,
+  callback: (map: MindMap | null) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe => {
+  const ref = doc(db, COLLECTIONS.MINDMAPS, mindMapId);
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (!snap.exists()) return callback(null);
+      callback({ id: snap.id, ...snap.data() } as MindMap);
+    },
+    (err) => {
+      if (onError) onError(err);
+      else console.error("listenToMindMap error", err);
+    }
+  );
 };
 
 // ===== BATCH OPERATIONS =====

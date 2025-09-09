@@ -27,18 +27,21 @@ service cloud.firestore {
       allow read, update: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Mind maps collection - nested structure: mindmaps/{userId}/userMindMaps/{mindMapId}
+    // Mind maps (legacy nested path - deprecated)
     match /mindmaps/{userId}/userMindMaps/{mindMapId} {
-      // Create: authenticated user creating under their own userId and userId field matches
-      allow create: if request.auth != null
-                     && request.auth.uid == userId
-                     && request.resource.data.userId == userId;
-      // Read: owner only
-      allow read: if request.auth != null && request.auth.uid == userId;
-      // Update/Delete: owner only and stored userId matches path
+      allow read, write: if false; // disallow new writes after migration
+    }
+
+    // Mind maps top-level collection: /mindmaps/{mindMapId}
+    match /mindmaps/{mindMapId} {
+      // Create: authenticated user only, must set userId field = auth.uid
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      // Read: owner only for now (could extend to public maps later)
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      // Update/Delete: owner only and cannot change ownership
       allow update, delete: if request.auth != null
-                             && request.auth.uid == userId
-                             && resource.data.userId == userId;
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
     }
   }
 }

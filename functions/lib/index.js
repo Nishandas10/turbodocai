@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.processDocument = void 0;
+exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.processDocument = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -16,9 +16,9 @@ const app = (0, app_1.initializeApp)();
 // Set global options
 (0, v2_1.setGlobalOptions)({
     maxInstances: 5,
-    concurrency: 1,
+    concurrency: 1, // Ensure only one execution per instance to cap memory usage
     region: "us-central1",
-    memory: "4GiB",
+    memory: "4GiB", // Maximum memory allocation
     timeoutSeconds: 540,
 });
 const db = (0, firestore_2.getFirestore)(app);
@@ -556,6 +556,64 @@ exports.generatePodcast = (0, https_1.onCall)({
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",
         };
+    }
+});
+// Mind map generation trigger: when a new mind map doc is created with status 'generating'
+exports.generateMindMap = (0, firestore_1.onDocumentWritten)("mindmaps/{mindMapId}", async (event) => {
+    var _a, _b, _c, _d;
+    try {
+        const after = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after) === null || _b === void 0 ? void 0 : _b.data();
+        const before = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.before) === null || _d === void 0 ? void 0 : _d.data();
+        const mindMapId = event.params.mindMapId;
+        if (!after)
+            return; // deleted
+        if (before && before.structure && before.status === "ready")
+            return; // already processed
+        if (after.status !== "generating")
+            return; // only process generating state
+        const { prompt, language, userId, mode } = after;
+        if (!prompt || !userId)
+            return;
+        const openai = new openai_1.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const system = `You create hierarchical JSON mind map structures. Return STRICT JSON only in this shape: {"root": {"title": string, "children": [{"title": string, "children": [...] }]}}. Depth max 4, each node max 6 words. No extraneous fields.`;
+        const userPrompt = `Prompt: ${prompt}\nLanguage: ${language || "English"}\nMode: ${mode}`;
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            temperature: 0.7,
+            messages: [
+                { role: "system", content: system },
+                { role: "user", content: userPrompt },
+            ],
+            max_tokens: 800,
+            response_format: { type: "json_object" },
+        });
+        let structure = null;
+        try {
+            const raw = completion.choices[0].message.content || "{}";
+            structure = JSON.parse(raw);
+        }
+        catch (e) {
+            structure = {
+                root: { title: after.title || "Mind Map", children: [] },
+            };
+        }
+        await db.collection("mindmaps").doc(mindMapId).set({
+            structure,
+            status: "ready",
+            updatedAt: new Date(),
+        }, { merge: true });
+    }
+    catch (err) {
+        firebase_functions_1.logger.error("Mind map generation failed", err);
+        const mindMapId = event.params.mindMapId;
+        await db
+            .collection("mindmaps")
+            .doc(mindMapId)
+            .set({
+            status: "error",
+            errorMessage: err instanceof Error ? err.message : "Unknown error",
+            updatedAt: new Date(),
+        }, { merge: true });
     }
 });
 //# sourceMappingURL=index.js.map

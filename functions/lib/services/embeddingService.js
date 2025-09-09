@@ -49,7 +49,7 @@ class EmbeddingService {
     async embedBatch(chunks) {
         try {
             const response = await this.openai.embeddings.create({
-                model: "text-embedding-3-small",
+                model: "text-embedding-3-small", // Use consistent model
                 input: chunks,
                 encoding_format: "float",
                 dimensions: 1024, // Match Pinecone index dimensions

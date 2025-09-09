@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, onAuthStateChanged, signInWithPopup, signInWithEmailLink, sendSignInLinkToEmail } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
@@ -22,27 +22,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   // Function to create or get user profile with retry logic
-  const ensureUserProfile = async (firebaseUser: User, retryCount = 0): Promise<void> => {
+  const ensureUserProfile = useCallback(async (firebaseUser: User, retryCount = 0): Promise<void> => {
     try {
+      // Small delay on first attempt to ensure auth token is fully ready (avoids occasional permission-denied)
+      if (retryCount === 0) {
+        await new Promise(r => setTimeout(r, 150));
+      }
       console.log('Ensuring user profile for:', firebaseUser.uid);
-      console.log('Using Firestore database: turbonotesai');
-      
-      // Check if user profile already exists
       const existingProfile = await getUserProfile(firebaseUser.uid);
-      
       if (!existingProfile) {
         console.log('Creating new user profile...');
-        
-        // Create new user profile
         await createUserProfile(firebaseUser.uid, {
           email: firebaseUser.email || '',
           displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
           photoURL: firebaseUser.photoURL || '',
         });
-        
         console.log('User profile created successfully');
-        
-        // Initialize user analytics
         try {
           await initializeUserAnalytics(firebaseUser.uid);
           console.log('User analytics initialized successfully');
@@ -53,24 +48,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('User profile already exists');
       }
     } catch (error) {
-      console.error('Error ensuring user profile:', error);
-      console.error('Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        code: error instanceof Error && 'code' in error ? error.code : 'Unknown code',
-        userId: firebaseUser.uid
-      });
-      
-      // Retry logic for network issues
+      const code = (error as { code?: string })?.code;
+      if (code === 'permission-denied') {
+        // Token propagation race; retry a couple of times with backoff
+        if (retryCount < 2) {
+          const delay = 250 * (retryCount + 1);
+          console.warn(`Permission denied fetching profile; retrying in ${delay}ms (attempt ${retryCount + 1})`);
+          await new Promise(r => setTimeout(r, delay));
+          return ensureUserProfile(firebaseUser, retryCount + 1);
+        }
+        console.warn('Permission denied persists for user profile; proceeding without blocking.');
+        return; // swallow
+      }
       if (retryCount < 3 && error instanceof Error && error.message?.includes('offline')) {
-        console.log(`Retrying profile creation (attempt ${retryCount + 1}/3)...`);
-        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
+        const delay = 500 * (retryCount + 1);
+        console.log(`Offline error; retrying profile fetch in ${delay}ms (attempt ${retryCount + 1})`);
+        await new Promise(r => setTimeout(r, delay));
         return ensureUserProfile(firebaseUser, retryCount + 1);
       }
-      
-      // If all retries failed, log the error but don't block the user
-      console.warn('Profile creation failed after retries, user can still proceed');
+      console.warn('Profile creation/fetch failed; non-blocking', error);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -93,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [ensureUserProfile]);
 
   const signInWithGoogle = async () => {
     try {

@@ -7,7 +7,8 @@ import { useAuth } from "@/contexts/AuthContext"
 import Link from "next/link"
 import { PenTool, ChevronLeft, Home, Settings, Star, LogOut, Sun, Moon, Monitor, Search, GitBranch } from "lucide-react"
 import { useTheme } from "@/contexts/ThemeContext"
-import { listenToMindMaps, createMindMap, updateMindMap } from "@/lib/firestore"
+import { listenToMindMaps, createMindMap } from "@/lib/firestore"
+import { useRouter } from "next/navigation"
 import type { MindMap } from "@/lib/types"
 
 type InputMode = { key: string; label: string; tooltip?: string }
@@ -51,13 +52,31 @@ export default function MindmapsPage() {
 		const { user, signOut } = useAuth()
 		const { theme, setTheme } = useTheme()
 	const [mindmaps, setMindmaps] = useState<MindMap[]>([])
+	const router = useRouter()
 		const [searchModalOpen, setSearchModalOpen] = useState(false)
 		const [searchQuery, setSearchQuery] = useState("")
 
 	useEffect(() => {
 		if (!user?.uid) return
-		const unsub = listenToMindMaps(user.uid, (maps) => setMindmaps(maps))
-		return () => unsub()
+		let cancelled = false
+		const unsub = listenToMindMaps(
+			user.uid,
+			(maps) => { if (!cancelled) setMindmaps(maps) },
+			(err) => {
+				const code = (err as { code?: string })?.code
+				if (code === 'permission-denied') {
+					console.warn('Permission denied on mind maps listener; will retry shortly')
+					setTimeout(() => {
+						if (!cancelled) {
+							listenToMindMaps(user.uid, (maps) => setMindmaps(maps))
+						}
+					}, 500)
+				} else {
+					console.error('listenToMindMaps error', err)
+				}
+			}
+		)
+		return () => { cancelled = true; unsub() }
 	}, [user?.uid])
 
 	function handleExample(p: string) {
@@ -80,12 +99,8 @@ export default function MindmapsPage() {
 				language,
 				mode,
 			})
-			setTimeout(async () => {
-				await updateMindMap(user.uid!, mindMapId, {
-					status: "ready",
-					structure: { root: { title, children: [] } },
-				})
-			}, 1200)
+			// Navigate to the mind map detail page where real-time generation will appear
+			router.push(`/mindmaps/${mindMapId}`)
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "message" in e) {
 				setError(String((e as { message?: unknown }).message))
@@ -159,7 +174,7 @@ export default function MindmapsPage() {
 								<button
 									key={m.id}
 									className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-sidebar-accent group"
-									onClick={() => setPrompt(m.prompt)}
+									onClick={() => router.push(`/mindmaps/${m.id}`)}
 									title={m.title}
 								>
 									<span className="inline-flex items-center justify-center size-6 rounded-md bg-gradient-to-br from-fuchsia-500 to-indigo-500 text-[10px] font-bold text-white">AI</span>

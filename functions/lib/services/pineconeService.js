@@ -26,13 +26,13 @@ class PineconeService {
             const index = this.pinecone.index(this.indexName);
             // Prepare vectors for upsert
             const vectors = chunks.map((chunk, i) => ({
-                id: `${documentId}_${startIndex + i}`,
+                id: `${documentId}_${startIndex + i}`, // Use startIndex for unique IDs
                 values: embeddings[i],
                 metadata: {
                     userId,
                     documentId,
-                    chunkIndex: startIndex + i,
-                    chunk: chunk.substring(0, 40000),
+                    chunkIndex: startIndex + i, // Use global chunk index
+                    chunk: chunk.substring(0, 40000), // Pinecone metadata limit
                     title: metadata.title,
                     fileName: metadata.fileName,
                     timestamp: Date.now(),

@@ -51,7 +51,7 @@ class QueryService {
                     documentId: chunk.documentId,
                     title: chunk.title,
                     fileName: chunk.fileName,
-                    chunk: chunk.chunk.substring(0, 200) + "...",
+                    chunk: chunk.chunk.substring(0, 200) + "...", // Truncate for display
                     score: chunk.score,
                 })),
                 confidence,
