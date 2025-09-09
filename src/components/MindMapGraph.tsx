@@ -20,7 +20,19 @@ const COLOR_PALETTES: string[][] = [
 	["#6d28d9","#9333ea","#c026d3","#db2777","#e11d48","#f43f5e","#f59e0b","#0ea5e9"],
 ];
 
-interface NodeData { label: string; color?: string; depth?: number; isRoot?: boolean }
+interface NodeData {
+	id: string;
+	label: string;
+	color?: string;
+	depth?: number;
+	isRoot?: boolean;
+	// interactive callbacks
+	onAddChild?: (parentId: string) => void;
+	onDelete?: (id: string) => void;
+	onRename?: (id: string, title: string) => void;
+	editingId?: string | null;
+	setEditingId?: (id: string | null) => void;
+}
 function tint(hex: string | undefined, alpha: number) {
 	if (!hex) return `rgba(255,255,255,${alpha})`;
 	const h = hex.replace('#', '');
@@ -29,7 +41,7 @@ function tint(hex: string | undefined, alpha: number) {
 	return `rgba(${r},${g},${b},${alpha})`;
 }
 
-const MindMapNode: React.FC<NodeProps<NodeData>> = ({ data }) => {
+const MindMapNode: React.FC<NodeProps<NodeData>> = ({ id, data, selected }) => {
 	const depth = data.depth ?? 0;
 	const branchColor = data.color || '#6366f1';
 	let background: string; let border: string; let color = '#fff'; let fontWeight = 400; let extraShadow = '';
@@ -43,7 +55,9 @@ const MindMapNode: React.FC<NodeProps<NodeData>> = ({ data }) => {
 	} else {
 		background = tint(branchColor, 0.10); border = `1px solid ${tint(branchColor,0.4)}`; color = '#fff';
 	}
+	const editing = data.editingId === id;
 	const style: React.CSSProperties = {
+		position: 'relative',
 		padding: depth === 0 ? 12 : 6,
 		borderRadius: depth <= 1 ? 14 : 10,
 		background,
@@ -59,12 +73,64 @@ const MindMapNode: React.FC<NodeProps<NodeData>> = ({ data }) => {
 		WebkitBackdropFilter: depth > 1 ? 'blur(4px)' : undefined,
 		transition: 'background .25s, box-shadow .25s, border-color .25s'
 	};
+
 	return <div style={style}>
-		{/* invisible handles for edges */}
 		<Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
 		<Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
-		{data.label}
+		{editing ? (
+			<input
+				autoFocus
+				defaultValue={data.label}
+				style={{
+					background: 'rgba(255,255,255,0.15)',
+					outline: 'none',
+					border: '1px solid rgba(255,255,255,0.25)',
+					borderRadius: 6,
+					fontSize: 12,
+					padding: '4px 6px',
+					width: '100%',
+					color: '#fff'
+				}}
+				onBlur={(e)=>{ data.onRename?.(id, e.target.value.trim()||'Untitled'); data.setEditingId?.(null); }}
+				onKeyDown={(e)=>{
+					if(e.key==='Enter'){ (e.target as HTMLInputElement).blur(); }
+					if(e.key==='Escape'){ data.setEditingId?.(null); }
+				}}
+			/>
+		): data.label}
+		{selected && !editing && (
+			<div style={{
+				position:'absolute',
+				top:-34,
+				left:'50%',
+				transform:'translateX(-50%)',
+				background:'rgba(255,255,255,0.9)',
+				backdropFilter:'blur(6px)',
+				border:'1px solid #cbd5e1',
+				borderRadius:8,
+				padding:'4px 6px',
+				fontSize:11,
+				color:'#334155',
+				display:'flex',
+				gap:6,
+				boxShadow:'0 4px 10px -2px rgba(0,0,0,0.15)'
+			}}>
+				<button title="Add child" style={btnStyle} onClick={()=> data.onAddChild?.(id)}>＋</button>
+				<button title="Rename" style={btnStyle} onClick={()=> data.setEditingId?.(id)}>✏️</button>
+				{!data.isRoot && <button title="Delete" style={btnStyle} onClick={()=> data.onDelete?.(id)}>🗑️</button>}
+			</div>
+		)}
 	</div>;
+};
+
+// small inline button style reused
+const btnStyle: React.CSSProperties = {
+  background:'transparent',
+  border:'none',
+  padding:'2px 4px',
+  cursor:'pointer',
+  fontSize:12,
+  lineHeight:1,
 };
 
 const CurvedEdge: React.FC<EdgeProps> = ({ id, sourceX, sourceY, targetX, targetY, data }) => {
@@ -89,6 +155,10 @@ export const MindMapGraph: React.FC<Props> = ({ structure, loading, error }) => 
 	const [rf, setRf] = useState<ReactFlowInstance | null>(null);
 	const [paletteIndex, setPaletteIndex] = useState(0);
 	const [showStyle, setShowStyle] = useState(false);
+	const [editingId, setEditingId] = useState<string | null>(null);
+
+	// editable tree state
+	const [rootTree, setRootTree] = useState<MindMapStructureNode | null>(null);
 
 	const normalized = useMemo(() => {
 		if (!structure?.root) return null;
@@ -100,6 +170,31 @@ export const MindMapGraph: React.FC<Props> = ({ structure, loading, error }) => 
 		});
 		return assign(structure.root);
 	}, [structure]);
+
+	useEffect(()=>{ if(normalized) setRootTree(normalized); },[normalized]);
+
+	// helper immutable tree operations
+	const updateTree = useCallback((fn:(root: MindMapStructureNode)=>MindMapStructureNode)=>{
+		setRootTree(r=> r ? fn(r) : r);
+	},[]);
+
+	const addChild = useCallback((parentId: string)=>{
+		updateTree(root=>{
+			const clone = structuredClone(root) as MindMapStructureNode;
+			let counter = 0; // compute unique id suffix by counting existing nodes
+			const collect=(n:MindMapStructureNode)=>{ counter++; (n.children||[]).forEach(collect); }; collect(clone);
+			const newNode: MindMapStructureNode = { id:`n_${Date.now().toString(36)}_${counter}`, title:'New Node', children:[] };
+			const walk=(n:MindMapStructureNode)=>{ if(n.id===parentId){ n.children = [...(n.children||[]), newNode]; return; } (n.children||[]).forEach(walk); }; walk(clone); return clone;
+		});
+	},[updateTree]);
+
+	const renameNode = useCallback((id:string, title:string)=>{
+		updateTree(root=>{ const clone=structuredClone(root) as MindMapStructureNode; const walk=(n:MindMapStructureNode)=>{ if(n.id===id) n.title=title; (n.children||[]).forEach(walk); }; walk(clone); return clone; });
+	},[updateTree]);
+
+	const deleteNode = useCallback((id:string)=>{
+		updateTree(root=>{ if(root.id===id) return root; const clone=structuredClone(root) as MindMapStructureNode; const prune=(n:MindMapStructureNode)=>{ if(!n.children) return; n.children = n.children.filter(c=>c.id!==id); n.children.forEach(prune); }; prune(clone); return clone; });
+	},[updateTree]);
 
 	interface Positioned { id: string; title: string; x: number; y: number; parentId?: string; depth: number; branch?: string }
 
@@ -136,10 +231,11 @@ export const MindMapGraph: React.FC<Props> = ({ structure, loading, error }) => 
 		const events=root.children||[]; const nodes: Positioned[]=[{ id:root.id!, title:root.title, x:40, y:40, depth:0 }]; events.forEach((e,i)=>{ if(!vertical){ nodes.push({ id:e.id!, title:e.title, x:140+i*180, y:140+(i%2===0?-40:60), parentId:root.id, depth:1 }); } else { nodes.push({ id:e.id!, title:e.title, x:140+(i%2===0?-40:60), y:140+i*140, parentId:root.id, depth:1 }); } (e.children||[]).forEach((sub,j)=>{ if(!vertical){ nodes.push({ id:sub.id!, title:sub.title, x:140+i*180, y:140+(i%2===0?-80-j*60:120+j*60), parentId:e.id, depth:2 }); } else { nodes.push({ id:sub.id!, title:sub.title, x:140+(i%2===0?-120-j*60:140+j*60), y:140+i*140, parentId:e.id, depth:2 }); } }); }); return nodes; }
 	function buildFishbone(root: MindMapStructureNode): Positioned[] { const nodes: Positioned[]=[]; const spineY=300; nodes.push({ id:root.id!, title:root.title, x:80, y:spineY, depth:0 }); const branches=root.children||[]; let up=0,down=0; const branchSpacing=200, minorSpacing=55; branches.forEach((b,i)=>{ const upward=i%2===0; const offset=upward?-(up++*120):down++*120; const bx=80+(i+1)*branchSpacing; const by=spineY+offset; nodes.push({ id:b.id!, title:b.title, x:bx, y:by, parentId:root.id, depth:1 }); (b.children||[]).forEach((c,j)=>{ const cx=bx+140; const cy=by+(upward?-1:1)*(60+j*minorSpacing); nodes.push({ id:c.id!, title:c.title, x:cx, y:cy, parentId:b.id, depth:2 }); }); }); return nodes; }
 
-	const { nodes: computedNodes, edges: computedEdges } = useMemo(()=>{ if(!normalized) return { nodes:[] as Node[], edges:[] as Edge[] }; let positioned: Positioned[]=[]; switch(layoutMode){ case"logical": positioned=buildLogical(normalized,false); break; case"logical-left": positioned=buildLogical(normalized,true); break; case"mindmap": positioned=buildRadial(normalized); break; case"organization": positioned=buildOrganization(normalized); break; case"catalog": positioned=buildCatalog(normalized); break; case"timeline": positioned=buildTimeline(normalized,false); break; case"vertical-timeline": positioned=buildTimeline(normalized,true); break; case"fishbone": positioned=buildFishbone(normalized); break; default: positioned=buildLogical(normalized,false); } const map=new Map(positioned.map(p=>[p.id,p] as const)); positioned.forEach(p=>{ if(p.depth>1){ let curr: any = p; while(curr && curr.depth>1) curr = map.get(curr.parentId!); if(curr && curr.depth===1) p.branch = curr.id; } else if(p.depth===1){ p.branch = p.id; } }); const palette = COLOR_PALETTES[paletteIndex % COLOR_PALETTES.length]; const firstLevel = positioned.filter(p=>p.depth===1); const colorMap = new Map<string,string>(); firstLevel.forEach((b,i)=>colorMap.set(b.id,palette[i%palette.length])); const nodes: Node[] = positioned.map(p=>({ id:p.id, position:{ x:p.x, y:p.y }, data:{ label:p.title, color: p.depth===1? colorMap.get(p.id): colorMap.get(p.branch||''), depth:p.depth, isRoot:p.depth===0 }, type:'mindMapNode' })); const edges: Edge[] = positioned.filter(p=>p.parentId).map((p,i)=>({ id:`e_${i}`, source:p.parentId!, target:p.id, type:'curved', data:{ color: p.depth===1? colorMap.get(p.id): colorMap.get(p.branch||'') } })); return { nodes, edges }; },[normalized, layoutMode, paletteIndex]);
+	const { nodes: computedNodes, edges: computedEdges } = useMemo(()=>{ if(!rootTree) return { nodes:[] as Node[], edges:[] as Edge[] }; let positioned: Positioned[]=[]; switch(layoutMode){ case"logical": positioned=buildLogical(rootTree,false); break; case"logical-left": positioned=buildLogical(rootTree,true); break; case"mindmap": positioned=buildRadial(rootTree); break; case"organization": positioned=buildOrganization(rootTree); break; case"catalog": positioned=buildCatalog(rootTree); break; case"timeline": positioned=buildTimeline(rootTree,false); break; case"vertical-timeline": positioned=buildTimeline(rootTree,true); break; case"fishbone": positioned=buildFishbone(rootTree); break; default: positioned=buildLogical(rootTree,false); } const map=new Map(positioned.map(p=>[p.id,p] as const)); positioned.forEach(p=>{ if(p.depth>1){ let curr: any = p; while(curr && curr.depth>1) curr = map.get(curr.parentId!); if(curr && curr.depth===1) p.branch = curr.id; } else if(p.depth===1){ p.branch = p.id; } }); const palette = COLOR_PALETTES[paletteIndex % COLOR_PALETTES.length]; const firstLevel = positioned.filter(p=>p.depth===1); const colorMap = new Map<string,string>(); firstLevel.forEach((b,i)=>colorMap.set(b.id,palette[i%palette.length])); const nodes: Node[] = positioned.map(p=>({ id:p.id, position:{ x:p.x, y:p.y }, data:{ id:p.id, label:p.title, color: p.depth===1? colorMap.get(p.id): colorMap.get(p.branch||''), depth:p.depth, isRoot:p.depth===0, onAddChild:addChild, onDelete:deleteNode, onRename:renameNode, editingId, setEditingId }, type:'mindMapNode' })); const edges: Edge[] = positioned.filter(p=>p.parentId).map((p,i)=>({ id:`e_${i}`, source:p.parentId!, target:p.id, type:'curved', data:{ color: p.depth===1? colorMap.get(p.id): colorMap.get(p.branch||'') } })); return { nodes, edges }; },[rootTree, layoutMode, paletteIndex, addChild, deleteNode, renameNode, editingId]);
 
 	const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<Node[]>([]); const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
-	useEffect(()=>{ setFlowNodes(computedNodes); setFlowEdges(computedEdges); },[computedNodes, computedEdges, setFlowNodes, setFlowEdges]);
+	// sync when layout or tree changes
+	useEffect(()=>{ setFlowNodes(computedNodes); setFlowEdges(computedEdges); },[computedNodes, computedEdges]);
 	useEffect(()=>{ if(rf){ const t=setTimeout(()=> rf.fitView({ padding:0.2 }), 40); return ()=> clearTimeout(t);} },[rf, layoutMode, computedNodes.length]);
 	const onInit = useCallback((inst: ReactFlowInstance)=> setRf(inst), []);
 
