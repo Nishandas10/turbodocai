@@ -6,14 +6,15 @@ import {
   FileText,
   Mic,
   Play,
-  FolderPlus,
-  MoreVertical,
   ArrowRight,
   Search,
   Globe,
-  Camera
+  Camera,
+  Paperclip,
+  AtSign,
+  ChevronDown,
+  AudioLines
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import CameraModal from "../components/CameraModal"
@@ -25,6 +26,7 @@ import DashboardSidebar from "@/components/DashboardSidebar"
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const username = (user?.displayName?.split(' ')[0]) || (user?.email?.split('@')[0]) || 'User'
   const [searchModalOpen, setSearchModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Array<{
@@ -33,6 +35,8 @@ export default function Dashboard() {
     type: 'audio' | 'document'
     lastOpened: string
   }>>([])
+  const [prompt, setPrompt] = useState('')
+  const [language, setLanguage] = useState<'en' | 'as'>('en')
   const [cameraModalOpen, setCameraModalOpen] = useState(false)
   const [audioModalOpen, setAudioModalOpen] = useState(false)
   const [documentUploadModalOpen, setDocumentUploadModalOpen] = useState(false)
@@ -111,6 +115,14 @@ export default function Dashboard() {
 
   const closeWebsiteLinkModal = () => {
     setWebsiteLinkModalOpen(false)
+  }
+
+  const handleSendPrompt = () => {
+    if (!prompt.trim()) return
+    // Placeholder action – wire this to your chat/assistant route later
+    console.log('Prompt sent:', { prompt, language })
+    alert(`Prompt submitted in ${language === 'en' ? 'English' : 'Assamese'}: \n\n${prompt}`)
+    setPrompt('')
   }
 
   const createNewNote = async () => {
@@ -269,88 +281,91 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Notes List Section */}
-          <div>
-            {/* Notes Header */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex space-x-1 bg-muted rounded-lg p-1">
-                <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium">
-                  My Notes
-                </button>
-                <button className="px-4 py-2 text-muted-foreground hover:text-foreground rounded-md text-sm">
-                  Shared with Me
+          {/* Prompt Bar Section */}
+          <div className="max-w-3xl mx-auto">
+            {/* Prompt Input */}
+            <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+              {/* Top row: input + Voice button */}
+              <div className="flex items-center gap-3 px-4 pt-3">
+                <input
+                  className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
+                  placeholder={language === 'en' ? `Greetings ${username}` : `নমস্কাৰ ${username}`}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSendPrompt() }}
+                />
+
+                <button
+                  type="button"
+                  className="flex items-center gap-2 rounded-full px-4 py-2 bg-foreground text-background hover:opacity-90"
+                  title="Start voice input"
+                >
+                  <AudioLines className="h-4 w-4" />
+                  <span className="text-sm font-medium">Voice</span>
                 </button>
               </div>
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                <FolderPlus className="h-4 w-4 mr-2" />
-                Create Folder
-              </Button>
+
+              {/* Bottom row: model, add context, language toggle, icons */}
+              <div className="flex items-center justify-between px-4 pb-3 mt-2">
+                <div className="flex items-center gap-3">
+                  <button className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+                    {/* Model name placeholder */}
+                    <span className="hidden sm:inline">Assistant</span>
+                    <span className="sm:hidden">Model</span>
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+
+                  <button className="flex items-center gap-2 text-sm rounded-full border border-border px-3 py-1 text-muted-foreground hover:text-foreground">
+                    <AtSign className="h-4 w-4" />
+                    <span>Add Context</span>
+                  </button>
+
+                  {/* Small language toggle */}
+                  <div className="flex items-center gap-1 border border-border rounded-full p-1">
+                    <button
+                      className={`px-2 py-0.5 text-xs rounded-full ${language === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => setLanguage('en')}
+                    >
+                      EN
+                    </button>
+                    <button
+                      className={`px-2 py-0.5 text-xs rounded-full ${language === 'as' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => setLanguage('as')}
+                      title="Assamese"
+                    >
+                      AS
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 text-muted-foreground">
+                  <button className="hover:text-foreground" title="Camera">
+                    <Camera className="h-5 w-5" />
+                  </button>
+                  <button className="hover:text-foreground" title="Attach file">
+                    <Paperclip className="h-5 w-5" />
+                  </button>
+                  <button className="hover:text-foreground" title="Voice input">
+                    <Mic className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
             </div>
-
-            {/* Notes List */}
-            <div className="space-y-3">
-              {/* Note 1 */}
-              <div className="bg-card rounded-xl p-4 border border-border hover:border-blue-500 transition-colors cursor-pointer group shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                      <Mic className="h-5 w-5 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-card-foreground font-medium">Icelandic: What Is It?</h3>
-                      <p className="text-muted-foreground text-sm">Last opened less than a minute ago</p>
-                    </div>
-                  </div>
-                  <MoreVertical className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
-                </div>
-              </div>
-
-              {/* Note 2 */}
-              <div className="bg-card rounded-xl p-4 border border-border hover:border-blue-500 transition-colors cursor-pointer group shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                      <FileText className="h-5 w-5 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-card-foreground font-medium">Notex</h3>
-                      <p className="text-muted-foreground text-sm">Last opened less than a minute ago</p>
-                    </div>
-                  </div>
-                  <MoreVertical className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
-                </div>
-              </div>
-
-              {/* Note 3 */}
-              <div className="bg-card rounded-xl p-4 border border-border hover:border-blue-500 transition-colors cursor-pointer group shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                      <span className="text-white font-bold text-sm">DOC</span>
-                    </div>
-                    <div>
-                      <h3 className="text-card-foreground font-medium">Metabolomics Technologies and Identification Methods Overview</h3>
-                      <p className="text-muted-foreground text-sm">Last opened 1 day ago</p>
-                    </div>
-                  </div>
-                  <MoreVertical className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
-                </div>
-              </div>
-
-              {/* Upgrade Note */}
-              <div className="bg-card rounded-xl p-4 border border-border hover:border-blue-500 transition-colors cursor-pointer group shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                      <span className="text-white font-bold text-sm">DOC</span>
-                    </div>
-                    <div>
-                      <h3 className="text-card-foreground font-medium">Upgrade plan to access notes!</h3>
-                      <p className="text-muted-foreground text-sm">⭐ Upgrade plan to access notes!</p>
-                    </div>
-                  </div>
-                  <MoreVertical className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
-                </div>
+            {/* Big language toggle */}
+            <div className="flex justify-center mt-4">
+              <div className="flex bg-muted rounded-full p-1">
+                <button
+                  onClick={() => setLanguage('en')}
+                  className={`px-5 py-2 rounded-full text-sm ${language === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                >
+                  English
+                </button>
+                <button
+                  onClick={() => setLanguage('as')}
+                  className={`px-5 py-2 rounded-full text-sm ${language === 'as' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                >
+                  অসমীয়া
+                </button>
               </div>
             </div>
           </div>
