@@ -2,29 +2,18 @@
 
 import { useState } from "react"
 import { 
-  ChevronLeft, 
-  PenTool, 
-  Home, 
-  Settings, 
-  Star, 
-  FileText, 
-  Mic, 
-  Play, 
-  FolderPlus, 
+  ChevronLeft,
+  FileText,
+  Mic,
+  Play,
+  FolderPlus,
   MoreVertical,
   ArrowRight,
-  Sun,
-  Moon,
-  Monitor,
   Search,
   Globe,
-  Camera,
-  LogOut,
-  GitBranch
+  Camera
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import Link from "next/link"
-import { useTheme } from "@/contexts/ThemeContext"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import CameraModal from "../components/CameraModal"
@@ -32,11 +21,10 @@ import AudioModal from "../components/AudioModal"
 import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
+import DashboardSidebar from "@/components/DashboardSidebar"
 
 export default function Dashboard() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const { theme, setTheme } = useTheme()
-  const { user, signOut } = useAuth()
+  const { user } = useAuth()
   const [searchModalOpen, setSearchModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Array<{
@@ -184,144 +172,8 @@ export default function Dashboard() {
   return (
     <ProtectedRoute>
       <div className="h-screen bg-background flex overflow-hidden">
-        {/* Left Sidebar */}
-        <div className={`bg-sidebar border-r border-sidebar-border transition-all duration-300 ${sidebarCollapsed ? 'w-16' : 'w-64'} flex flex-col h-full sticky top-0`}>
-          <div 
-            className="p-4 flex-1 overflow-y-auto" 
-            style={{ 
-              scrollbarWidth: 'none', 
-              msOverflowStyle: 'none'
-            }}
-          >
-            {/* App Name and Collapse Button */}
-            <div className="flex items-center justify-between mb-8">
-              <button 
-                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                className="flex items-center space-x-2 hover:bg-sidebar-accent rounded-lg p-2 transition-colors cursor-pointer group"
-                title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              >
-                <PenTool className="h-5 w-5 text-blue-400 group-hover:text-blue-300 transition-colors flex-shrink-0" />
-                {!sidebarCollapsed && <span className="text-sidebar-foreground font-semibold text-lg">Turbonotes AI</span>}
-              </button>
-              <div className="text-sidebar-accent-foreground flex-shrink-0">
-                <ChevronLeft className={`h-5 w-5 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} />
-              </div>
-            </div>
-
-            {/* Navigation */}
-            <nav className="space-y-2 mb-8">
-              <Link 
-                href="/dashboard" 
-                className="flex items-center space-x-3 px-3 py-2 bg-white/20 backdrop-blur-sm rounded-lg text-sidebar-foreground"
-              >
-                <Home className="h-5 w-5 flex-shrink-0" />
-                {!sidebarCollapsed && <span>Dashboard</span>}
-              </Link>
-              <Link 
-                href="/mindmaps" 
-                className="flex items-center space-x-3 px-3 py-2 text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors"
-              >
-                <GitBranch className="h-5 w-5 flex-shrink-0" />
-                {!sidebarCollapsed && <span>Mind Maps</span>}
-              </Link>
-              <button 
-                onClick={openSearchModal}
-                className="flex items-center space-x-3 px-3 py-2 text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors w-full text-left"
-              >
-                <Search className="h-5 w-5 flex-shrink-0" />
-                {!sidebarCollapsed && <span>Search</span>}
-              </button>
-              <Link 
-                href="/settings" 
-                className="flex items-center space-x-3 px-3 py-2 text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors"
-              >
-                <Settings className="h-5 w-5 flex-shrink-0" />
-                {!sidebarCollapsed && <span>Settings</span>}
-              </Link>
-            </nav>
-
-            {/* Upgrade Button */}
-            <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white mb-8">
-              <Star className="h-4 w-4 mr-2" />
-              {!sidebarCollapsed && "Upgrade to Premium"}
-            </Button>
-          </div>
-
-          {/* Theme Toggle Section */}
-          {!sidebarCollapsed && (
-            <div className="px-4 py-2">
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => setTheme('light')}
-                  className={`p-2 rounded-lg transition-colors ${
-                    theme === 'light' 
-                      ? 'bg-white/20 backdrop-blur-sm text-sidebar-foreground' 
-                      : 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground'
-                  }`}
-                  title="Light theme"
-                >
-                  <Sun className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => setTheme('dark')}
-                  className={`p-2 rounded-lg transition-colors ${
-                    theme === 'dark' 
-                      ? 'bg-white/20 backdrop-blur-sm text-sidebar-foreground' 
-                      : 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground'
-                  }`}
-                  title="Dark theme"
-                >
-                  <Moon className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => setTheme('system')}
-                  className={`p-2 rounded-lg transition-colors ${
-                    theme === 'system' 
-                      ? 'bg-white/20 backdrop-blur-sm text-sidebar-foreground' 
-                      : 'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground'
-                  }`}
-                  title="System theme"
-                >
-                  <Monitor className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* User Profile - Now at bottom */}
-          <div className="p-4">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-8 h-8 bg-sidebar-accent rounded-full flex items-center justify-center">
-                <span className="text-sidebar-accent-foreground text-sm">
-                  {user?.displayName?.charAt(0) || user?.email?.charAt(0) || "U"}
-                </span>
-              </div>
-              {!sidebarCollapsed && (
-                <div className="flex-1 min-w-0">
-                  <div className="text-sidebar-foreground text-sm font-medium truncate">
-                    {user?.displayName || "User"}
-                  </div>
-                  <div className="text-sidebar-accent-foreground text-xs truncate">
-                    {user?.email}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Sign Out Button */}
-            {!sidebarCollapsed && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-sidebar-accent-foreground hover:text-red-400 hover:border-red-400/50"
-                onClick={signOut}
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </Button>
-            )}
-          </div>
-        </div>
+  {/* Left Sidebar */}
+  <DashboardSidebar onSearchClick={openSearchModal} onAddContentClick={openDocumentUploadModal} />
 
         {/* Main Content */}
         <div className="flex-1 p-8 overflow-y-auto">
