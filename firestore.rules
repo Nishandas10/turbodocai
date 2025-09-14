@@ -38,10 +38,26 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
       // Read: owner only for now (could extend to public maps later)
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      // Update/Delete: owner only and cannot change ownership
-      allow update, delete: if request.auth != null
+      // Update: owner only and cannot change ownership
+      allow update: if request.auth != null
         && resource.data.userId == request.auth.uid
         && request.resource.data.userId == resource.data.userId;
+      // Delete: owner only
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    // Spaces top-level collection: /spaces/{spaceId}
+    match /spaces/{spaceId} {
+      // Create: authenticated user only, must set userId field = auth.uid
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      // Read: owner only
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      // Update: owner only and cannot change ownership
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      // Delete: owner only
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
   }
 }

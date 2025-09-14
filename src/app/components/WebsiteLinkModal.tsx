@@ -1,4 +1,5 @@
 "use client"
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useState } from "react"
 import { X, Globe, Loader2 } from "lucide-react"
@@ -6,12 +7,8 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import { createWebsiteDocument } from "@/lib/firestore"
 
-interface WebsiteLinkModalProps {
-  isOpen: boolean
-  onClose: () => void
-}
-
-export default function WebsiteLinkModal({ isOpen, onClose }: WebsiteLinkModalProps) {
+export default function WebsiteLinkModal(props: any) {
+  const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [websiteLink, setWebsiteLink] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
   const { user } = useAuth()
@@ -51,7 +48,7 @@ export default function WebsiteLinkModal({ isOpen, onClose }: WebsiteLinkModalPr
     setIsProcessing(true)
     try {
       const normalizedUrl = normalizeUrl(websiteLink)
-      const documentId = await createWebsiteDocument(user.uid, normalizedUrl)
+  const documentId = await createWebsiteDocument(user.uid, normalizedUrl, undefined, spaceId)
       console.log('Website saved successfully:', documentId)
       alert(`Website saved successfully! Document ID: ${documentId}`)
       setWebsiteLink("") // Reset the input

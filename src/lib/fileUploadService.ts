@@ -13,6 +13,7 @@ export interface FileUploadOptions {
   tags?: string[];
   isPublic?: boolean;
   description?: string;
+  spaceId?: string;
 }
 
 /**
@@ -51,6 +52,7 @@ export const uploadDocumentFile = async (
       },
       tags: options.tags || [],
       isPublic: options.isPublic || false,
+      ...(options.spaceId ? { spaceId: options.spaceId } : {}),
     };
 
     const documentId = await createDocumentWithFile(userId, documentData, file);
@@ -113,6 +115,7 @@ export const uploadAudioFile = async (
       },
       tags: options.tags || [],
       isPublic: options.isPublic || false,
+      ...(options.spaceId ? { spaceId: options.spaceId } : {}),
     };
 
     const documentId = await createDocumentWithFile(userId, documentData, file);
@@ -175,6 +178,7 @@ export const uploadRecordingFile = async (
       },
       tags: options.tags || ["recording"],
       isPublic: options.isPublic || false,
+      ...(options.spaceId ? { spaceId: options.spaceId } : {}),
     };
 
     const documentId = await createDocumentWithFile(userId, documentData, file);
@@ -237,6 +241,7 @@ export const uploadImageFile = async (
       },
       tags: options.tags || [],
       isPublic: options.isPublic || false,
+      ...(options.spaceId ? { spaceId: options.spaceId } : {}),
     };
 
     const documentId = await createDocumentWithFile(userId, documentData, file);

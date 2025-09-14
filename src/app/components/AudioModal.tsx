@@ -1,4 +1,5 @@
 "use client"
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useState, useRef } from "react"
 import { X, Mic, Upload, ChevronRight, Loader2 } from "lucide-react"
@@ -7,12 +8,8 @@ import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { uploadAudioFile } from "@/lib/fileUploadService"
 
-interface AudioModalProps {
-  isOpen: boolean
-  onClose: () => void
-}
-
-export default function AudioModal({ isOpen, onClose }: AudioModalProps) {
+export default function AudioModal(props: any) {
+  const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -61,7 +58,8 @@ export default function AudioModal({ isOpen, onClose }: AudioModalProps) {
     try {
       const result = await uploadAudioFile(audioFile, user.uid, {
         title: audioFile.name.replace(/\.[^/.]+$/, ""), // Remove file extension
-        tags: ['audio', 'uploaded']
+        tags: ['audio', 'uploaded'],
+        ...(spaceId ? { spaceId } : {}),
       })
 
       if (result.success) {

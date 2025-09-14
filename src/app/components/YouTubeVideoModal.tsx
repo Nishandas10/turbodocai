@@ -1,4 +1,5 @@
 "use client"
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useState } from "react"
 import { X, Play, Loader2 } from "lucide-react"
@@ -6,12 +7,8 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import { createYouTubeDocument } from "@/lib/firestore"
 
-interface YouTubeVideoModalProps {
-  isOpen: boolean
-  onClose: () => void
-}
-
-export default function YouTubeVideoModal({ isOpen, onClose }: YouTubeVideoModalProps) {
+export default function YouTubeVideoModal(props: any) {
+  const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [youtubeLink, setYoutubeLink] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
   const { user } = useAuth()
@@ -31,11 +28,11 @@ export default function YouTubeVideoModal({ isOpen, onClose }: YouTubeVideoModal
 
     setIsProcessing(true)
     try {
-      const documentId = await createYouTubeDocument(user.uid, youtubeLink)
+  const documentId = await createYouTubeDocument(user.uid, youtubeLink, undefined, spaceId)
       console.log('YouTube video saved successfully:', documentId)
       alert(`YouTube video saved successfully! Document ID: ${documentId}`)
       setYoutubeLink("") // Reset the input
-      onClose()
+  onClose()
     } catch (error) {
       console.error('Error saving YouTube video:', error)
       alert('Failed to save YouTube video. Please try again.')
@@ -49,7 +46,7 @@ export default function YouTubeVideoModal({ isOpen, onClose }: YouTubeVideoModal
   return (
     <div 
       className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-      onClick={onClose}
+  onClick={onClose}
     >
       <div 
         className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
@@ -58,7 +55,7 @@ export default function YouTubeVideoModal({ isOpen, onClose }: YouTubeVideoModal
         {/* Modal Header */}
         <div className="p-6 text-center relative">
           <button
-            onClick={onClose}
+    onClick={onClose}
             className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted"
             disabled={isProcessing}
           >

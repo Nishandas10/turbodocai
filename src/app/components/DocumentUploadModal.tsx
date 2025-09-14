@@ -1,6 +1,6 @@
 "use client"
-// eslint-disable-next-line @next/next/no-assign-module-variable
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useRef } from "react"
 import { ChevronDown, Cloud, FileText, Upload, Loader2, CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -9,12 +9,8 @@ import { uploadDocumentFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from 'next/navigation'
 
-interface DocumentUploadModalProps {
-  isOpen: boolean
-  onClose: () => void
-}
-
-export default function DocumentUploadModal({ isOpen, onClose }: DocumentUploadModalProps) {
+export default function DocumentUploadModal(props: any) {
+  const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [textContent, setTextContent] = useState("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -53,7 +49,8 @@ export default function DocumentUploadModal({ isOpen, onClose }: DocumentUploadM
     try {
       const result = await uploadDocumentFile(selectedFile, user.uid, {
         title: selectedFile.name.replace(/\.[^/.]+$/, ""), // Remove file extension
-        tags: ['uploaded']
+        tags: ['uploaded'],
+        ...(spaceId ? { spaceId } : {}),
       })
 
       if (result.success) {

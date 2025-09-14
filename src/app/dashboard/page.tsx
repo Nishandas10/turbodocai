@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import Image from "next/image"
 import { 
   ChevronLeft,
   FileText,
@@ -13,7 +14,11 @@ import {
   Paperclip,
   AtSign,
   ChevronDown,
-  AudioLines
+  AudioLines,
+  Plus,
+  Box,
+  ChevronRight,
+  MoreHorizontal
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
@@ -23,9 +28,15 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace } from "@/lib/firestore"
+import { useRouter } from "next/navigation"
+import { listenToUserDocuments } from "@/lib/firestore"
+import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const router = useRouter()
   const username = (user?.displayName?.split(' ')[0]) || (user?.email?.split('@')[0]) || 'User'
   const [searchModalOpen, setSearchModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -42,6 +53,116 @@ export default function Dashboard() {
   const [documentUploadModalOpen, setDocumentUploadModalOpen] = useState(false)
   const [youtubeVideoModalOpen, setYoutubeVideoModalOpen] = useState(false)
   const [websiteLinkModalOpen, setWebsiteLinkModalOpen] = useState(false)
+  const [recentDocs, setRecentDocs] = useState<UserDoc[]>([])
+  const [spaces, setSpaces] = useState<SpaceType[]>([])
+  const [spaceCounts, setSpaceCounts] = useState<Record<string, number>>({})
+
+  // Listen to user's recent documents
+  useEffect(() => {
+    if (!user?.uid) {
+      setRecentDocs([])
+      return
+    }
+    const unsubscribe = listenToUserDocuments(user.uid, (docs) => {
+      setRecentDocs(docs.slice(0, 3))
+    })
+    return () => {
+      try { unsubscribe() } catch {}
+    }
+  }, [user?.uid])
+
+  // Listen to user's spaces (recent first)
+  useEffect(() => {
+    if (!user?.uid) {
+      setSpaces([])
+      setSpaceCounts({})
+      return
+    }
+    const unsub = listenToUserSpaces(user.uid, (sps) => {
+      setSpaces(sps)
+    })
+    return () => { try { unsub() } catch {} }
+  }, [user?.uid])
+
+  // For first few spaces, keep a live count of documents
+  useEffect(() => {
+    if (!user?.uid) return
+    const limit = 6
+    const targets = spaces.slice(0, limit)
+    const unsubs: Array<() => void> = []
+    targets.forEach((sp) => {
+      const u = listenToSpaceDocuments(user.uid!, sp.id, (docs) => {
+        setSpaceCounts((prev) => ({ ...prev, [sp.id]: docs.length }))
+      })
+      unsubs.push(u)
+    })
+    return () => { unsubs.forEach((u) => { try { u() } catch {} }) }
+  }, [spaces, user?.uid])
+
+  const relativeTime = (date: unknown) => {
+    try {
+      let d: Date;
+      
+      if (!date) {
+        d = new Date();
+      } else if (date instanceof Date) {
+        d = date;
+      } else if (typeof date === 'object' && date !== null && 'toDate' in date && typeof (date as { toDate: () => Date }).toDate === 'function') {
+        d = (date as { toDate: () => Date }).toDate();
+      } else if (typeof date === 'number' || typeof date === 'string') {
+        d = new Date(date);
+      } else {
+        d = new Date();
+      }
+      
+      const diff = Date.now() - d.getTime()
+      const s = Math.floor(diff / 1000)
+      if (s < 60) return `just now`
+      const m = Math.floor(s / 60)
+      if (m < 60) return `${m} min${m > 1 ? 's' : ''} ago`
+      const h = Math.floor(m / 60)
+      if (h < 24) return `${h} hour${h > 1 ? 's' : ''} ago`
+      const days = Math.floor(h / 24)
+      return `${days} day${days > 1 ? 's' : ''} ago`
+    } catch {
+      return ''
+    }
+  }
+
+  const renderDocPreview = (doc: UserDoc) => {
+    const url = doc?.metadata?.downloadURL
+    const mime = doc?.metadata?.mimeType || ''
+    const text = (doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
+    const iconCls = "h-8 w-8 text-muted-foreground"
+
+    if (url && mime.startsWith('image/')) {
+      return (
+        <div className="absolute inset-0 w-full h-full">
+          <Image 
+            src={url}
+            alt={doc.title}
+            fill
+            className="object-cover"
+            sizes="(max-width: 768px) 100vw, 33vw"
+          />
+        </div>
+      )
+    }
+    if (doc.type === 'youtube') return <Play className={iconCls} />
+    if (doc.type === 'website') return <Globe className={iconCls} />
+    if (doc.type === 'audio') return <Mic className={iconCls} />
+
+    // Default: show text excerpt if available
+    if (text) {
+      const excerpt = text.split(/\n+/).slice(0, 4).join('\n')
+      return (
+        <div className="absolute inset-0 p-3 text-[11px] leading-4 text-foreground/80 whitespace-pre-line overflow-hidden">
+          {excerpt}
+        </div>
+      )
+    }
+    return <FileText className={iconCls} />
+  }
 
   // Mock search results - in real app this would come from API
   const mockDocuments: Array<{
@@ -181,11 +302,22 @@ export default function Dashboard() {
     }
   }
 
+  const handleCreateSpace = async () => {
+    if (!user?.uid) return
+    try {
+      const id = await createSpace(user.uid, { name: 'Untitled' })
+      router.push(`/spaces/${id}`)
+    } catch (e) {
+      console.error('Create space failed', e)
+      alert('Failed to create space')
+    }
+  }
+
   return (
     <ProtectedRoute>
       <div className="h-screen bg-background flex overflow-hidden">
   {/* Left Sidebar */}
-  <DashboardSidebar onSearchClick={openSearchModal} onAddContentClick={openDocumentUploadModal} />
+  <DashboardSidebar onSearchClick={openSearchModal} onAddContentClick={openDocumentUploadModal} onCreateSpaceClick={handleCreateSpace} />
 
         {/* Main Content */}
         <div className="flex-1 p-8 overflow-y-auto">
@@ -368,6 +500,98 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* Spaces Section */}
+          <div className="max-w-6xl mx-auto mt-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground">Spaces</h2>
+              <button className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/15">
+                <span>Practice with exams</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {spaces.map((sp) => (
+                <div key={sp.id} className="group relative bg-card border border-border rounded-2xl p-4 flex items-center gap-3 hover:border-blue-500 transition-colors cursor-pointer"
+                  onClick={() => router.push(`/spaces/${sp.id}`)}
+                >
+                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                    <Box className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-card-foreground truncate">{sp.name || 'Untitled Space'}</p>
+                    <p className="text-xs text-muted-foreground">{spaceCounts[sp.id] ?? 0} { (spaceCounts[sp.id] ?? 0) === 1 ? 'content' : 'contents' }</p>
+                  </div>
+
+                  {/* Hover menu */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Space menu"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuItem onSelect={async (e) => {
+                        e.preventDefault()
+                        try {
+                          const url = `${window.location.origin}/spaces/${sp.id}`
+                          await navigator.clipboard.writeText(url)
+                          alert('Space link copied')
+                        } catch {}
+                      }}>Share</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={async (e) => {
+                        e.preventDefault()
+                        const newName = window.prompt('Rename space', sp.name || 'Untitled')?.trim()
+                        if (newName && user?.uid) await updateSpace(user.uid, sp.id, { name: newName })
+                      }}>Edit</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={async (e) => {
+                        e.preventDefault()
+                        if (confirm('Delete this space? This does not remove documents.')) {
+                          if (user?.uid) await deleteSpace(user.uid, sp.id)
+                        }
+                      }}>Delete</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))}
+
+              {/* Add space */}
+              <div className="bg-card border border-dashed border-border rounded-2xl p-4 flex items-center justify-center hover:border-blue-500 transition-colors cursor-pointer" onClick={handleCreateSpace}>
+                <Plus className="h-5 w-5 text-muted-foreground" />
+              </div>
+            </div>
+          </div>
+
+          {/* Recents Section */}
+          <div className="max-w-6xl mx-auto mt-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground">Recents</h2>
+              <button className="text-sm text-muted-foreground hover:text-foreground">View all</button>
+            </div>
+
+            {recentDocs.length === 0 ? (
+              <div className="text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">No recent documents yet.</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {recentDocs.map((d) => (
+                  <div key={d.id} className="bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer">
+                    <div className="relative h-32 bg-muted flex items-center justify-center">
+                      {renderDocPreview(d)}
+                      <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">{username}&apos;s Space</span>
+                    </div>
+                    <div className="p-4">
+                      <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
+                      <p className="text-xs text-muted-foreground">{relativeTime(d.createdAt || d.updatedAt)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

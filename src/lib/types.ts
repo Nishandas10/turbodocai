@@ -37,6 +37,8 @@ export interface DocumentMetadata {
 export interface Document {
   id: string;
   userId: string; // owner
+  // If the document belongs to a space/workspace
+  spaceId?: string;
   title: string;
   type:
     | "text"
@@ -119,6 +121,8 @@ export interface CreateDocumentData {
   metadata: DocumentMetadata;
   tags?: string[];
   isPublic?: boolean;
+  // Optional association to a space/workspace
+  spaceId?: string;
 }
 
 export interface UpdateDocumentData {
@@ -130,6 +134,7 @@ export interface UpdateDocumentData {
   status?: Document["status"];
   summary?: string;
   summaryUpdatedAt?: Timestamp;
+  spaceId?: string;
 }
 
 // Mind Map Types
@@ -163,4 +168,19 @@ export interface UpdateMindMapData {
   structure?: unknown;
   status?: MindMap["status"];
   errorMessage?: string;
+}
+
+// Space/Workspace Types
+export interface Space {
+  id: string;
+  userId: string; // owner
+  name: string;
+  description?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CreateSpaceData {
+  name: string;
+  description?: string;
 }
