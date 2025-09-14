@@ -51,7 +51,9 @@ const createServices = () => {
 export const processDocument = onDocumentWritten(
   "documents/{userId}/userDocuments/{documentId}",
   async (event) => {
-    const documentData = event.data?.after.data();
+    const afterSnap = event.data?.after;
+    const beforeSnap = event.data?.before;
+    const documentData = afterSnap?.data();
     const { userId, documentId } = event.params;
 
     if (!documentData) {
@@ -67,6 +69,23 @@ export const processDocument = onDocumentWritten(
     });
 
     try {
+      // Run only on create or when storagePath first appears/changes
+      const beforeData = beforeSnap?.exists ? beforeSnap.data() : undefined;
+      const created = !beforeSnap?.exists && !!afterSnap?.exists;
+      const storagePathAdded =
+        !!documentData?.metadata?.storagePath &&
+        (!beforeData?.metadata?.storagePath ||
+          beforeData?.metadata?.storagePath !==
+            documentData?.metadata?.storagePath);
+
+      if (!created && !storagePathAdded) {
+        logger.info("Skipping event: not a create or storagePath change", {
+          created,
+          storagePathAdded,
+        });
+        return;
+      }
+
       // Initialize services
       const { documentProcessor, embeddingService, pineconeService } =
         createServices();
@@ -97,16 +116,36 @@ export const processDocument = onDocumentWritten(
         return;
       }
 
-      // Update document status to processing
-      await db
+      // Acquire processing lock via transaction to avoid duplicate runs
+      const docRef = db
         .collection("documents")
         .doc(userId)
         .collection("userDocuments")
-        .doc(documentId)
-        .update({
+        .doc(documentId);
+      const acquired = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(docRef);
+        const data = (snap.data() as any) || {};
+        if (
+          data.processingStatus === "processing" ||
+          data.processingStatus === "completed"
+        ) {
+          return false; // someone else is processing or it's done
+        }
+        tx.update(docRef, {
           processingStatus: "processing",
           processingStartedAt: new Date(),
+          processingLock: {
+            event: (event as any)?.id || randomUUID(),
+            at: new Date(),
+          },
         });
+        return true;
+      });
+
+      if (!acquired) {
+        logger.info("Processing lock not acquired; exiting");
+        return;
+      }
 
       // Step 1: Download file from Firebase Storage
       logger.info("Downloading file from storage...");
@@ -235,6 +274,7 @@ export const processDocument = onDocumentWritten(
           characterCount: workingText.length,
           truncated,
           processingProgress: 100,
+          processingLock: null,
         });
 
       logger.info(
@@ -254,6 +294,7 @@ export const processDocument = onDocumentWritten(
           processingError:
             error instanceof Error ? error.message : "Unknown error",
           processingFailedAt: new Date(),
+          processingLock: null,
         });
     }
   }

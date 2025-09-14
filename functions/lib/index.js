@@ -42,8 +42,10 @@ const createServices = () => {
  * 5. Store in Pinecone
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d;
-    const documentData = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after.data();
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
+    const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
+    const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
     const { userId, documentId } = event.params;
     if (!documentData) {
         firebase_functions_1.logger.error("No document data found");
@@ -52,10 +54,24 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
     firebase_functions_1.logger.info(`Processing document ${documentId} for user ${userId}`);
     firebase_functions_1.logger.info(`Document data:`, {
         type: documentData.type,
-        storagePath: (_b = documentData.metadata) === null || _b === void 0 ? void 0 : _b.storagePath,
+        storagePath: (_c = documentData.metadata) === null || _c === void 0 ? void 0 : _c.storagePath,
         title: documentData.title,
     });
     try {
+        // Run only on create or when storagePath first appears/changes
+        const beforeData = (beforeSnap === null || beforeSnap === void 0 ? void 0 : beforeSnap.exists) ? beforeSnap.data() : undefined;
+        const created = !(beforeSnap === null || beforeSnap === void 0 ? void 0 : beforeSnap.exists) && !!(afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.exists);
+        const storagePathAdded = !!((_d = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _d === void 0 ? void 0 : _d.storagePath) &&
+            (!((_e = beforeData === null || beforeData === void 0 ? void 0 : beforeData.metadata) === null || _e === void 0 ? void 0 : _e.storagePath) ||
+                ((_f = beforeData === null || beforeData === void 0 ? void 0 : beforeData.metadata) === null || _f === void 0 ? void 0 : _f.storagePath) !==
+                    ((_g = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _g === void 0 ? void 0 : _g.storagePath));
+        if (!created && !storagePathAdded) {
+            firebase_functions_1.logger.info("Skipping event: not a create or storagePath change", {
+                created,
+                storagePathAdded,
+            });
+            return;
+        }
         // Initialize services
         const { documentProcessor, embeddingService, pineconeService } = createServices();
         // Only process if it's a PDF and has a storage path
@@ -63,7 +79,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info(`Skipping processing - not a PDF document, type: ${documentData.type}`);
             return;
         }
-        if (!((_c = documentData.metadata) === null || _c === void 0 ? void 0 : _c.storagePath)) {
+        if (!((_h = documentData.metadata) === null || _h === void 0 ? void 0 : _h.storagePath)) {
             firebase_functions_1.logger.info(`PDF document ${documentId} doesn't have storagePath yet, will process when storage info is updated`);
             return;
         }
@@ -73,16 +89,33 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info(`Document ${documentId} already processed or currently processing, skipping`);
             return;
         }
-        // Update document status to processing
-        await db
+        // Acquire processing lock via transaction to avoid duplicate runs
+        const docRef = db
             .collection("documents")
             .doc(userId)
             .collection("userDocuments")
-            .doc(documentId)
-            .update({
-            processingStatus: "processing",
-            processingStartedAt: new Date(),
+            .doc(documentId);
+        const acquired = await db.runTransaction(async (tx) => {
+            const snap = await tx.get(docRef);
+            const data = snap.data() || {};
+            if (data.processingStatus === "processing" ||
+                data.processingStatus === "completed") {
+                return false; // someone else is processing or it's done
+            }
+            tx.update(docRef, {
+                processingStatus: "processing",
+                processingStartedAt: new Date(),
+                processingLock: {
+                    event: (event === null || event === void 0 ? void 0 : event.id) || (0, crypto_1.randomUUID)(),
+                    at: new Date(),
+                },
+            });
+            return true;
         });
+        if (!acquired) {
+            firebase_functions_1.logger.info("Processing lock not acquired; exiting");
+            return;
+        }
         // Step 1: Download file from Firebase Storage
         firebase_functions_1.logger.info("Downloading file from storage...");
         const fileBuffer = await downloadFileFromStorage(documentData.metadata.storagePath);
@@ -141,7 +174,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 const embedding = await embeddingService.embedChunks([chunk]);
                 await pineconeService.storeEmbeddings([chunk], embedding, documentId, userId, {
                     title: documentData.title,
-                    fileName: (_d = documentData.metadata) === null || _d === void 0 ? void 0 : _d.fileName,
+                    fileName: (_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName,
                 }, i);
             }
             catch (chunkError) {
@@ -189,6 +222,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             characterCount: workingText.length,
             truncated,
             processingProgress: 100,
+            processingLock: null,
         });
         firebase_functions_1.logger.info(`Successfully processed document ${documentId} with ${chunkCount} chunks`);
     }
@@ -204,6 +238,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             processingStatus: "failed",
             processingError: error instanceof Error ? error.message : "Unknown error",
             processingFailedAt: new Date(),
+            processingLock: null,
         });
     }
 });
