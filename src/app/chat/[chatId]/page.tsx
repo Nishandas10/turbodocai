@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { ArrowUp, Loader2 } from "lucide-react";
+import { ArrowUp, Loader2, ChevronDown, AtSign, Mic, Camera, Paperclip } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { functions, db } from "@/lib/firebase";
 import { httpsCallable } from "firebase/functions";
@@ -36,6 +36,7 @@ export default function ChatPage() {
 	const [input, setInput] = useState("");
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [sending, setSending] = useState(false);
+	const [language, setLanguage] = useState<'en' | 'as'>('en');
 	const endRef = useRef<HTMLDivElement | null>(null);
 
 	// Listen to messages
@@ -99,7 +100,7 @@ export default function ChatPage() {
 
 			const call = httpsCallable(functions, "sendChatMessage");
 			// Fire and forget; server will stream the assistant message into Firestore
-			void call({ userId: user.uid, prompt: text, chatId });
+			void call({ userId: user.uid, prompt: text, chatId, language });
 
 			setInput("");
 		} catch (e) {
@@ -110,18 +111,13 @@ export default function ChatPage() {
 		}
 	};
 
-	const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-		if (e.key === "Enter") send();
-	};
-
 	return (
 		<div className="h-screen bg-background flex overflow-hidden">
 			{/* Left Sidebar */}
 			<DashboardSidebar />
-
 			{/* Chat Content */}
-			<div className="flex-1 flex flex-col">
-				<div className="flex-1 overflow-y-auto px-4 py-6 max-w-3xl w-full mx-auto">
+			<div className="flex-1 flex flex-col relative">{/* relative so we can absolutely position prompt bar within chat column */}
+				<div className="flex-1 overflow-y-auto px-4 py-6 max-w-3xl w-full mx-auto pb-40">
 					{messages.length === 0 ? (
 						<div className="text-center text-muted-foreground mt-20">
 							Start your conversation.
@@ -148,31 +144,59 @@ export default function ChatPage() {
 						</div>
 					)}
 				</div>
-
-				<div className="border-t border-border">
-					<div className="max-w-3xl w-full mx-auto p-4">
-						<div className="flex items-center gap-3 bg-card border border-border rounded-2xl px-4 py-2">
-							<input
-								className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground py-2"
-								placeholder="Send a message"
-								value={input}
-								onChange={(e) => setInput(e.target.value)}
-								onKeyDown={onKey}
-							/>
-							<button
-								type="button"
-								onClick={() => send()}
-								disabled={!input.trim() || sending}
-								className="rounded-full p-2 bg-foreground text-background hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-								title="Send"
-								aria-label="Send"
-							>
-								{sending ? (
-									<Loader2 className="h-4 w-4 animate-spin" />
-								) : (
-									<ArrowUp className="h-4 w-4" />
-								)}
-							</button>
+				{/* Floating Prompt Bar centered to chat column (not full viewport) */}
+				<div className="pointer-events-none absolute bottom-4 left-0 right-0 px-4 z-40">
+					<div className="pointer-events-auto max-w-3xl mx-auto w-full">
+						<div className="bg-card rounded-2xl shadow-lg">
+							{/* Input row */}
+							<div className="flex items-center gap-3 px-4 pt-3">
+								<input
+									className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
+									placeholder={language === 'en' ? 'Ask something...' : 'প্ৰশ্ন কৰক...'}
+									value={input}
+									onChange={(e) => setInput(e.target.value)}
+									onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+								/>
+								<button
+									type="button"
+									onClick={() => send()}
+									disabled={!input.trim() || sending}
+									className="rounded-full p-2 bg-foreground text-background hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+									title="Send"
+									aria-label="Send"
+								>
+									{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+								</button>
+							</div>
+							{/* Options row */}
+							<div className="flex items-center justify-between px-4 pb-3 mt-2 text-sm">
+								<div className="flex items-center gap-3">
+									<button className="flex items-center gap-1 text-muted-foreground hover:text-foreground">
+										<span className="hidden sm:inline">Assistant</span>
+										<span className="sm:hidden">Model</span>
+										<ChevronDown className="h-4 w-4" />
+									</button>
+									<button className="flex items-center gap-2 rounded-full bg-muted/40 px-3 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/60">
+										<AtSign className="h-4 w-4" />
+										<span>Add Context</span>
+									</button>
+									<div className="flex items-center gap-1 rounded-full bg-muted/40 p-1">
+										<button
+											className={`px-2 py-0.5 text-xs rounded-full ${language === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+											onClick={() => setLanguage('en')}
+										>EN</button>
+										<button
+											className={`px-2 py-0.5 text-xs rounded-full ${language === 'as' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+											onClick={() => setLanguage('as')}
+										>AS</button>
+									</div>
+								</div>
+								<div className="flex items-center gap-4 text-muted-foreground">
+									<button className="hover:text-foreground" title="Camera"><Camera className="h-5 w-5" /></button>
+									<button className="hover:text-foreground" title="Attach file"><Paperclip className="h-5 w-5" /></button>
+									<button className="hover:text-foreground" title="Voice input"><Mic className="h-5 w-5" /></button>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>
