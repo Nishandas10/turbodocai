@@ -14,7 +14,7 @@ import {
   Paperclip,
   AtSign,
   ChevronDown,
-  AudioLines,
+  ArrowUp,
   Plus,
   Box,
   ChevronRight,
@@ -33,6 +33,8 @@ import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { functions } from "@/lib/firebase"
+import { httpsCallable } from "firebase/functions"
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -238,12 +240,27 @@ export default function Dashboard() {
     setWebsiteLinkModalOpen(false)
   }
 
-  const handleSendPrompt = () => {
-    if (!prompt.trim()) return
-    // Placeholder action – wire this to your chat/assistant route later
-    console.log('Prompt sent:', { prompt, language })
-    alert(`Prompt submitted in ${language === 'en' ? 'English' : 'Assamese'}: \n\n${prompt}`)
-    setPrompt('')
+  const handleSendPrompt = async () => {
+    if (!prompt.trim() || !user?.uid) return
+    try {
+      const initial = prompt.trim()
+      setPrompt('')
+
+      // Create chat immediately
+      const callCreate = httpsCallable(functions, 'createChat')
+      const createRes = (await callCreate({ userId: user.uid, language, title: initial })) as unknown as { data: { success: boolean; data?: { chatId?: string } } }
+      const chatId = createRes?.data?.data?.chatId
+      if (chatId) {
+        // Redirect immediately with the prompt in query to auto-send
+        const q = new URLSearchParams({ prompt: initial })
+        window.location.href = `/chat/${chatId}?${q.toString()}`
+      } else {
+        throw new Error('Failed to create chat')
+      }
+    } catch (e) {
+      console.error('Start chat failed', e)
+      alert('Failed to start chat')
+    }
   }
 
   const createNewNote = async () => {
@@ -417,7 +434,7 @@ export default function Dashboard() {
           <div className="max-w-3xl mx-auto">
             {/* Prompt Input */}
             <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
-              {/* Top row: input + Voice button */}
+              {/* Top row: input + Send button */}
               <div className="flex items-center gap-3 px-4 pt-3">
                 <input
                   className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
@@ -429,11 +446,13 @@ export default function Dashboard() {
 
                 <button
                   type="button"
-                  className="flex items-center gap-2 rounded-full px-4 py-2 bg-foreground text-background hover:opacity-90"
-                  title="Start voice input"
+                  onClick={handleSendPrompt}
+                  disabled={!prompt.trim()}
+                  className="rounded-full p-2 bg-foreground text-background hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Send"
+                  aria-label="Send"
                 >
-                  <AudioLines className="h-4 w-4" />
-                  <span className="text-sm font-medium">Voice</span>
+                  <ArrowUp className="h-4 w-4" />
                 </button>
               </div>
 
@@ -698,4 +717,4 @@ export default function Dashboard() {
       </div>
     </ProtectedRoute>
   )
-} 
+}

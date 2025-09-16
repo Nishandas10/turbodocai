@@ -59,5 +59,20 @@ service cloud.firestore {
       // Delete: owner only
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
+
+    // Chats top-level collection: /chats/{chatId}
+    match /chats/{chatId} {
+      // Create: via Cloud Functions only (Admin). Client shouldn't create directly.
+      allow create: if false;
+      // Read/Update/Delete: only the owner can access their chat metadata
+      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+
+      // Messages subcollection: /chats/{chatId}/messages/{messageId}
+      match /messages/{messageId} {
+        // Messages are written by Cloud Functions (Admin). Allow client reads for owner only.
+        allow read: if request.auth != null && get(/databases/$(database)/documents/chats/$(chatId)).data.userId == request.auth.uid;
+        allow write: if false;
+      }
+    }
   }
 }

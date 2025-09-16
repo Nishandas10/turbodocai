@@ -29,6 +29,8 @@ setGlobalOptions({
 const db = getFirestore(app);
 const storage = getStorage();
 
+// Secrets: OpenAI API key is accessed via process.env.OPENAI_API_KEY (same as other functions)
+
 // Initialize services (they will be created when functions are called)
 const createServices = () => {
   return {
@@ -38,6 +40,41 @@ const createServices = () => {
     queryService: new QueryService(),
   };
 };
+
+/**
+ * Lightweight callable to create a chat and return chatId immediately.
+ * Data: { userId: string, language?: string, title?: string }
+ * Returns: { success, data: { chatId } }
+ */
+export const createChat = onCall(
+  { enforceAppCheck: false },
+  async (request) => {
+    try {
+      const { userId, language, title } = request.data || {};
+      if (!userId) throw new Error("Missing required parameter: userId");
+      if (request.auth && request.auth.uid && request.auth.uid !== userId) {
+        throw new Error("Authenticated user mismatch");
+      }
+
+      const chatRef = await db.collection("chats").add({
+        userId,
+        title: (title || "New Chat").toString().slice(0, 60) || "New Chat",
+        language: language || "en",
+        model: "gpt-4o-mini",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      return { success: true, data: { chatId: chatRef.id } };
+    } catch (error) {
+      logger.error("Error in createChat:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+);
 
 /**
  * Cloud Function triggered when a document is created or updated in Firestore
@@ -296,6 +333,190 @@ export const processDocument = onDocumentWritten(
           processingFailedAt: new Date(),
           processingLock: null,
         });
+    }
+  }
+);
+
+/**
+ * Callable function to create/continue a chat and generate an assistant reply.
+ * Data: { userId: string, prompt: string, language?: string, chatId?: string }
+ * Returns: { success, data: { chatId, answer } }
+ */
+export const sendChatMessage = onCall(
+  {
+    enforceAppCheck: false,
+  },
+  async (request) => {
+    try {
+      const { userId, prompt, language, chatId } = request.data || {};
+
+      if (!userId || !prompt || typeof prompt !== "string") {
+        throw new Error("Missing required parameters: userId and prompt");
+      }
+
+      // Optional: basic auth consistency check if available
+      if (request.auth && request.auth.uid && request.auth.uid !== userId) {
+        throw new Error("Authenticated user mismatch");
+      }
+
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      // Create or fetch chat document
+      let chatDocId: string = chatId;
+      if (!chatDocId) {
+        const title = (prompt as string).trim().slice(0, 60);
+        const chatRef = await db.collection("chats").add({
+          userId,
+          title: title || "New Chat",
+          language: language || "en",
+          model: "gpt-4o-mini",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        chatDocId = chatRef.id;
+      } else {
+        // Touch updatedAt if continuing
+        await db
+          .collection("chats")
+          .doc(chatDocId)
+          .set(
+            {
+              updatedAt: new Date(),
+              language: language || "en",
+            },
+            { merge: true }
+          );
+      }
+
+      const messagesCol = db
+        .collection("chats")
+        .doc(chatDocId)
+        .collection("messages");
+
+      // Add user's message if client hasn't just added it
+      try {
+        const lastSnap = await messagesCol
+          .orderBy("createdAt", "desc")
+          .limit(1)
+          .get();
+        const last = lastSnap.docs[0]?.data() as any | undefined;
+        const sameContent = last && String(last.content) === String(prompt);
+        const isUser = last && last.role === "user";
+        if (!(sameContent && isUser)) {
+          await messagesCol.add({
+            role: "user",
+            content: String(prompt),
+            createdAt: new Date(),
+          });
+        }
+      } catch (dupeErr) {
+        logger.warn("User message duplicate check failed", dupeErr);
+      }
+
+      // Build the conversation context (last N messages)
+      // For simplicity, fetch up to last 20 messages
+      const recentSnap = await messagesCol
+        .orderBy("createdAt", "asc")
+        .limit(20)
+        .get();
+      const convo = recentSnap.docs.map((d) => d.data() as any);
+
+      const sysMsg = {
+        role: "system" as const,
+        content:
+          "You are a helpful AI assistant. Keep responses concise and clear. Use markdown when helpful.",
+      };
+      const chatMessages = [
+        sysMsg,
+        ...convo.map((m) => ({ role: m.role, content: m.content })),
+      ];
+
+      // Create assistant message placeholder and stream updates
+      const assistantRef = await messagesCol.add({
+        role: "assistant",
+        content: "",
+        createdAt: new Date(),
+        streaming: true,
+      });
+
+      let buffered = "";
+      let lastUpdate = Date.now();
+
+      const flush = async (final = false) => {
+        try {
+          await assistantRef.set(
+            {
+              content: buffered,
+              streaming: final ? false : true,
+              updatedAt: new Date(),
+            },
+            { merge: true }
+          );
+          await db
+            .collection("chats")
+            .doc(chatDocId)
+            .set({ updatedAt: new Date() }, { merge: true });
+        } catch (e) {
+          logger.warn("Failed to flush streaming token to Firestore", e);
+        }
+      };
+
+      try {
+        const stream = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          temperature: 0.7,
+          messages: chatMessages as any,
+          stream: true,
+        } as any);
+
+        for await (const part of stream as any) {
+          const delta = part?.choices?.[0]?.delta?.content || "";
+          if (delta) buffered += delta;
+          const now = Date.now();
+          if (now - lastUpdate > 250) {
+            await flush(false);
+            lastUpdate = now;
+          }
+        }
+        await flush(true);
+      } catch (streamErr) {
+        logger.error(
+          "OpenAI streaming failed; falling back to non-streaming",
+          streamErr
+        );
+        try {
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            temperature: 0.7,
+            messages: chatMessages as any,
+          });
+          buffered =
+            completion.choices?.[0]?.message?.content ||
+            "I'm sorry, I couldn't generate a response.";
+          await flush(true);
+        } catch (fallbackErr) {
+          logger.error("OpenAI non-streaming also failed", fallbackErr);
+          buffered = "I'm sorry, an error occurred generating the response.";
+          await flush(true);
+        }
+      }
+
+      // Update chat title from first prompt if new
+      if (!chatId) {
+        const title = (prompt as string).trim().slice(0, 60);
+        await db
+          .collection("chats")
+          .doc(chatDocId)
+          .set({ title: title || "New Chat" }, { merge: true });
+      }
+
+      return { success: true, data: { chatId: chatDocId } };
+    } catch (error) {
+      logger.error("Error in sendChatMessage:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
     }
   }
 );
