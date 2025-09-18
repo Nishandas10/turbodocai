@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
+import useSpeechToText from "@/hooks/useSpeechToText"
 import Image from "next/image"
 import { 
   ChevronLeft,
@@ -11,7 +12,6 @@ import {
   Search,
   Globe,
   Camera,
-  Paperclip,
   AtSign,
   ChevronDown,
   ArrowUp,
@@ -58,6 +58,61 @@ export default function Dashboard() {
   const [recentDocs, setRecentDocs] = useState<UserDoc[]>([])
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const [spaceCounts, setSpaceCounts] = useState<Record<string, number>>({})
+  // Add Context state
+  const [contextOpen, setContextOpen] = useState(false)
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
+  const [contextSearch, setContextSearch] = useState('')
+  const contextWrapperRef = useRef<HTMLDivElement | null>(null)
+  const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
+    lang: language === 'as' ? 'as-IN' : 'en-US',
+    continuous: false,
+    interimResults: true,
+    onSegment: (seg) => setPrompt(prev => prev ? prev + ' ' + seg : seg)
+  })
+  const effectivePromptValue = listening && interimTranscript ? (prompt ? prompt + ' ' + interimTranscript : interimTranscript) : prompt
+  const lastTranslatedRef = useRef<string>("")
+  useEffect(() => {
+    if (listening) return;
+    const current = prompt.trim();
+    if (!current || current === lastTranslatedRef.current) return;
+    const run = async () => {
+      try {
+        const call = httpsCallable(functions, 'translateText');
+        const targetLang = language === 'as' ? 'as' : 'en';
+        interface TranslateResp { data?: { success?: boolean; data?: { detectedLang?: string; translatedText?: string } } }
+        const res = await call({ text: current, targetLang }) as unknown as TranslateResp;
+        const translated = res?.data?.data?.translatedText;
+        if (translated && typeof translated === 'string' && translated.trim() && translated.trim() !== current) {
+          setPrompt(translated.trim());
+          lastTranslatedRef.current = translated.trim();
+        } else {
+          lastTranslatedRef.current = current;
+        }
+      } catch {
+        /* silent */
+      }
+    };
+    run();
+  }, [listening, prompt, language]);
+
+  // Close context popover on outside click / Escape
+  useEffect(() => {
+    if (!contextOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (contextWrapperRef.current && !contextWrapperRef.current.contains(e.target as Node)) {
+        setContextOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [contextOpen])
 
   // Listen to user's recent documents
   useEffect(() => {
@@ -66,7 +121,7 @@ export default function Dashboard() {
       return
     }
     const unsubscribe = listenToUserDocuments(user.uid, (docs) => {
-      setRecentDocs(docs.slice(0, 3))
+      setRecentDocs(docs.slice(0, 8))
     })
     return () => {
       try { unsubscribe() } catch {}
@@ -247,8 +302,8 @@ export default function Dashboard() {
       setPrompt('')
 
       // Create chat immediately
-      const callCreate = httpsCallable(functions, 'createChat')
-      const createRes = (await callCreate({ userId: user.uid, language, title: initial })) as unknown as { data: { success: boolean; data?: { chatId?: string } } }
+  const callCreate = httpsCallable(functions, 'createChat')
+  const createRes = (await callCreate({ userId: user.uid, language, title: initial, contextDocIds: selectedDocIds })) as unknown as { data: { success: boolean; data?: { chatId?: string } } }
       const chatId = createRes?.data?.data?.chatId
       if (chatId) {
         // Redirect immediately with the prompt in query to auto-send
@@ -433,13 +488,13 @@ export default function Dashboard() {
           {/* Prompt Bar Section */}
           <div className="max-w-3xl mx-auto">
             {/* Prompt Input */}
-            <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-card border border-border rounded-2xl shadow-sm relative">
               {/* Top row: input + Send button */}
               <div className="flex items-center gap-3 px-4 pt-3">
                 <input
                   className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
                   placeholder={language === 'en' ? `Greetings ${username}` : `নমস্কাৰ ${username}`}
-                  value={prompt}
+                  value={effectivePromptValue}
                   onChange={(e) => setPrompt(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSendPrompt() }}
                 />
@@ -466,10 +521,47 @@ export default function Dashboard() {
                     <ChevronDown className="h-4 w-4" />
                   </button>
 
-                  <button className="flex items-center gap-2 text-sm rounded-full border border-border px-3 py-1 text-muted-foreground hover:text-foreground">
-                    <AtSign className="h-4 w-4" />
-                    <span>Add Context</span>
-                  </button>
+                  <div className="relative" ref={contextWrapperRef}>
+                    <button type="button" onClick={() => setContextOpen(o=>!o)} className="flex items-center gap-2 text-sm rounded-full border border-border px-3 py-1 text-muted-foreground hover:text-foreground">
+                      <AtSign className="h-4 w-4" />
+                      <span>Add Context{selectedDocIds.length ? ` (${selectedDocIds.length})` : ''}</span>
+                    </button>
+                    {contextOpen && (
+                      <div className="absolute left-0 mt-2 w-96 bg-card border border-border rounded-xl shadow-xl z-50 p-3">
+                        <div className="mb-2 text-xs font-semibold text-muted-foreground flex items-center justify-between">
+                          <span>Recents</span>
+                          <button onClick={()=>{setContextOpen(false)}} className="text-muted-foreground hover:text-foreground text-xs">Done</button>
+                        </div>
+                        <div className="relative mb-3">
+                          <input
+                            value={contextSearch}
+                            onChange={(e)=>setContextSearch(e.target.value)}
+                            placeholder="Search"
+                            className="w-full text-sm px-3 py-2 rounded-lg bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                          />
+                        </div>
+                        <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                          {recentDocs
+                            .filter(d => !contextSearch.trim() || d.title.toLowerCase().includes(contextSearch.toLowerCase()))
+                            .slice(0,4)
+                            .map(d => {
+                              const active = selectedDocIds.includes(d.id)
+                              return (
+                                <button
+                                  key={d.id}
+                                  type="button"
+                                  onClick={() => setSelectedDocIds(prev => prev.includes(d.id) ? prev.filter(x=>x!==d.id) : [...prev, d.id].slice(0,4))}
+                                  className={`w-full text-left text-sm rounded-lg px-3 py-2 border transition-colors ${active ? 'border-blue-500 bg-blue-500/10 text-foreground' : 'border-transparent hover:bg-muted/60 text-muted-foreground'}`}
+                                >
+                                  {d.title || 'Untitled'}
+                                </button>
+                              )
+                            })}
+                          {recentDocs.length === 0 && <div className="text-xs text-muted-foreground px-1 py-6">No documents yet.</div>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Small language toggle */}
                   <div className="flex items-center gap-1 border border-border rounded-full p-1">
@@ -490,18 +582,31 @@ export default function Dashboard() {
                 </div>
 
                 <div className="flex items-center gap-4 text-muted-foreground">
-                  <button className="hover:text-foreground" title="Camera">
-                    <Camera className="h-5 w-5" />
-                  </button>
-                  <button className="hover:text-foreground" title="Attach file">
-                    <Paperclip className="h-5 w-5" />
-                  </button>
-                  <button className="hover:text-foreground" title="Voice input">
+                  <button
+                    className={`hover:text-foreground ${listening ? 'text-red-500 animate-pulse' : ''}`}
+                    title={speechSupported ? (listening ? 'Stop recording' : 'Start voice input') : 'Speech not supported'}
+                    type="button"
+                    aria-pressed={listening}
+                    onClick={() => { if (!speechSupported) return; if (listening) { stopSpeech(); } else { resetSpeech(); startSpeech(); } }}
+                  >
                     <Mic className="h-5 w-5" />
                   </button>
                 </div>
               </div>
             </div>
+            {selectedDocIds.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2 px-1">
+                {selectedDocIds.map(id => {
+                  const title = recentDocs.find(r=>r.id===id)?.title || 'Document'
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs bg-muted/70 rounded-full pl-2 pr-1 py-0.5">
+                      {title.length>22?title.slice(0,22)+'…':title}
+                      <button type="button" onClick={()=>setSelectedDocIds(prev=>prev.filter(x=>x!==id))} className="hover:text-destructive">×</button>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
             {/* Big language toggle */}
             <div className="flex justify-center mt-4">
               <div className="flex bg-muted rounded-full p-1">

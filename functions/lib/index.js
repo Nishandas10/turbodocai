@@ -7,7 +7,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.sendChatMessage = exports.processDocument = exports.createChat = void 0;
+exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.translateText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.sendChatMessage = exports.processDocument = exports.createChat = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -47,7 +47,7 @@ const createServices = () => {
  */
 exports.createChat = (0, https_1.onCall)({ enforceAppCheck: false }, async (request) => {
     try {
-        const { userId, language, title } = request.data || {};
+        const { userId, language, title, contextDocIds } = request.data || {};
         if (!userId)
             throw new Error("Missing required parameter: userId");
         if (request.auth && request.auth.uid && request.auth.uid !== userId) {
@@ -58,6 +58,9 @@ exports.createChat = (0, https_1.onCall)({ enforceAppCheck: false }, async (requ
             title: (title || "New Chat").toString().slice(0, 60) || "New Chat",
             language: language || "en",
             model: "gpt-4o-mini",
+            contextDocIds: Array.isArray(contextDocIds)
+                ? contextDocIds.slice(0, 8)
+                : [],
             createdAt: new Date(),
             updatedAt: new Date(),
         });
@@ -292,7 +295,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
     var _a, e_1, _b, _c;
     var _d, _e, _f, _g, _h, _j, _k;
     try {
-        const { userId, prompt, language, chatId } = request.data || {};
+        const { userId, prompt, language, chatId, docIds } = request.data || {};
         if (!userId || !prompt || typeof prompt !== "string") {
             throw new Error("Missing required parameters: userId and prompt");
         }
@@ -310,6 +313,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 title: title || "New Chat",
                 language: language || "en",
                 model: "gpt-4o-mini",
+                contextDocIds: Array.isArray(docIds) ? docIds.slice(0, 8) : [],
                 createdAt: new Date(),
                 updatedAt: new Date(),
             });
@@ -320,10 +324,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
             await db
                 .collection("chats")
                 .doc(chatDocId)
-                .set({
-                updatedAt: new Date(),
-                language: language || "en",
-            }, { merge: true });
+                .set(Object.assign({ updatedAt: new Date(), language: language || "en" }, (Array.isArray(docIds) && docIds.length
+                ? { contextDocIds: docIds.slice(0, 8) }
+                : {})), { merge: true });
         }
         const messagesCol = db
             .collection("chats")
@@ -356,10 +359,86 @@ exports.sendChatMessage = (0, https_1.onCall)({
             .limit(20)
             .get();
         const convo = recentSnap.docs.map((d) => d.data());
-        const sysMsg = {
-            role: "system",
-            content: "You are a helpful AI assistant. Keep responses concise and clear. Use markdown when helpful.",
-        };
+        // Determine active context document IDs (persisted or new)
+        let activeDocIds = [];
+        try {
+            if (Array.isArray(docIds) && docIds.length) {
+                activeDocIds = docIds.slice(0, 8);
+            }
+            else {
+                const chatSnap = await db.collection("chats").doc(chatDocId).get();
+                const data = chatSnap.data();
+                if (Array.isArray(data === null || data === void 0 ? void 0 : data.contextDocIds)) {
+                    activeDocIds = data.contextDocIds.slice(0, 8);
+                }
+            }
+        }
+        catch (e) {
+            firebase_functions_1.logger.warn("Could not load contextDocIds", e);
+        }
+        // RAG retrieval: for each active doc, retrieve top relevant chunks based on prompt embedding
+        let docsContext = "";
+        if (activeDocIds.length) {
+            try {
+                const { embeddingService, pineconeService } = createServices();
+                // Embed the current user prompt
+                const queryEmbedding = await embeddingService.embedQuery(String(prompt));
+                const perDoc = 3; // top chunks per document
+                const aggregated = [];
+                for (const dId of activeDocIds) {
+                    try {
+                        const matches = await pineconeService.querySimilarChunks(queryEmbedding, userId, perDoc * 2, // over-fetch then filter
+                        dId);
+                        // Deduplicate by chunkIndex (encoded in id suffix) and take top perDoc
+                        const seen = new Set();
+                        for (const m of matches) {
+                            const idx = m.id.split("_").pop() || m.id;
+                            if (seen.has(idx))
+                                continue;
+                            seen.add(idx);
+                            aggregated.push({
+                                docId: dId,
+                                title: m.title || dId,
+                                chunk: m.chunk,
+                                score: m.score,
+                            });
+                            if (seen.size >= perDoc)
+                                break;
+                        }
+                    }
+                    catch (inner) {
+                        firebase_functions_1.logger.warn("RAG doc retrieval failed", { docId: dId, inner });
+                    }
+                }
+                // Sort aggregated by score desc and cap total context length
+                aggregated.sort((a, b) => b.score - a.score);
+                const MAX_CONTEXT_CHARS = 12000;
+                const pieces = [];
+                let used = 0;
+                for (const a of aggregated) {
+                    const clean = a.chunk.replace(/\s+/g, " ").trim();
+                    if (!clean)
+                        continue;
+                    const snippet = clean.slice(0, 1000);
+                    const block = `DOC ${a.docId} | ${a.title}\n${snippet}`;
+                    if (used + block.length > MAX_CONTEXT_CHARS)
+                        break;
+                    pieces.push(block);
+                    used += block.length;
+                }
+                if (pieces.length) {
+                    docsContext = `Retrieved document context (do not fabricate beyond this unless using general knowledge cautiously):\n\n${pieces.join("\n\n---\n\n")}`;
+                }
+            }
+            catch (ragErr) {
+                firebase_functions_1.logger.warn("RAG retrieval failed, falling back to no docsContext", ragErr);
+            }
+        }
+        const baseInstruction = "You are a helpful AI assistant. Prefer grounded answers using provided document context blocks when present. If context insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
+        const sysContent = docsContext
+            ? `${baseInstruction}\n\n${docsContext}`
+            : baseInstruction;
+        const sysMsg = { role: "system", content: sysContent };
         const chatMessages = [
             sysMsg,
             ...convo.map((m) => ({ role: m.role, content: m.content })),
@@ -560,6 +639,65 @@ exports.generateQuiz = (0, https_1.onCall)({
     }
     catch (error) {
         firebase_functions_1.logger.error("Error in generateQuiz:", error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+        };
+    }
+});
+/**
+ * Callable: detect language of text and optionally translate to target language.
+ * Data: { text: string, targetLang?: string } targetLang like 'en' or 'as' etc.
+ * Returns: { success, data: { detectedLang, translatedText, sourceText, targetLang } }
+ */
+exports.translateText = (0, https_1.onCall)({ enforceAppCheck: false }, async (request) => {
+    var _a, _b, _c;
+    try {
+        const { text, targetLang } = request.data || {};
+        if (!text || typeof text !== "string") {
+            throw new Error("Missing required parameter: text");
+        }
+        const openai = new openai_1.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        // Use a single prompt to detect + (optionally) translate to minimize latency.
+        const sys = `You are a language detection and translation helper. Detect the language (ISO 639-1 if obvious) of the given user text. If a target language code is provided and different from the detected language, translate preserving meaning. Respond strictly in JSON: {"detectedLang":"<code>","translated":"<translated or original>","changed":true|false}. If uncertain, guess the most likely.`;
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            temperature: 0,
+            messages: [
+                { role: "system", content: sys },
+                {
+                    role: "user",
+                    content: `Text: ${text}\nTarget: ${targetLang || "none"}`,
+                },
+            ],
+            response_format: { type: "json_object" },
+            max_tokens: 300,
+        });
+        let detectedLang = "und";
+        let translated = text;
+        try {
+            const raw = ((_c = (_b = (_a = completion.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) || "{}";
+            const parsed = JSON.parse(raw);
+            if (parsed.detectedLang)
+                detectedLang = String(parsed.detectedLang).slice(0, 8);
+            if (parsed.translated)
+                translated = String(parsed.translated);
+        }
+        catch (e) {
+            // Fallback: keep original
+        }
+        return {
+            success: true,
+            data: {
+                detectedLang,
+                translatedText: translated,
+                sourceText: text,
+                targetLang: targetLang || null,
+            },
+        };
+    }
+    catch (error) {
+        firebase_functions_1.logger.error("Error in translateText:", error);
         return {
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",

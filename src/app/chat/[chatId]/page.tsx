@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { ArrowUp, Loader2, ChevronDown, AtSign, Mic, Camera, Paperclip } from "lucide-react";
+import { ArrowUp, Loader2, ChevronDown, AtSign, Mic, X } from "lucide-react";
+import useSpeechToText from "@/hooks/useSpeechToText";
 import { useAuth } from "@/contexts/AuthContext";
 import { functions, db } from "@/lib/firebase";
+import { collection as fsCollection, orderBy as fsOrderBy, query as fsQuery, limit as fsLimit, getDocs } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import {
 	collection,
@@ -37,6 +39,10 @@ export default function ChatPage() {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [sending, setSending] = useState(false);
 	const [language, setLanguage] = useState<'en' | 'as'>('en');
+	const [recentDocs, setRecentDocs] = useState<Array<{ id: string; title: string }>>([]);
+	const [contextOpen, setContextOpen] = useState(false);
+	const contextWrapperRef = useRef<HTMLDivElement | null>(null);
+	const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
 	const endRef = useRef<HTMLDivElement | null>(null);
 
 	// Listen to messages
@@ -66,6 +72,22 @@ export default function ChatPage() {
 		return () => unsub();
 	}, [chatId]);
 
+	// Load recent docs for Add Context popover
+	useEffect(() => {
+		(async () => {
+			if (!user?.uid) { setRecentDocs([]); return; }
+			try {
+				const userDocsCol = fsCollection(db, "documents", user.uid, "userDocuments");
+				const qy = fsQuery(userDocsCol, fsOrderBy("createdAt", "desc"), fsLimit(20));
+				const snap = await getDocs(qy);
+				setRecentDocs(snap.docs.map(d => {
+					const data = d.data() as { title?: string } | undefined;
+					return { id: d.id, title: data?.title || 'Untitled' };
+				}));
+			} catch (e) { console.warn('recent docs fetch failed', e); }
+		})();
+	}, [user?.uid]);
+
 	// If page loaded with an initial prompt in the URL, auto-send once.
 	useEffect(() => {
 		const p = search?.get("prompt");
@@ -79,6 +101,54 @@ export default function ChatPage() {
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [search, user?.uid]);
+
+	const { supported: speechSupported, listening, interimTranscript, start, stop, reset } = useSpeechToText({
+		lang: language === 'as' ? 'as-IN' : 'en-US',
+		continuous: false,
+		interimResults: true,
+		onSegment: (seg) => {
+			// Append final segment to input if user hasn't started typing new content manually
+			setInput(prev => prev ? prev + ' ' + seg : seg);
+		}
+	});
+
+	// Detect & translate once speech ends (when listening switches false and we have new content)
+	const lastTranslatedRef = useRef<string>("");
+	useEffect(() => {
+		if (listening) return; // only act after stop
+		const current = input.trim();
+		if (!current || current === lastTranslatedRef.current) return;
+		// Call translateText to detect language; if different from UI language, translate
+		const run = async () => {
+			try {
+				const call = httpsCallable(functions, 'translateText');
+				const targetLang = language === 'as' ? 'as' : 'en';
+				interface TranslateResp { data?: { success?: boolean; data?: { detectedLang?: string; translatedText?: string } } }
+				const res = await call({ text: current, targetLang }) as unknown as TranslateResp;
+				const dataBlock = res?.data?.data;
+				const translated = dataBlock?.translatedText;
+				if (translated && typeof translated === 'string' && translated.trim() && translated.trim() !== current) {
+					setInput(translated.trim());
+					lastTranslatedRef.current = translated.trim();
+				} else {
+					lastTranslatedRef.current = current;
+				}
+			} catch {
+				// silent fail
+			}
+		};
+		run();
+	}, [listening, input, language]);
+
+	// Show interim transcript in input while listening
+	useEffect(() => {
+		if (listening && interimTranscript) {
+			// Don't permanently set; overlay visually by merging
+			// We'll just append interim to displayed value via computed variable below
+		}
+	}, [interimTranscript, listening]);
+
+	const effectiveInputValue = listening && interimTranscript ? (input ? input + ' ' + interimTranscript : interimTranscript) : input;
 
 	const send = async (overrideText?: string) => {
 		const text = (overrideText ?? input).trim();
@@ -100,9 +170,10 @@ export default function ChatPage() {
 
 			const call = httpsCallable(functions, "sendChatMessage");
 			// Fire and forget; server will stream the assistant message into Firestore
-			void call({ userId: user.uid, prompt: text, chatId, language });
+			void call({ userId: user.uid, prompt: text, chatId, language, docIds: selectedDocIds });
 
 			setInput("");
+			reset();
 		} catch (e) {
 			console.error("sendChatMessage failed", e);
 			alert("Failed to send message");
@@ -110,6 +181,28 @@ export default function ChatPage() {
 			setSending(false);
 		}
 	};
+
+	const toggleDoc = (id: string) => {
+		setSelectedDocIds(prev => prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id].slice(0,4));
+	};
+	const removeDoc = (id: string) => setSelectedDocIds(prev => prev.filter(d => d !== id));
+
+	// Close popover on outside click or Escape
+	useEffect(() => {
+		if (!contextOpen) return;
+		const onDown = (e: MouseEvent) => {
+			if (contextWrapperRef.current && !contextWrapperRef.current.contains(e.target as Node)) {
+				setContextOpen(false);
+			}
+		};
+		const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setContextOpen(false); };
+		document.addEventListener('mousedown', onDown);
+		document.addEventListener('keydown', onKey);
+		return () => {
+			document.removeEventListener('mousedown', onDown);
+			document.removeEventListener('keydown', onKey);
+		};
+	}, [contextOpen]);
 
 	return (
 		<div className="h-screen bg-background flex overflow-hidden">
@@ -147,13 +240,13 @@ export default function ChatPage() {
 				{/* Floating Prompt Bar centered to chat column (not full viewport) */}
 				<div className="pointer-events-none absolute bottom-4 left-0 right-0 px-4 z-40">
 					<div className="pointer-events-auto max-w-3xl mx-auto w-full">
-						<div className="bg-card rounded-2xl shadow-lg">
+						<div className="bg-card rounded-2xl shadow-lg relative">
 							{/* Input row */}
 							<div className="flex items-center gap-3 px-4 pt-3">
 								<input
 									className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
 									placeholder={language === 'en' ? 'Ask something...' : 'প্ৰশ্ন কৰক...'}
-									value={input}
+									value={effectiveInputValue}
 									onChange={(e) => setInput(e.target.value)}
 									onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
 								/>
@@ -176,10 +269,29 @@ export default function ChatPage() {
 										<span className="sm:hidden">Model</span>
 										<ChevronDown className="h-4 w-4" />
 									</button>
-									<button className="flex items-center gap-2 rounded-full bg-muted/40 px-3 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/60">
-										<AtSign className="h-4 w-4" />
-										<span>Add Context</span>
-									</button>
+									<div className="relative" ref={contextWrapperRef}>
+										<button type="button" onClick={() => setContextOpen(o=>!o)} className="flex items-center gap-2 rounded-full bg-muted/40 px-3 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/60">
+											<AtSign className="h-4 w-4" />
+											<span>Add Context{selectedDocIds.length ? ` (${selectedDocIds.length})` : ''}</span>
+										</button>
+										{contextOpen && (
+											<div className="absolute left-0 bottom-full mb-2 w-80 bg-popover border border-border rounded-xl shadow-xl z-50 p-3">
+												<div className="text-xs font-semibold mb-2 text-muted-foreground flex items-center justify-between">
+													<span>Recents</span>
+													<button type="button" onClick={()=>setContextOpen(false)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
+												</div>
+												<div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+													{recentDocs.slice(0,4).map(d => {
+														const active = selectedDocIds.includes(d.id);
+														return (
+															<button key={d.id} type="button" onClick={() => toggleDoc(d.id)} className={`w-full text-left text-sm rounded-lg px-3 py-2 border ${active ? 'border-blue-500 bg-blue-500/10 text-foreground' : 'border-transparent hover:bg-muted/60 text-muted-foreground'} transition-colors`}>{d.title}</button>
+														);
+													})}
+													{recentDocs.slice(0,4).length === 0 && <div className="text-xs text-muted-foreground px-1 py-4">No documents yet.</div>}
+												</div>
+											</div>
+										)}
+									</div>
 									<div className="flex items-center gap-1 rounded-full bg-muted/40 p-1">
 										<button
 											className={`px-2 py-0.5 text-xs rounded-full ${language === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
@@ -192,11 +304,30 @@ export default function ChatPage() {
 									</div>
 								</div>
 								<div className="flex items-center gap-4 text-muted-foreground">
-									<button className="hover:text-foreground" title="Camera"><Camera className="h-5 w-5" /></button>
-									<button className="hover:text-foreground" title="Attach file"><Paperclip className="h-5 w-5" /></button>
-									<button className="hover:text-foreground" title="Voice input"><Mic className="h-5 w-5" /></button>
+									<button
+										title={speechSupported ? (listening ? 'Stop recording' : 'Start voice input') : 'Speech not supported'}
+										onClick={() => { if (!speechSupported) return; if (listening) { stop(); } else { reset(); start(); } }}
+										className={`hover:text-foreground ${listening ? 'text-red-500 animate-pulse' : ''}`}
+										type="button"
+										aria-pressed={listening}
+									>
+										<Mic className="h-5 w-5" />
+									</button>
 								</div>
 							</div>
+							{selectedDocIds.length > 0 && (
+								<div className="flex flex-wrap gap-2 px-4 pb-3 -mt-1">
+									{selectedDocIds.map(id => {
+										const title = recentDocs.find(d=>d.id===id)?.title || 'Document';
+										return (
+											<span key={id} className="inline-flex items-center gap-1 text-xs bg-muted/60 rounded-full pl-2 pr-1 py-0.5">
+												{title.length > 18 ? title.slice(0,18)+"…" : title}
+												<button type="button" onClick={()=>removeDoc(id)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
+											</span>
+										);
+									})}
+								</div>
+							)}
 						</div>
 					</div>
 				</div>
