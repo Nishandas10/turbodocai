@@ -763,65 +763,6 @@ export const generateQuiz = onCall(
 );
 
 /**
- * Callable: detect language of text and optionally translate to target language.
- * Data: { text: string, targetLang?: string } targetLang like 'en' or 'as' etc.
- * Returns: { success, data: { detectedLang, translatedText, sourceText, targetLang } }
- */
-export const translateText = onCall(
-  { enforceAppCheck: false },
-  async (request) => {
-    try {
-      const { text, targetLang } = request.data || {};
-      if (!text || typeof text !== "string") {
-        throw new Error("Missing required parameter: text");
-      }
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      // Use a single prompt to detect + (optionally) translate to minimize latency.
-      const sys = `You are a language detection and translation helper. Detect the language (ISO 639-1 if obvious) of the given user text. If a target language code is provided and different from the detected language, translate preserving meaning. Respond strictly in JSON: {"detectedLang":"<code>","translated":"<translated or original>","changed":true|false}. If uncertain, guess the most likely.`;
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        temperature: 0,
-        messages: [
-          { role: "system", content: sys },
-          {
-            role: "user",
-            content: `Text: ${text}\nTarget: ${targetLang || "none"}`,
-          },
-        ],
-        response_format: { type: "json_object" },
-        max_tokens: 300,
-      });
-      let detectedLang = "und";
-      let translated = text;
-      try {
-        const raw = completion.choices?.[0]?.message?.content || "{}";
-        const parsed = JSON.parse(raw);
-        if (parsed.detectedLang)
-          detectedLang = String(parsed.detectedLang).slice(0, 8);
-        if (parsed.translated) translated = String(parsed.translated);
-      } catch (e) {
-        // Fallback: keep original
-      }
-      return {
-        success: true,
-        data: {
-          detectedLang,
-          translatedText: translated,
-          sourceText: text,
-          targetLang: targetLang || null,
-        },
-      };
-    } catch (error) {
-      logger.error("Error in translateText:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
-  }
-);
-
-/**
  * Callable function to fetch full raw document text from Pinecone (ordered by chunk index)
  * Falls back to Firestore stored raw content if vectors are not available.
  */

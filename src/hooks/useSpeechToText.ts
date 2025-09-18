@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface UseSpeechToTextOptions {
-  lang?: string;
+  lang?: string; // requested locale
+  fallbackLangs?: string[]; // optional ordered fallback locales
   continuous?: boolean; // keep listening after final results
   interimResults?: boolean; // whether to provide interim transcripts
   onSegment?: (text: string) => void; // fires for each new final segment
+  onPartial?: (text: string) => void; // fires rapidly with interim text
 }
 
 interface UseSpeechToTextReturn {
@@ -28,9 +30,11 @@ export function useSpeechToText(
 ): UseSpeechToTextReturn {
   const {
     lang = "en-US",
+    fallbackLangs = [],
     continuous = false,
     interimResults = true,
     onSegment,
+    onPartial,
   } = options;
 
   type RecognitionConstructor = new () => SpeechRecognitionLike;
@@ -85,12 +89,19 @@ export function useSpeechToText(
   const [error, setError] = useState<string | null>(null);
   const deliveredSegmentsRef = useRef<string[]>([]);
 
+  const triedFallbackRef = useRef(false);
+
   const start = useCallback(() => {
     if (!supported) return;
     setError(null);
     if (!recognitionRef.current) {
       const rec = new RecognitionClass();
-      rec.lang = lang;
+      // Assign primary lang; some browsers may throw for unsupported locale
+      try {
+        rec.lang = lang;
+      } catch {
+        // ignore
+      }
       rec.continuous = continuous;
       rec.interimResults = interimResults;
 
@@ -110,10 +121,30 @@ export function useSpeechToText(
           }
         }
         setInterimTranscript(interim.trim());
+        if (interim && onPartial) onPartial(interim.trim());
       };
 
       rec.onerror = (e: { error?: string }) => {
-        setError(e?.error || "speech_error");
+        const code = e?.error || "speech_error";
+        setError(code);
+        // Attempt one-time fallback locale if provided
+        if (!triedFallbackRef.current && fallbackLangs.length) {
+          triedFallbackRef.current = true;
+          try {
+            rec.stop();
+          } catch {}
+          const fb = fallbackLangs[0];
+          try {
+            (rec as unknown as SpeechRecognitionLike).lang = fb;
+          } catch {}
+          try {
+            rec.start();
+            setListening(true);
+            return;
+          } catch {
+            /* ignore */
+          }
+        }
       };
 
       rec.onend = () => {
@@ -142,6 +173,8 @@ export function useSpeechToText(
     continuous,
     interimResults,
     onSegment,
+    onPartial,
+    fallbackLangs,
     RecognitionClass,
   ]);
 

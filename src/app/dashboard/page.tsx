@@ -63,37 +63,65 @@ export default function Dashboard() {
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [contextSearch, setContextSearch] = useState('')
   const contextWrapperRef = useRef<HTMLDivElement | null>(null)
+  const quickLangRef = useRef<'en' | 'as' | 'unknown'>('unknown')
+  const lastPartialRef = useRef<string>('')
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
     lang: language === 'as' ? 'as-IN' : 'en-US',
+    fallbackLangs: language === 'as' ? ['bn-IN','en-US'] : ['en-US'],
     continuous: false,
     interimResults: true,
+    onPartial: (partial) => {
+      lastPartialRef.current = partial
+      if (/[^a-zA-Z0-9]*[\u0980-\u09FF]/.test(partial)) {
+        quickLangRef.current = 'as'
+      } else if (/[a-zA-Z]/.test(partial) && !/[\u0980-\u09FF]/.test(partial)) {
+        if (quickLangRef.current === 'unknown') quickLangRef.current = 'en'
+      }
+    },
     onSegment: (seg) => setPrompt(prev => prev ? prev + ' ' + seg : seg)
   })
   const effectivePromptValue = listening && interimTranscript ? (prompt ? prompt + ' ' + interimTranscript : interimTranscript) : prompt
   const lastTranslatedRef = useRef<string>("")
+  const translateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (listening) return;
-    const current = prompt.trim();
-    if (!current || current === lastTranslatedRef.current) return;
-    const run = async () => {
-      try {
-        const call = httpsCallable(functions, 'translateText');
-        const targetLang = language === 'as' ? 'as' : 'en';
-        interface TranslateResp { data?: { success?: boolean; data?: { detectedLang?: string; translatedText?: string } } }
-        const res = await call({ text: current, targetLang }) as unknown as TranslateResp;
-        const translated = res?.data?.data?.translatedText;
-        if (translated && typeof translated === 'string' && translated.trim() && translated.trim() !== current) {
-          setPrompt(translated.trim());
-          lastTranslatedRef.current = translated.trim();
-        } else {
-          lastTranslatedRef.current = current;
-        }
-      } catch {
-        /* silent */
-      }
-    };
-    run();
-  }, [listening, prompt, language]);
+    if (listening) {
+      if (translateTimerRef.current) { clearTimeout(translateTimerRef.current); translateTimerRef.current = null }
+      return
+    }
+    const current = prompt.trim()
+    if (!current || current === lastTranslatedRef.current) return
+    if ((language === 'as' && quickLangRef.current === 'as') || (language === 'en' && quickLangRef.current === 'en')) {
+      lastTranslatedRef.current = current
+      return
+    }
+    translateTimerRef.current = setTimeout(() => {
+      (async () => {
+        try {
+          const targetLang = language === 'as' ? 'as' : 'en'
+          const force = quickLangRef.current === 'unknown'
+          const controller = new AbortController()
+          const abortTimeout = setTimeout(()=>controller.abort(), 9000)
+          const res = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: current, targetLang, force }),
+            signal: controller.signal
+          })
+          clearTimeout(abortTimeout)
+          if (!res.ok) return
+          const json: { success?: boolean; data?: { translatedText?: string } } = await res.json()
+          const translated = json?.data?.translatedText
+          if (translated && translated.trim() && translated.trim() !== current) {
+            setPrompt(translated.trim())
+            lastTranslatedRef.current = translated.trim()
+          } else {
+            lastTranslatedRef.current = current
+          }
+        } catch { /* ignore */ }
+      })()
+    }, 250)
+    return () => { if (translateTimerRef.current) clearTimeout(translateTimerRef.current) }
+  }, [listening, prompt, language])
 
   // Close context popover on outside click / Escape
   useEffect(() => {

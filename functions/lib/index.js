@@ -7,7 +7,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.translateText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.sendChatMessage = exports.processDocument = exports.createChat = void 0;
+exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.sendChatMessage = exports.processDocument = exports.createChat = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -639,65 +639,6 @@ exports.generateQuiz = (0, https_1.onCall)({
     }
     catch (error) {
         firebase_functions_1.logger.error("Error in generateQuiz:", error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-        };
-    }
-});
-/**
- * Callable: detect language of text and optionally translate to target language.
- * Data: { text: string, targetLang?: string } targetLang like 'en' or 'as' etc.
- * Returns: { success, data: { detectedLang, translatedText, sourceText, targetLang } }
- */
-exports.translateText = (0, https_1.onCall)({ enforceAppCheck: false }, async (request) => {
-    var _a, _b, _c;
-    try {
-        const { text, targetLang } = request.data || {};
-        if (!text || typeof text !== "string") {
-            throw new Error("Missing required parameter: text");
-        }
-        const openai = new openai_1.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        // Use a single prompt to detect + (optionally) translate to minimize latency.
-        const sys = `You are a language detection and translation helper. Detect the language (ISO 639-1 if obvious) of the given user text. If a target language code is provided and different from the detected language, translate preserving meaning. Respond strictly in JSON: {"detectedLang":"<code>","translated":"<translated or original>","changed":true|false}. If uncertain, guess the most likely.`;
-        const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0,
-            messages: [
-                { role: "system", content: sys },
-                {
-                    role: "user",
-                    content: `Text: ${text}\nTarget: ${targetLang || "none"}`,
-                },
-            ],
-            response_format: { type: "json_object" },
-            max_tokens: 300,
-        });
-        let detectedLang = "und";
-        let translated = text;
-        try {
-            const raw = ((_c = (_b = (_a = completion.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) || "{}";
-            const parsed = JSON.parse(raw);
-            if (parsed.detectedLang)
-                detectedLang = String(parsed.detectedLang).slice(0, 8);
-            if (parsed.translated)
-                translated = String(parsed.translated);
-        }
-        catch (e) {
-            // Fallback: keep original
-        }
-        return {
-            success: true,
-            data: {
-                detectedLang,
-                translatedText: translated,
-                sourceText: text,
-                targetLang: targetLang || null,
-            },
-        };
-    }
-    catch (error) {
-        firebase_functions_1.logger.error("Error in translateText:", error);
         return {
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",

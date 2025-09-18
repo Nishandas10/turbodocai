@@ -34,6 +34,9 @@ export default function ChatPage() {
 	const chatId = (params?.chatId as string) || "";
 	const { user } = useAuth();
 	const search = useSearchParams();
+	// hydration guard
+	const [mounted, setMounted] = useState(false);
+	useEffect(()=>{ setMounted(true); }, []);
 
 	const [input, setInput] = useState("");
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -102,43 +105,183 @@ export default function ChatPage() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [search, user?.uid]);
 
+	const quickLangRef = useRef<'en' | 'as' | 'unknown'>('unknown');
+	const lastPartialRef = useRef<string>('');
+	const [translatedInterim, setTranslatedInterim] = useState<string>('');
+	const interimTranslateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const currentInterimRef = useRef<string>('');
+	const translationAbortRef = useRef<AbortController | null>(null);
+
+	const isAssameseScript = (t: string) => /[\u0980-\u09FF]/.test(t);
+
+	const translateInterimText = async (text: string, isLatest: boolean = true) => {
+		if (!text.trim() || language !== 'as' || !isLatest) return;
+		// If already Assamese script, keep as-is
+		if (isAssameseScript(text)) {
+			setTranslatedInterim(text);
+			return;
+		}
+		// Abort prior
+		if (translationAbortRef.current) translationAbortRef.current.abort();
+		try {
+			const controller = new AbortController();
+			translationAbortRef.current = controller;
+			const res = await fetch('/api/translate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ text, targetLang: 'as', force: true }),
+				signal: controller.signal
+			});
+			if (!res.ok || controller.signal.aborted) return;
+			const json: { success?: boolean; data?: { translatedText?: string } } = await res.json();
+			const translated = json?.data?.translatedText;
+			if (!controller.signal.aborted && translated && currentInterimRef.current === text) {
+				setTranslatedInterim(translated);
+			}
+		} catch (e) {
+			if ((e as Error).name !== 'AbortError') {
+				if (currentInterimRef.current === text) setTranslatedInterim(text);
+			}
+		}
+	};
+
 	const { supported: speechSupported, listening, interimTranscript, start, stop, reset } = useSpeechToText({
 		lang: language === 'as' ? 'as-IN' : 'en-US',
+		fallbackLangs: language === 'as' ? ['bn-IN','en-US'] : ['en-US'],
 		continuous: false,
 		interimResults: true,
+		onPartial: (partial) => {
+			lastPartialRef.current = partial;
+			currentInterimRef.current = partial;
+			// quick detection
+			if (isAssameseScript(partial)) quickLangRef.current = 'as';
+			else if (/[a-zA-Z]/.test(partial) && !isAssameseScript(partial) && quickLangRef.current === 'unknown') quickLangRef.current = 'en';
+			// When Assamese target selected, always show partial immediately then translate if needed
+			if (language === 'as' && partial.trim()) {
+				if (interimTranslateTimerRef.current) clearTimeout(interimTranslateTimerRef.current);
+				setTranslatedInterim(partial); // immediate echo
+				interimTranslateTimerRef.current = setTimeout(() => {
+					translateInterimText(partial, currentInterimRef.current === partial);
+				}, 180); // slightly faster
+			} else {
+				setTranslatedInterim(partial);
+			}
+		},
 		onSegment: (seg) => {
-			// Append final segment to input if user hasn't started typing new content manually
 			setInput(prev => prev ? prev + ' ' + seg : seg);
+			setTranslatedInterim(''); // clear interim on final segment
+			currentInterimRef.current = '';
 		}
 	});
 
-	// Detect & translate once speech ends (when listening switches false and we have new content)
-	const lastTranslatedRef = useRef<string>("");
+	// Cleanup on unmount or language change
 	useEffect(() => {
-		if (listening) return; // only act after stop
-		const current = input.trim();
-		if (!current || current === lastTranslatedRef.current) return;
-		// Call translateText to detect language; if different from UI language, translate
-		const run = async () => {
-			try {
-				const call = httpsCallable(functions, 'translateText');
-				const targetLang = language === 'as' ? 'as' : 'en';
-				interface TranslateResp { data?: { success?: boolean; data?: { detectedLang?: string; translatedText?: string } } }
-				const res = await call({ text: current, targetLang }) as unknown as TranslateResp;
-				const dataBlock = res?.data?.data;
-				const translated = dataBlock?.translatedText;
-				if (translated && typeof translated === 'string' && translated.trim() && translated.trim() !== current) {
-					setInput(translated.trim());
-					lastTranslatedRef.current = translated.trim();
-				} else {
-					lastTranslatedRef.current = current;
-				}
-			} catch {
-				// silent fail
+		return () => {
+			if (interimTranslateTimerRef.current) {
+				clearTimeout(interimTranslateTimerRef.current);
+			}
+			if (translationAbortRef.current) {
+				translationAbortRef.current.abort();
 			}
 		};
-		run();
-	}, [listening, input, language]);
+	}, []);
+
+	// Clear interim translation when language changes
+	useEffect(() => {
+		setTranslatedInterim('');
+		currentInterimRef.current = '';
+		if (translationAbortRef.current) {
+			translationAbortRef.current.abort();
+		}
+	}, [language]);
+
+	// Graceful UI state for listening pill to avoid flicker when the underlying
+	// speech API briefly stops/starts (permission prompts, fallback locale retry, etc.)
+	const [voiceActive, setVoiceActive] = useState(false);
+	const deactivateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const wantVoiceRef = useRef(false); // tracks user intent to keep capturing
+
+	const handleStartVoice = () => {
+		if (!speechSupported) return;
+		if (deactivateTimerRef.current) { clearTimeout(deactivateTimerRef.current); deactivateTimerRef.current = null; }
+		wantVoiceRef.current = true;
+		reset();
+		setVoiceActive(true);
+		start();
+	};
+	const handleStopVoice = () => {
+		wantVoiceRef.current = false;
+		stop();
+		if (deactivateTimerRef.current) clearTimeout(deactivateTimerRef.current);
+		// Immediately hide pill for snappy UX
+		setVoiceActive(false);
+	};
+
+	useEffect(() => {
+		if (listening) {
+			if (wantVoiceRef.current && !voiceActive) setVoiceActive(true);
+			if (deactivateTimerRef.current) { clearTimeout(deactivateTimerRef.current); deactivateTimerRef.current = null; }
+		} else {
+			if (wantVoiceRef.current) {
+				// Only auto-restart if user still wants voice
+				setTimeout(() => { if (wantVoiceRef.current) start(); }, 120);
+			} else {
+				// user intentionally stopped; ensure pill hidden
+				if (voiceActive) setVoiceActive(false);
+			}
+		}
+	}, [listening, voiceActive, start]);
+
+	useEffect(() => () => { 
+		if (deactivateTimerRef.current) clearTimeout(deactivateTimerRef.current);
+		if (interimTranslateTimerRef.current) clearTimeout(interimTranslateTimerRef.current);
+	}, []);
+
+	// Debounced translation gating (refactored: react to input+language only)
+	const lastTranslatedRef = useRef<string>("");
+	const translateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => {
+		const current = input.trim();
+		if (!current || current === lastTranslatedRef.current) return;
+		// if user has selected Assamese but content appears already Assamese (script), skip
+		if (language === 'as' && isAssameseScript(current)) {
+			lastTranslatedRef.current = current;
+			return;
+		}
+		// if English target and text clearly Latin only, skip
+		if (language === 'en' && /[a-zA-Z]/.test(current) && !isAssameseScript(current)) {
+			lastTranslatedRef.current = current;
+			return;
+		}
+		if (translateTimerRef.current) clearTimeout(translateTimerRef.current);
+		translateTimerRef.current = setTimeout(() => {
+			(async () => {
+				try {
+					const targetLang = language === 'as' ? 'as' : 'en';
+					const force = true; // always force since heuristic simplified
+					const controller = new AbortController();
+					const abortTimeout = setTimeout(()=>controller.abort(), 9000);
+					const res = await fetch('/api/translate', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ text: current, targetLang, force }),
+						signal: controller.signal
+					});
+					clearTimeout(abortTimeout);
+					if (!res.ok) return;
+					const json: { success?: boolean; data?: { translatedText?: string } } = await res.json();
+					const translated = json?.data?.translatedText;
+					if (translated && translated.trim() && translated.trim() !== current) {
+						setInput(translated.trim());
+						lastTranslatedRef.current = translated.trim();
+					} else {
+						lastTranslatedRef.current = current;
+					}
+				} catch {/* ignore */}
+			})();
+		}, 300);
+		return () => { if (translateTimerRef.current) clearTimeout(translateTimerRef.current); };
+	}, [input, language]);
 
 	// Show interim transcript in input while listening
 	useEffect(() => {
@@ -148,7 +291,9 @@ export default function ChatPage() {
 		}
 	}, [interimTranscript, listening]);
 
-	const effectiveInputValue = listening && interimTranscript ? (input ? input + ' ' + interimTranscript : interimTranscript) : input;
+	const effectiveInputValue = (voiceActive && (translatedInterim || interimTranscript))
+		? (input ? input + ' ' + (translatedInterim || interimTranscript) : (translatedInterim || interimTranscript))
+		: input;
 
 	const send = async (overrideText?: string) => {
 		const text = (overrideText ?? input).trim();
@@ -304,15 +449,35 @@ export default function ChatPage() {
 									</div>
 								</div>
 								<div className="flex items-center gap-4 text-muted-foreground">
-									<button
-										title={speechSupported ? (listening ? 'Stop recording' : 'Start voice input') : 'Speech not supported'}
-										onClick={() => { if (!speechSupported) return; if (listening) { stop(); } else { reset(); start(); } }}
-										className={`hover:text-foreground ${listening ? 'text-red-500 animate-pulse' : ''}`}
-										type="button"
-										aria-pressed={listening}
-									>
-										<Mic className="h-5 w-5" />
-									</button>
+									{/* Voice input section - fixed height container to prevent layout shift */}
+									<div className="h-9 flex items-center">
+										{voiceActive ? (
+											<div className="flex items-center gap-1 rounded-full bg-muted/60 px-2 py-1 pr-3 transition-all duration-200 ease-in-out">
+												<div className="flex items-center gap-1 mr-1" aria-label={listening ? 'Listening…' : 'Processing voice…'}>
+													<span className="h-4 w-1 rounded-full bg-red-500 animate-[pulse_0.9s_ease-in-out_infinite]" />
+													<span className="h-4 w-1 rounded-full bg-red-500 animate-[pulse_0.9s_ease-in-out_infinite_0.15s]" />
+													<span className="h-4 w-1 rounded-full bg-red-500 animate-[pulse_0.9s_ease-in-out_infinite_0.3s]" />
+												</div>
+												<button
+													type="button"
+													onClick={handleStopVoice}
+													className="p-1.5 rounded-full bg-red-500/90 text-white hover:bg-red-600 transition-colors"
+													title="Stop voice input"
+												>
+													<X className="h-4 w-4" />
+												</button>
+											</div>
+										) : (
+											<button
+												title={mounted ? (speechSupported ? 'Start voice input' : 'Speech not supported') : 'Start voice input'}
+												onClick={handleStartVoice}
+												className="hover:text-foreground p-2 transition-colors duration-200"
+												type="button"
+											>
+												<Mic className="h-5 w-5" />
+											</button>
+										)}
+									</div>
 								</div>
 							</div>
 							{selectedDocIds.length > 0 && (
@@ -325,10 +490,10 @@ export default function ChatPage() {
 												<button type="button" onClick={()=>removeDoc(id)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
 											</span>
 										);
-									})}
-								</div>
-							)}
-						</div>
+										})}
+									</div>
+								)}
+							</div>
 					</div>
 				</div>
 			</div>
