@@ -19,7 +19,8 @@ import {
   Box,
   ChevronRight,
   MoreHorizontal,
-  X
+  X,
+  Brain
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
@@ -58,6 +59,9 @@ export default function Dashboard() {
   const [recentDocs, setRecentDocs] = useState<UserDoc[]>([])
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const [spaceCounts, setSpaceCounts] = useState<Record<string, number>>({})
+  // Prompt options
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
+  const [thinkModeEnabled, setThinkModeEnabled] = useState(false)
   // Add Context state
   const [contextOpen, setContextOpen] = useState(false)
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
@@ -334,8 +338,15 @@ export default function Dashboard() {
       setPrompt('')
 
       // Create chat immediately
-  const callCreate = httpsCallable(functions, 'createChat')
-  const createRes = (await callCreate({ userId: user.uid, language: 'en', title: initial, contextDocIds: selectedDocIds })) as unknown as { data: { success: boolean; data?: { chatId?: string } } }
+      const callCreate = httpsCallable(functions, 'createChat')
+      const createRes = (await callCreate({
+        userId: user.uid,
+        language: 'en',
+        title: initial,
+        contextDocIds: selectedDocIds,
+        webSearch: webSearchEnabled,
+        thinkMode: thinkModeEnabled,
+      })) as unknown as { data: { success: boolean; data?: { chatId?: string } } }
       const chatId = createRes?.data?.data?.chatId
       if (chatId) {
         // Redirect immediately with the prompt in query to auto-send
@@ -561,12 +572,34 @@ export default function Dashboard() {
               {/* Bottom row: model, add context, language toggle, icons */}
               <div className="flex items-center justify-between px-4 pb-3 mt-2">
                 <div className="flex items-center gap-3">
-                  <button className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-                    {/* Model name placeholder */}
-                    <span className="hidden sm:inline">Assistant</span>
-                    <span className="sm:hidden">Model</span>
-                    <ChevronDown className="h-4 w-4" />
-                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+                        <span className="hidden sm:inline">{thinkModeEnabled ? 'Learn Pro' : 'Learn+'}</span>
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-64">
+                      <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); setThinkModeEnabled(v=>!v) }} className="flex items-center gap-3">
+                        <Brain className="h-4 w-4 text-emerald-600" />
+                        <span className="flex-1">Learn Pro</span>
+                        <span role="switch" aria-checked={thinkModeEnabled} className={`relative shrink-0 w-16 h-7 rounded-full transition-colors duration-200 ${thinkModeEnabled ? 'bg-violet-600' : 'bg-muted'}`}>
+                          <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${thinkModeEnabled ? 'text-white opacity-100' : 'opacity-0'}`}>ON</span>
+                          <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${thinkModeEnabled ? 'opacity-0' : 'text-foreground/60 opacity-100'}`}>OFF</span>
+                          <span className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${thinkModeEnabled ? 'translate-x-8' : ''}`} />
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); setWebSearchEnabled(v=>!v) }} className="flex items-center gap-3">
+                        <Globe className="h-4 w-4 text-blue-600" />
+                        <span className="flex-1">Search</span>
+                        <span role="switch" aria-checked={webSearchEnabled} className={`relative shrink-0 w-16 h-7 rounded-full transition-colors duration-200 ${webSearchEnabled ? 'bg-blue-600' : 'bg-muted'}`}>
+                          <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${webSearchEnabled ? 'text-white opacity-100' : 'opacity-0'}`}>ON</span>
+                          <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${webSearchEnabled ? 'opacity-0' : 'text-foreground/60 opacity-100'}`}>OFF</span>
+                          <span className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${webSearchEnabled ? 'translate-x-8' : ''}`} />
+                        </span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
                   <div className="relative" ref={contextWrapperRef}>
                     <button type="button" onClick={() => setContextOpen(o=>!o)} className="flex items-center gap-2 text-sm rounded-full border border-border px-3 py-1 text-muted-foreground hover:text-foreground">
@@ -609,6 +642,15 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
+                  {webSearchEnabled && (
+                    <span className="inline-flex items-center gap-1 text-xs bg-blue-500/10 text-blue-600 rounded-full pl-2 pr-1 py-0.5 border border-blue-500/30">
+                      <Globe className="h-3 w-3" />
+                      <span>@WebSearch</span>
+                      <button type="button" onClick={() => setWebSearchEnabled(false)} className="hover:text-destructive/80 ml-0.5">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
 
                   {/* Language toggle removed */}
                 </div>

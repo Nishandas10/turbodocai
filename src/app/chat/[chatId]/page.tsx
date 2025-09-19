@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { ArrowUp, Loader2, ChevronDown, AtSign, Mic, X } from "lucide-react";
+import { ArrowUp, Loader2, ChevronDown, AtSign, Mic, X, Globe, Brain } from "lucide-react";
 import useSpeechToText from "@/hooks/useSpeechToText";
 import { useAuth } from "@/contexts/AuthContext";
 import { functions, db } from "@/lib/firebase";
@@ -20,6 +20,7 @@ import {
 	setDoc,
 } from "firebase/firestore";
 import DashboardSidebar from "@/components/DashboardSidebar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 type ChatMessage = {
 	id?: string;
@@ -41,6 +42,9 @@ export default function ChatPage() {
 	const [input, setInput] = useState("");
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [sending, setSending] = useState(false);
+	// Prompt options
+	const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+	const [thinkModeEnabled, setThinkModeEnabled] = useState(false);
 	// Language selection removed; default English
 	const [recentDocs, setRecentDocs] = useState<Array<{ id: string; title: string }>>([]);
 	const [contextOpen, setContextOpen] = useState(false);
@@ -200,7 +204,15 @@ export default function ChatPage() {
 
 			const call = httpsCallable(functions, "sendChatMessage");
 			// Fire and forget; server will stream the assistant message into Firestore
-			void call({ userId: user.uid, prompt: text, chatId, language: 'en', docIds: selectedDocIds });
+			void call({
+				userId: user.uid,
+				prompt: text,
+				chatId,
+				language: 'en',
+				docIds: selectedDocIds,
+				webSearch: webSearchEnabled,
+				thinkMode: thinkModeEnabled,
+			});
 
 			setInput("");
 			reset();
@@ -306,11 +318,48 @@ export default function ChatPage() {
 							{/* Options row */}
 							<div className="flex items-center justify-between px-4 pb-3 mt-2 text-sm">
 								<div className="flex items-center gap-3">
-									<button className="flex items-center gap-1 text-muted-foreground hover:text-foreground">
-										<span className="hidden sm:inline">Assistant</span>
-										<span className="sm:hidden">Model</span>
-										<ChevronDown className="h-4 w-4" />
-									</button>
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<button className="flex items-center gap-1 text-muted-foreground hover:text-foreground">
+												<span className="hidden sm:inline">{thinkModeEnabled ? 'Learn Pro' : 'Learn+'}</span>
+												<ChevronDown className="h-4 w-4" />
+											</button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="start" className="w-64">
+											<DropdownMenuItem
+												onSelect={(e) => { e.preventDefault(); setThinkModeEnabled(v => !v); }}
+												className="flex items-center gap-3"
+											>
+												<Brain className="h-4 w-4 text-emerald-600" />
+												<span className="flex-1">Learn Pro</span>
+												<span
+													role="switch"
+													aria-checked={thinkModeEnabled}
+													className={`relative shrink-0 w-16 h-7 rounded-full transition-colors duration-200 ${thinkModeEnabled ? 'bg-violet-600' : 'bg-muted'}`}
+												>
+													<span className={`absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${thinkModeEnabled ? 'text-white opacity-100' : 'opacity-0'}`}>ON</span>
+													<span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${thinkModeEnabled ? 'opacity-0' : 'text-foreground/60 opacity-100'}`}>OFF</span>
+													<span className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${thinkModeEnabled ? 'translate-x-8' : ''}`} />
+												</span>
+											</DropdownMenuItem>
+											<DropdownMenuItem
+												onSelect={(e) => { e.preventDefault(); setWebSearchEnabled(v => !v); }}
+												className="flex items-center gap-3"
+											>
+												<Globe className="h-4 w-4 text-blue-600" />
+												<span className="flex-1">Search</span>
+												<span
+													role="switch"
+													aria-checked={webSearchEnabled}
+													className={`relative shrink-0 w-16 h-7 rounded-full transition-colors duration-200 ${webSearchEnabled ? 'bg-blue-600' : 'bg-muted'}`}
+												>
+													<span className={`absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${webSearchEnabled ? 'text-white opacity-100' : 'opacity-0'}`}>ON</span>
+													<span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold transition-opacity ${webSearchEnabled ? 'opacity-0' : 'text-foreground/60 opacity-100'}`}>OFF</span>
+													<span className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${webSearchEnabled ? 'translate-x-8' : ''}`} />
+												</span>
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
 									<div className="relative" ref={contextWrapperRef}>
 										<button type="button" onClick={() => setContextOpen(o=>!o)} className="flex items-center gap-2 rounded-full bg-muted/40 px-3 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/60">
 											<AtSign className="h-4 w-4" />
@@ -335,8 +384,17 @@ export default function ChatPage() {
 										)}
 									</div>
 									{/* Language toggle removed */}
-								</div>
-								<div className="flex items-center gap-4 text-muted-foreground">
+											{webSearchEnabled && (
+												<span className="inline-flex items-center gap-1 text-xs bg-blue-500/10 text-blue-600 rounded-full pl-2 pr-1 py-0.5 border border-blue-500/30">
+													<Globe className="h-3 w-3" />
+													<span>@WebSearch</span>
+													<button type="button" onClick={() => setWebSearchEnabled(false)} className="hover:text-destructive/80 ml-0.5">
+														<X className="h-3 w-3" />
+													</button>
+												</span>
+											)}
+										</div>
+									<div className="flex items-center gap-4 text-muted-foreground">
 									{/* Voice input section - fixed height container to prevent layout shift */}
 									<div className="h-9 flex items-center">
 										{voiceActive ? (
