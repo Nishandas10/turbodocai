@@ -293,17 +293,21 @@ exports.sendChatMessage = (0, https_1.onCall)({
     enforceAppCheck: false,
 }, async (request) => {
     var _a, e_1, _b, _c;
-    var _d, _e, _f, _g, _h, _j, _k;
+    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7;
     try {
-        const { userId, prompt, language, chatId, docIds } = request.data || {};
+        const { userId, prompt, language, chatId, docIds, webSearch, thinkMode } = request.data || {};
         if (!userId || !prompt || typeof prompt !== "string") {
             throw new Error("Missing required parameters: userId and prompt");
         }
-        // Optional: basic auth consistency check if available
         if (request.auth && request.auth.uid && request.auth.uid !== userId) {
             throw new Error("Authenticated user mismatch");
         }
         const openai = new openai_1.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const model = webSearch
+            ? "gpt-4.1"
+            : thinkMode
+                ? "o3-mini"
+                : "gpt-4o-mini";
         // Create or fetch chat document
         let chatDocId = chatId;
         if (!chatDocId) {
@@ -312,7 +316,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 userId,
                 title: title || "New Chat",
                 language: language || "en",
-                model: "gpt-4o-mini",
+                model,
                 contextDocIds: Array.isArray(docIds) ? docIds.slice(0, 8) : [],
                 createdAt: new Date(),
                 updatedAt: new Date(),
@@ -320,11 +324,10 @@ exports.sendChatMessage = (0, https_1.onCall)({
             chatDocId = chatRef.id;
         }
         else {
-            // Touch updatedAt if continuing
             await db
                 .collection("chats")
                 .doc(chatDocId)
-                .set(Object.assign({ updatedAt: new Date(), language: language || "en" }, (Array.isArray(docIds) && docIds.length
+                .set(Object.assign({ updatedAt: new Date(), language: language || "en", model }, (Array.isArray(docIds) && docIds.length
                 ? { contextDocIds: docIds.slice(0, 8) }
                 : {})), { merge: true });
         }
@@ -332,7 +335,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
             .collection("chats")
             .doc(chatDocId)
             .collection("messages");
-        // Add user's message if client hasn't just added it
+        // Add user's message if not already last
         try {
             const lastSnap = await messagesCol
                 .orderBy("createdAt", "desc")
@@ -352,14 +355,13 @@ exports.sendChatMessage = (0, https_1.onCall)({
         catch (dupeErr) {
             firebase_functions_1.logger.warn("User message duplicate check failed", dupeErr);
         }
-        // Build the conversation context (last N messages)
-        // For simplicity, fetch up to last 20 messages
+        // Load last messages for context
         const recentSnap = await messagesCol
             .orderBy("createdAt", "asc")
             .limit(20)
             .get();
         const convo = recentSnap.docs.map((d) => d.data());
-        // Determine active context document IDs (persisted or new)
+        // Active context documents
         let activeDocIds = [];
         try {
             if (Array.isArray(docIds) && docIds.length) {
@@ -368,31 +370,27 @@ exports.sendChatMessage = (0, https_1.onCall)({
             else {
                 const chatSnap = await db.collection("chats").doc(chatDocId).get();
                 const data = chatSnap.data();
-                if (Array.isArray(data === null || data === void 0 ? void 0 : data.contextDocIds)) {
+                if (Array.isArray(data === null || data === void 0 ? void 0 : data.contextDocIds))
                     activeDocIds = data.contextDocIds.slice(0, 8);
-                }
             }
         }
         catch (e) {
             firebase_functions_1.logger.warn("Could not load contextDocIds", e);
         }
-        // RAG retrieval: for each active doc, retrieve top relevant chunks based on prompt embedding
+        // Optional RAG retrieval
         let docsContext = "";
         if (activeDocIds.length) {
             try {
                 const { embeddingService, pineconeService } = createServices();
-                // Embed the current user prompt
                 const queryEmbedding = await embeddingService.embedQuery(String(prompt));
-                const perDoc = 3; // top chunks per document
+                const perDoc = 3;
                 const aggregated = [];
                 for (const dId of activeDocIds) {
                     try {
-                        const matches = await pineconeService.querySimilarChunks(queryEmbedding, userId, perDoc * 2, // over-fetch then filter
-                        dId);
-                        // Deduplicate by chunkIndex (encoded in id suffix) and take top perDoc
+                        const matches = await pineconeService.querySimilarChunks(queryEmbedding, userId, perDoc * 2, dId);
                         const seen = new Set();
                         for (const m of matches) {
-                            const idx = m.id.split("_").pop() || m.id;
+                            const idx = String(m.id).split("_").pop() || String(m.id);
                             if (seen.has(idx))
                                 continue;
                             seen.add(idx);
@@ -410,7 +408,6 @@ exports.sendChatMessage = (0, https_1.onCall)({
                         firebase_functions_1.logger.warn("RAG doc retrieval failed", { docId: dId, inner });
                     }
                 }
-                // Sort aggregated by score desc and cap total context length
                 aggregated.sort((a, b) => b.score - a.score);
                 const MAX_CONTEXT_CHARS = 12000;
                 const pieces = [];
@@ -434,7 +431,11 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 firebase_functions_1.logger.warn("RAG retrieval failed, falling back to no docsContext", ragErr);
             }
         }
-        const baseInstruction = "You are a helpful AI assistant. Prefer grounded answers using provided document context blocks when present. If context insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
+        let baseInstruction = "You are a helpful AI assistant. Prefer grounded answers using provided document context blocks when present. If context insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
+        if (webSearch) {
+            baseInstruction +=
+                "\n\nWeb browsing is permitted via the web_search tool. Use it when the question requires up-to-date or external information. Summarize findings and cite source domains briefly (e.g., example.com).";
+        }
         const sysContent = docsContext
             ? `${baseInstruction}\n\n${docsContext}`
             : baseInstruction;
@@ -443,7 +444,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
             sysMsg,
             ...convo.map((m) => ({ role: m.role, content: m.content })),
         ];
-        // Create assistant message placeholder and stream updates
+        // Assistant placeholder
         const assistantRef = await messagesCol.add({
             role: "assistant",
             content: "",
@@ -469,56 +470,112 @@ exports.sendChatMessage = (0, https_1.onCall)({
             }
         };
         try {
-            const stream = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
-                temperature: 0.7,
-                messages: chatMessages,
-                stream: true,
-            });
-            try {
-                for (var _l = true, _m = __asyncValues(stream), _o; _o = await _m.next(), _a = _o.done, !_a; _l = true) {
-                    _c = _o.value;
-                    _l = false;
-                    const part = _c;
-                    const delta = ((_g = (_f = (_e = part === null || part === void 0 ? void 0 : part.choices) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.delta) === null || _g === void 0 ? void 0 : _g.content) || "";
-                    if (delta)
-                        buffered += delta;
-                    const now = Date.now();
-                    if (now - lastUpdate > 250) {
-                        await flush(false);
-                        lastUpdate = now;
+            if (webSearch) {
+                // Non-streaming Responses API with web_search tool (gpt-4.1)
+                const input = chatMessages.map((m) => ({
+                    role: m.role,
+                    content: [
+                        {
+                            type: m.role === "assistant"
+                                ? "output_text"
+                                : "input_text",
+                            text: String(m.content || ""),
+                        },
+                    ],
+                }));
+                const resp = await openai.responses.create({
+                    model,
+                    input,
+                    tools: [{ type: "web_search" }],
+                });
+                buffered =
+                    (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                        ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.output) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
+                        ((_m = (_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.data) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.content) === null || _l === void 0 ? void 0 : _l[0]) === null || _m === void 0 ? void 0 : _m.text) ||
+                        ((_q = (_p = (_o = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _o === void 0 ? void 0 : _o[0]) === null || _p === void 0 ? void 0 : _p.message) === null || _q === void 0 ? void 0 : _q.content) ||
+                        "I'm sorry, I couldn't generate a response.";
+                await flush(true);
+            }
+            else if (thinkMode) {
+                // Non-streaming Responses API for reasoning model o3-mini
+                const input = chatMessages.map((m) => ({
+                    role: m.role,
+                    content: [
+                        {
+                            type: m.role === "assistant"
+                                ? "output_text"
+                                : "input_text",
+                            text: String(m.content || ""),
+                        },
+                    ],
+                }));
+                const resp = await openai.responses.create({
+                    model,
+                    input,
+                });
+                buffered =
+                    (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                        ((_u = (_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.output) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.content) === null || _t === void 0 ? void 0 : _t[0]) === null || _u === void 0 ? void 0 : _u.text) ||
+                        ((_y = (_x = (_w = (_v = resp === null || resp === void 0 ? void 0 : resp.data) === null || _v === void 0 ? void 0 : _v[0]) === null || _w === void 0 ? void 0 : _w.content) === null || _x === void 0 ? void 0 : _x[0]) === null || _y === void 0 ? void 0 : _y.text) ||
+                        ((_1 = (_0 = (_z = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.message) === null || _1 === void 0 ? void 0 : _1.content) ||
+                        "I'm sorry, I couldn't generate a response.";
+                await flush(true);
+            }
+            else {
+                // Normal streaming path
+                const stream = await openai.chat.completions.create({
+                    model,
+                    temperature: thinkMode ? 0.2 : 0.7,
+                    messages: chatMessages,
+                    stream: true,
+                });
+                try {
+                    for (var _8 = true, _9 = __asyncValues(stream), _10; _10 = await _9.next(), _a = _10.done, !_a; _8 = true) {
+                        _c = _10.value;
+                        _8 = false;
+                        const part = _c;
+                        const delta = ((_4 = (_3 = (_2 = part === null || part === void 0 ? void 0 : part.choices) === null || _2 === void 0 ? void 0 : _2[0]) === null || _3 === void 0 ? void 0 : _3.delta) === null || _4 === void 0 ? void 0 : _4.content) || "";
+                        if (delta)
+                            buffered += delta;
+                        const now = Date.now();
+                        if (now - lastUpdate > 250) {
+                            await flush(false);
+                            lastUpdate = now;
+                        }
                     }
                 }
-            }
-            catch (e_1_1) { e_1 = { error: e_1_1 }; }
-            finally {
-                try {
-                    if (!_l && !_a && (_b = _m.return)) await _b.call(_m);
+                catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                finally {
+                    try {
+                        if (!_8 && !_a && (_b = _9.return)) await _b.call(_9);
+                    }
+                    finally { if (e_1) throw e_1.error; }
                 }
-                finally { if (e_1) throw e_1.error; }
+                await flush(true);
             }
-            await flush(true);
         }
-        catch (streamErr) {
-            firebase_functions_1.logger.error("OpenAI streaming failed; falling back to non-streaming", streamErr);
+        catch (genErr) {
+            firebase_functions_1.logger.error("OpenAI generation failed", genErr);
             try {
+                const fallbackModel = webSearch || (typeof model === "string" && model.startsWith("o3"))
+                    ? "gpt-4o-mini"
+                    : model;
                 const completion = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
-                    temperature: 0.7,
+                    model: fallbackModel,
+                    temperature: thinkMode ? 0.2 : 0.7,
                     messages: chatMessages,
                 });
                 buffered =
-                    ((_k = (_j = (_h = completion.choices) === null || _h === void 0 ? void 0 : _h[0]) === null || _j === void 0 ? void 0 : _j.message) === null || _k === void 0 ? void 0 : _k.content) ||
+                    ((_7 = (_6 = (_5 = completion.choices) === null || _5 === void 0 ? void 0 : _5[0]) === null || _6 === void 0 ? void 0 : _6.message) === null || _7 === void 0 ? void 0 : _7.content) ||
                         "I'm sorry, I couldn't generate a response.";
                 await flush(true);
             }
             catch (fallbackErr) {
-                firebase_functions_1.logger.error("OpenAI non-streaming also failed", fallbackErr);
+                firebase_functions_1.logger.error("OpenAI fallback also failed", fallbackErr);
                 buffered = "I'm sorry, an error occurred generating the response.";
                 await flush(true);
             }
         }
-        // Update chat title from first prompt if new
         if (!chatId) {
             const title = prompt.trim().slice(0, 60);
             await db
@@ -536,6 +593,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
         };
     }
 });
+// Web search now uses OpenAI Responses API (gpt-4.1 tools-web-search); no third-party providers.
 /**
  * Download file from Firebase Storage
  */

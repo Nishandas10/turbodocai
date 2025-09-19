@@ -351,18 +351,23 @@ export const sendChatMessage = onCall(
   },
   async (request) => {
     try {
-      const { userId, prompt, language, chatId, docIds } = request.data || {};
+      const { userId, prompt, language, chatId, docIds, webSearch, thinkMode } =
+        request.data || {};
 
       if (!userId || !prompt || typeof prompt !== "string") {
         throw new Error("Missing required parameters: userId and prompt");
       }
 
-      // Optional: basic auth consistency check if available
       if (request.auth && request.auth.uid && request.auth.uid !== userId) {
         throw new Error("Authenticated user mismatch");
       }
 
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const model = webSearch
+        ? "gpt-4.1"
+        : thinkMode
+        ? "o3-mini"
+        : "gpt-4o-mini";
 
       // Create or fetch chat document
       let chatDocId: string = chatId;
@@ -372,14 +377,13 @@ export const sendChatMessage = onCall(
           userId,
           title: title || "New Chat",
           language: language || "en",
-          model: "gpt-4o-mini",
+          model,
           contextDocIds: Array.isArray(docIds) ? docIds.slice(0, 8) : [],
           createdAt: new Date(),
           updatedAt: new Date(),
         });
         chatDocId = chatRef.id;
       } else {
-        // Touch updatedAt if continuing
         await db
           .collection("chats")
           .doc(chatDocId)
@@ -387,6 +391,7 @@ export const sendChatMessage = onCall(
             {
               updatedAt: new Date(),
               language: language || "en",
+              model,
               ...(Array.isArray(docIds) && docIds.length
                 ? { contextDocIds: docIds.slice(0, 8) }
                 : {}),
@@ -400,7 +405,7 @@ export const sendChatMessage = onCall(
         .doc(chatDocId)
         .collection("messages");
 
-      // Add user's message if client hasn't just added it
+      // Add user's message if not already last
       try {
         const lastSnap = await messagesCol
           .orderBy("createdAt", "desc")
@@ -420,15 +425,14 @@ export const sendChatMessage = onCall(
         logger.warn("User message duplicate check failed", dupeErr);
       }
 
-      // Build the conversation context (last N messages)
-      // For simplicity, fetch up to last 20 messages
+      // Load last messages for context
       const recentSnap = await messagesCol
         .orderBy("createdAt", "asc")
         .limit(20)
         .get();
       const convo = recentSnap.docs.map((d) => d.data() as any);
 
-      // Determine active context document IDs (persisted or new)
+      // Active context documents
       let activeDocIds: string[] = [];
       try {
         if (Array.isArray(docIds) && docIds.length) {
@@ -436,24 +440,22 @@ export const sendChatMessage = onCall(
         } else {
           const chatSnap = await db.collection("chats").doc(chatDocId).get();
           const data = chatSnap.data() as any;
-          if (Array.isArray(data?.contextDocIds)) {
+          if (Array.isArray(data?.contextDocIds))
             activeDocIds = data.contextDocIds.slice(0, 8);
-          }
         }
       } catch (e) {
         logger.warn("Could not load contextDocIds", e);
       }
 
-      // RAG retrieval: for each active doc, retrieve top relevant chunks based on prompt embedding
+      // Optional RAG retrieval
       let docsContext = "";
       if (activeDocIds.length) {
         try {
           const { embeddingService, pineconeService } = createServices();
-          // Embed the current user prompt
           const queryEmbedding = await embeddingService.embedQuery(
             String(prompt)
           );
-          const perDoc = 3; // top chunks per document
+          const perDoc = 3;
           const aggregated: Array<{
             docId: string;
             title: string;
@@ -465,13 +467,12 @@ export const sendChatMessage = onCall(
               const matches = await pineconeService.querySimilarChunks(
                 queryEmbedding,
                 userId,
-                perDoc * 2, // over-fetch then filter
+                perDoc * 2,
                 dId
               );
-              // Deduplicate by chunkIndex (encoded in id suffix) and take top perDoc
               const seen = new Set<string>();
               for (const m of matches) {
-                const idx = m.id.split("_").pop() || m.id;
+                const idx = String(m.id).split("_").pop() || String(m.id);
                 if (seen.has(idx)) continue;
                 seen.add(idx);
                 aggregated.push({
@@ -486,7 +487,6 @@ export const sendChatMessage = onCall(
               logger.warn("RAG doc retrieval failed", { docId: dId, inner });
             }
           }
-          // Sort aggregated by score desc and cap total context length
           aggregated.sort((a, b) => b.score - a.score);
           const MAX_CONTEXT_CHARS = 12000;
           const pieces: string[] = [];
@@ -513,28 +513,30 @@ export const sendChatMessage = onCall(
         }
       }
 
-      const baseInstruction =
+      let baseInstruction =
         "You are a helpful AI assistant. Prefer grounded answers using provided document context blocks when present. If context insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
+      if (webSearch) {
+        baseInstruction +=
+          "\n\nWeb browsing is permitted via the web_search tool. Use it when the question requires up-to-date or external information. Summarize findings and cite source domains briefly (e.g., example.com).";
+      }
       const sysContent = docsContext
         ? `${baseInstruction}\n\n${docsContext}`
         : baseInstruction;
       const sysMsg = { role: "system" as const, content: sysContent };
       const chatMessages = [
         sysMsg,
-        ...convo.map((m) => ({ role: m.role, content: m.content })),
+        ...convo.map((m: any) => ({ role: m.role, content: m.content })),
       ];
 
-      // Create assistant message placeholder and stream updates
+      // Assistant placeholder
       const assistantRef = await messagesCol.add({
         role: "assistant",
         content: "",
         createdAt: new Date(),
         streaming: true,
       });
-
       let buffered = "";
       let lastUpdate = Date.now();
-
       const flush = async (final = false) => {
         try {
           await assistantRef.set(
@@ -555,46 +557,99 @@ export const sendChatMessage = onCall(
       };
 
       try {
-        const stream = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          temperature: 0.7,
-          messages: chatMessages as any,
-          stream: true,
-        } as any);
-
-        for await (const part of stream as any) {
-          const delta = part?.choices?.[0]?.delta?.content || "";
-          if (delta) buffered += delta;
-          const now = Date.now();
-          if (now - lastUpdate > 250) {
-            await flush(false);
-            lastUpdate = now;
-          }
-        }
-        await flush(true);
-      } catch (streamErr) {
-        logger.error(
-          "OpenAI streaming failed; falling back to non-streaming",
-          streamErr
-        );
-        try {
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0.7,
-            messages: chatMessages as any,
+        if (webSearch) {
+          // Non-streaming Responses API with web_search tool (gpt-4.1)
+          const input = chatMessages.map((m) => ({
+            role: (m as any).role,
+            content: [
+              {
+                type:
+                  (m as any).role === "assistant"
+                    ? "output_text"
+                    : "input_text",
+                text: String((m as any).content || ""),
+              },
+            ],
+          }));
+          const resp: any = await (openai as any).responses.create({
+            model,
+            input,
+            tools: [{ type: "web_search" }],
           });
+          buffered =
+            resp?.output_text ||
+            resp?.output?.[0]?.content?.[0]?.text ||
+            resp?.data?.[0]?.content?.[0]?.text ||
+            resp?.choices?.[0]?.message?.content ||
+            "I'm sorry, I couldn't generate a response.";
+          await flush(true);
+        } else if (thinkMode) {
+          // Non-streaming Responses API for reasoning model o3-mini
+          const input = chatMessages.map((m) => ({
+            role: (m as any).role,
+            content: [
+              {
+                type:
+                  (m as any).role === "assistant"
+                    ? "output_text"
+                    : "input_text",
+                text: String((m as any).content || ""),
+              },
+            ],
+          }));
+          const resp: any = await (openai as any).responses.create({
+            model,
+            input,
+          });
+          buffered =
+            resp?.output_text ||
+            resp?.output?.[0]?.content?.[0]?.text ||
+            resp?.data?.[0]?.content?.[0]?.text ||
+            resp?.choices?.[0]?.message?.content ||
+            "I'm sorry, I couldn't generate a response.";
+          await flush(true);
+        } else {
+          // Normal streaming path
+          const stream = await openai.chat.completions.create({
+            model,
+            temperature: thinkMode ? 0.2 : 0.7,
+            messages: chatMessages as any,
+            stream: true,
+          } as any);
+          for await (const part of stream as any) {
+            const delta = part?.choices?.[0]?.delta?.content || "";
+            if (delta) buffered += delta;
+            const now = Date.now();
+            if (now - lastUpdate > 250) {
+              await flush(false);
+              lastUpdate = now;
+            }
+          }
+          await flush(true);
+        }
+      } catch (genErr) {
+        logger.error("OpenAI generation failed", genErr);
+        try {
+          const fallbackModel =
+            webSearch || (typeof model === "string" && model.startsWith("o3"))
+              ? "gpt-4o-mini"
+              : model;
+          const completion = await openai.chat.completions.create({
+            model: fallbackModel as any,
+            temperature: thinkMode ? 0.2 : 0.7,
+            messages: chatMessages as any,
+          } as any);
           buffered =
             completion.choices?.[0]?.message?.content ||
             "I'm sorry, I couldn't generate a response.";
           await flush(true);
         } catch (fallbackErr) {
-          logger.error("OpenAI non-streaming also failed", fallbackErr);
+          logger.error("OpenAI fallback also failed", fallbackErr);
           buffered = "I'm sorry, an error occurred generating the response.";
           await flush(true);
         }
       }
 
-      // Update chat title from first prompt if new
       if (!chatId) {
         const title = (prompt as string).trim().slice(0, 60);
         await db
@@ -613,6 +668,8 @@ export const sendChatMessage = onCall(
     }
   }
 );
+
+// Web search now uses OpenAI Responses API (gpt-4.1 tools-web-search); no third-party providers.
 
 /**
  * Download file from Firebase Storage
