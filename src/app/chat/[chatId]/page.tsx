@@ -41,7 +41,7 @@ export default function ChatPage() {
 	const [input, setInput] = useState("");
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [sending, setSending] = useState(false);
-	const [language, setLanguage] = useState<'en' | 'as'>('en');
+	// Language selection removed; default English
 	const [recentDocs, setRecentDocs] = useState<Array<{ id: string; title: string }>>([]);
 	const [contextOpen, setContextOpen] = useState(false);
 	const contextWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -105,95 +105,24 @@ export default function ChatPage() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [search, user?.uid]);
 
-	const quickLangRef = useRef<'en' | 'as' | 'unknown'>('unknown');
-	const lastPartialRef = useRef<string>('');
-	const [translatedInterim, setTranslatedInterim] = useState<string>('');
-	const interimTranslateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const currentInterimRef = useRef<string>('');
-	const translationAbortRef = useRef<AbortController | null>(null);
-
-	const isAssameseScript = (t: string) => /[\u0980-\u09FF]/.test(t);
-
-	const translateInterimText = async (text: string, isLatest: boolean = true) => {
-		if (!text.trim() || language !== 'as' || !isLatest) return;
-		// If already Assamese script, keep as-is
-		if (isAssameseScript(text)) {
-			setTranslatedInterim(text);
-			return;
-		}
-		// Abort prior
-		if (translationAbortRef.current) translationAbortRef.current.abort();
-		try {
-			const controller = new AbortController();
-			translationAbortRef.current = controller;
-			const res = await fetch('/api/translate', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ text, targetLang: 'as', force: true }),
-				signal: controller.signal
-			});
-			if (!res.ok || controller.signal.aborted) return;
-			const json: { success?: boolean; data?: { translatedText?: string } } = await res.json();
-			const translated = json?.data?.translatedText;
-			if (!controller.signal.aborted && translated && currentInterimRef.current === text) {
-				setTranslatedInterim(translated);
-			}
-		} catch (e) {
-			if ((e as Error).name !== 'AbortError') {
-				if (currentInterimRef.current === text) setTranslatedInterim(text);
-			}
-		}
-	};
+	// Translation removed; overlay uses interimTranscript only
+	const userEditedRef = useRef<boolean>(false);
 
 	const { supported: speechSupported, listening, interimTranscript, start, stop, reset } = useSpeechToText({
-		lang: language === 'as' ? 'as-IN' : 'en-US',
-		fallbackLangs: language === 'as' ? ['bn-IN','en-US'] : ['en-US'],
+		lang: 'en-US',
+		fallbackLangs: ['en-US'],
 		continuous: false,
 		interimResults: true,
-		onPartial: (partial) => {
-			lastPartialRef.current = partial;
-			currentInterimRef.current = partial;
-			// quick detection
-			if (isAssameseScript(partial)) quickLangRef.current = 'as';
-			else if (/[a-zA-Z]/.test(partial) && !isAssameseScript(partial) && quickLangRef.current === 'unknown') quickLangRef.current = 'en';
-			// When Assamese target selected, always show partial immediately then translate if needed
-			if (language === 'as' && partial.trim()) {
-				if (interimTranslateTimerRef.current) clearTimeout(interimTranslateTimerRef.current);
-				setTranslatedInterim(partial); // immediate echo
-				interimTranslateTimerRef.current = setTimeout(() => {
-					translateInterimText(partial, currentInterimRef.current === partial);
-				}, 180); // slightly faster
-			} else {
-				setTranslatedInterim(partial);
-			}
-		},
+		onPartial: () => { /* no-op: overlay from interimTranscript */ },
 		onSegment: (seg) => {
-			setInput(prev => prev ? prev + ' ' + seg : seg);
-			setTranslatedInterim(''); // clear interim on final segment
-			currentInterimRef.current = '';
+			if (!userEditedRef.current) {
+				setInput(prev => prev ? prev + ' ' + seg : seg);
+			}
 		}
 	});
 
-	// Cleanup on unmount or language change
-	useEffect(() => {
-		return () => {
-			if (interimTranslateTimerRef.current) {
-				clearTimeout(interimTranslateTimerRef.current);
-			}
-			if (translationAbortRef.current) {
-				translationAbortRef.current.abort();
-			}
-		};
-	}, []);
-
-	// Clear interim translation when language changes
-	useEffect(() => {
-		setTranslatedInterim('');
-		currentInterimRef.current = '';
-		if (translationAbortRef.current) {
-			translationAbortRef.current.abort();
-		}
-	}, [language]);
+	// Cleanup
+	useEffect(() => { return () => {}; }, []);
 
 	// Graceful UI state for listening pill to avoid flicker when the underlying
 	// speech API briefly stops/starts (permission prompts, fallback locale retry, etc.)
@@ -206,6 +135,7 @@ export default function ChatPage() {
 		if (deactivateTimerRef.current) { clearTimeout(deactivateTimerRef.current); deactivateTimerRef.current = null; }
 		wantVoiceRef.current = true;
 		reset();
+		userEditedRef.current = false;
 		setVoiceActive(true);
 		start();
 	};
@@ -215,6 +145,7 @@ export default function ChatPage() {
 		if (deactivateTimerRef.current) clearTimeout(deactivateTimerRef.current);
 		// Immediately hide pill for snappy UX
 		setVoiceActive(false);
+		userEditedRef.current = false;
 	};
 
 	useEffect(() => {
@@ -234,54 +165,8 @@ export default function ChatPage() {
 
 	useEffect(() => () => { 
 		if (deactivateTimerRef.current) clearTimeout(deactivateTimerRef.current);
-		if (interimTranslateTimerRef.current) clearTimeout(interimTranslateTimerRef.current);
 	}, []);
 
-	// Debounced translation gating (refactored: react to input+language only)
-	const lastTranslatedRef = useRef<string>("");
-	const translateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	useEffect(() => {
-		const current = input.trim();
-		if (!current || current === lastTranslatedRef.current) return;
-		// if user has selected Assamese but content appears already Assamese (script), skip
-		if (language === 'as' && isAssameseScript(current)) {
-			lastTranslatedRef.current = current;
-			return;
-		}
-		// if English target and text clearly Latin only, skip
-		if (language === 'en' && /[a-zA-Z]/.test(current) && !isAssameseScript(current)) {
-			lastTranslatedRef.current = current;
-			return;
-		}
-		if (translateTimerRef.current) clearTimeout(translateTimerRef.current);
-		translateTimerRef.current = setTimeout(() => {
-			(async () => {
-				try {
-					const targetLang = language === 'as' ? 'as' : 'en';
-					const force = true; // always force since heuristic simplified
-					const controller = new AbortController();
-					const abortTimeout = setTimeout(()=>controller.abort(), 9000);
-					const res = await fetch('/api/translate', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ text: current, targetLang, force }),
-						signal: controller.signal
-					});
-					clearTimeout(abortTimeout);
-					if (!res.ok) return;
-					const json: { success?: boolean; data?: { translatedText?: string } } = await res.json();
-					const translated = json?.data?.translatedText;
-					if (translated && translated.trim() && translated.trim() !== current) {
-						setInput(translated.trim());
-						lastTranslatedRef.current = translated.trim();
-					} else {
-						lastTranslatedRef.current = current;
-					}
-				} catch {/* ignore */}
-			})();
-		}, 300);
-		return () => { if (translateTimerRef.current) clearTimeout(translateTimerRef.current); };
-	}, [input, language]);
 
 	// Show interim transcript in input while listening
 	useEffect(() => {
@@ -291,8 +176,8 @@ export default function ChatPage() {
 		}
 	}, [interimTranscript, listening]);
 
-	const effectiveInputValue = (voiceActive && (translatedInterim || interimTranscript))
-		? (input ? input + ' ' + (translatedInterim || interimTranscript) : (translatedInterim || interimTranscript))
+	const effectiveInputValue = (voiceActive && !userEditedRef.current && interimTranscript)
+		? (input ? input + ' ' + interimTranscript : interimTranscript)
 		: input;
 
 	const send = async (overrideText?: string) => {
@@ -315,7 +200,7 @@ export default function ChatPage() {
 
 			const call = httpsCallable(functions, "sendChatMessage");
 			// Fire and forget; server will stream the assistant message into Firestore
-			void call({ userId: user.uid, prompt: text, chatId, language, docIds: selectedDocIds });
+			void call({ userId: user.uid, prompt: text, chatId, language: 'en', docIds: selectedDocIds });
 
 			setInput("");
 			reset();
@@ -388,11 +273,23 @@ export default function ChatPage() {
 						<div className="bg-card rounded-2xl shadow-lg relative">
 							{/* Input row */}
 							<div className="flex items-center gap-3 px-4 pt-3">
-								<input
+												<input
 									className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
-									placeholder={language === 'en' ? 'Ask something...' : 'প্ৰশ্ন কৰক...'}
-									value={effectiveInputValue}
-									onChange={(e) => setInput(e.target.value)}
+				    placeholder={'Ask something...'}
+													value={effectiveInputValue}
+													onChange={(e) => {
+														const v = e.target.value;
+					    const interimShown = interimTranscript || '';
+														let base = v;
+														if (voiceActive && interimShown) {
+															if (base.endsWith(' ' + interimShown)) base = base.slice(0, -(' '.length + interimShown.length));
+															else if (base.endsWith(interimShown)) base = base.slice(0, -interimShown.length);
+														}
+														setInput(base);
+														if (voiceActive) {
+															userEditedRef.current = true;
+														}
+													}}
 									onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
 								/>
 								<button
@@ -437,16 +334,7 @@ export default function ChatPage() {
 											</div>
 										)}
 									</div>
-									<div className="flex items-center gap-1 rounded-full bg-muted/40 p-1">
-										<button
-											className={`px-2 py-0.5 text-xs rounded-full ${language === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-											onClick={() => setLanguage('en')}
-										>EN</button>
-										<button
-											className={`px-2 py-0.5 text-xs rounded-full ${language === 'as' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-											onClick={() => setLanguage('as')}
-										>AS</button>
-									</div>
+									{/* Language toggle removed */}
 								</div>
 								<div className="flex items-center gap-4 text-muted-foreground">
 									{/* Voice input section - fixed height container to prevent layout shift */}

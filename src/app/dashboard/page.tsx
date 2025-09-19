@@ -18,7 +18,8 @@ import {
   Plus,
   Box,
   ChevronRight,
-  MoreHorizontal
+  MoreHorizontal,
+  X
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
@@ -49,7 +50,6 @@ export default function Dashboard() {
     lastOpened: string
   }>>([])
   const [prompt, setPrompt] = useState('')
-  const [language, setLanguage] = useState<'en' | 'as'>('en')
   const [cameraModalOpen, setCameraModalOpen] = useState(false)
   const [audioModalOpen, setAudioModalOpen] = useState(false)
   const [documentUploadModalOpen, setDocumentUploadModalOpen] = useState(false)
@@ -63,65 +63,69 @@ export default function Dashboard() {
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [contextSearch, setContextSearch] = useState('')
   const contextWrapperRef = useRef<HTMLDivElement | null>(null)
-  const quickLangRef = useRef<'en' | 'as' | 'unknown'>('unknown')
-  const lastPartialRef = useRef<string>('')
+  // Translation removed; overlay uses interimTranscript only
+  const userEditedRef = useRef<boolean>(false)
+  const userEditTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  
+
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
-    lang: language === 'as' ? 'as-IN' : 'en-US',
-    fallbackLangs: language === 'as' ? ['bn-IN','en-US'] : ['en-US'],
+    lang: 'en-US',
+    fallbackLangs: ['en-US'],
     continuous: false,
     interimResults: true,
-    onPartial: (partial) => {
-      lastPartialRef.current = partial
-      if (/[^a-zA-Z0-9]*[\u0980-\u09FF]/.test(partial)) {
-        quickLangRef.current = 'as'
-      } else if (/[a-zA-Z]/.test(partial) && !/[\u0980-\u09FF]/.test(partial)) {
-        if (quickLangRef.current === 'unknown') quickLangRef.current = 'en'
+    onPartial: () => { /* no-op: interim overlay handled via interimTranscript */ },
+    onSegment: (seg) => {
+      // If the user manually edited while mic active, do not auto-append
+      if (!userEditedRef.current) {
+        setPrompt(prev => prev ? prev + ' ' + seg : seg)
       }
-    },
-    onSegment: (seg) => setPrompt(prev => prev ? prev + ' ' + seg : seg)
+    }
   })
-  const effectivePromptValue = listening && interimTranscript ? (prompt ? prompt + ' ' + interimTranscript : interimTranscript) : prompt
-  const lastTranslatedRef = useRef<string>("")
-  const translateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [voiceActive, setVoiceActive] = useState(false)
+  const deactivateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wantVoiceRef = useRef(false)
+
+  const handleStartVoice = () => {
+    if (!speechSupported) return
+    if (deactivateTimerRef.current) { clearTimeout(deactivateTimerRef.current); deactivateTimerRef.current = null }
+    wantVoiceRef.current = true
+    resetSpeech()
+  userEditedRef.current = false
+    setVoiceActive(true)
+    startSpeech()
+  }
+  const handleStopVoice = () => {
+    wantVoiceRef.current = false
+    stopSpeech()
+    if (deactivateTimerRef.current) clearTimeout(deactivateTimerRef.current)
+    setVoiceActive(false)
+  userEditedRef.current = false
+  }
+
   useEffect(() => {
     if (listening) {
-      if (translateTimerRef.current) { clearTimeout(translateTimerRef.current); translateTimerRef.current = null }
-      return
+      if (wantVoiceRef.current && !voiceActive) setVoiceActive(true)
+      if (deactivateTimerRef.current) { clearTimeout(deactivateTimerRef.current); deactivateTimerRef.current = null }
+    } else {
+      if (wantVoiceRef.current) {
+        setTimeout(() => { if (wantVoiceRef.current) startSpeech() }, 120)
+      } else {
+        if (voiceActive) setVoiceActive(false)
+      }
     }
-    const current = prompt.trim()
-    if (!current || current === lastTranslatedRef.current) return
-    if ((language === 'as' && quickLangRef.current === 'as') || (language === 'en' && quickLangRef.current === 'en')) {
-      lastTranslatedRef.current = current
-      return
+  }, [listening, voiceActive, startSpeech])
+
+  useEffect(() => {
+    return () => {
+  if (userEditTimerRef.current) clearTimeout(userEditTimerRef.current)
     }
-    translateTimerRef.current = setTimeout(() => {
-      (async () => {
-        try {
-          const targetLang = language === 'as' ? 'as' : 'en'
-          const force = quickLangRef.current === 'unknown'
-          const controller = new AbortController()
-          const abortTimeout = setTimeout(()=>controller.abort(), 9000)
-          const res = await fetch('/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: current, targetLang, force }),
-            signal: controller.signal
-          })
-          clearTimeout(abortTimeout)
-          if (!res.ok) return
-          const json: { success?: boolean; data?: { translatedText?: string } } = await res.json()
-          const translated = json?.data?.translatedText
-          if (translated && translated.trim() && translated.trim() !== current) {
-            setPrompt(translated.trim())
-            lastTranslatedRef.current = translated.trim()
-          } else {
-            lastTranslatedRef.current = current
-          }
-        } catch { /* ignore */ }
-      })()
-    }, 250)
-    return () => { if (translateTimerRef.current) clearTimeout(translateTimerRef.current) }
-  }, [listening, prompt, language])
+  }, [])
+
+  const effectivePromptValue = (voiceActive && !userEditedRef.current && interimTranscript)
+    ? (prompt ? prompt + ' ' + interimTranscript : interimTranscript)
+    : prompt
+  
 
   // Close context popover on outside click / Escape
   useEffect(() => {
@@ -331,7 +335,7 @@ export default function Dashboard() {
 
       // Create chat immediately
   const callCreate = httpsCallable(functions, 'createChat')
-  const createRes = (await callCreate({ userId: user.uid, language, title: initial, contextDocIds: selectedDocIds })) as unknown as { data: { success: boolean; data?: { chatId?: string } } }
+  const createRes = (await callCreate({ userId: user.uid, language: 'en', title: initial, contextDocIds: selectedDocIds })) as unknown as { data: { success: boolean; data?: { chatId?: string } } }
       const chatId = createRes?.data?.data?.chatId
       if (chatId) {
         // Redirect immediately with the prompt in query to auto-send
@@ -521,9 +525,24 @@ export default function Dashboard() {
               <div className="flex items-center gap-3 px-4 pt-3">
                 <input
                   className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
-                  placeholder={language === 'en' ? `Greetings ${username}` : `নমস্কাৰ ${username}`}
+                  placeholder={`Greetings ${username}`}
                   value={effectivePromptValue}
-                  onChange={(e) => setPrompt(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    const interimShown = interimTranscript || ''
+                    let base = v
+                    if (voiceActive && interimShown) {
+                      // Strip trailing interim overlay (with or without a leading space)
+                      if (base.endsWith(' ' + interimShown)) base = base.slice(0, -(' '.length + interimShown.length))
+                      else if (base.endsWith(interimShown)) base = base.slice(0, -interimShown.length)
+                    }
+                    setPrompt(base)
+                    if (voiceActive) {
+                      userEditedRef.current = true
+                      if (userEditTimerRef.current) clearTimeout(userEditTimerRef.current)
+                      userEditTimerRef.current = setTimeout(() => { userEditedRef.current = false }, 1200)
+                    }
+                  }}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSendPrompt() }}
                 />
 
@@ -591,34 +610,38 @@ export default function Dashboard() {
                     )}
                   </div>
 
-                  {/* Small language toggle */}
-                  <div className="flex items-center gap-1 border border-border rounded-full p-1">
-                    <button
-                      className={`px-2 py-0.5 text-xs rounded-full ${language === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                      onClick={() => setLanguage('en')}
-                    >
-                      EN
-                    </button>
-                    <button
-                      className={`px-2 py-0.5 text-xs rounded-full ${language === 'as' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                      onClick={() => setLanguage('as')}
-                      title="Assamese"
-                    >
-                      AS
-                    </button>
-                  </div>
+                  {/* Language toggle removed */}
                 </div>
 
                 <div className="flex items-center gap-4 text-muted-foreground">
-                  <button
-                    className={`hover:text-foreground ${listening ? 'text-red-500 animate-pulse' : ''}`}
-                    title={speechSupported ? (listening ? 'Stop recording' : 'Start voice input') : 'Speech not supported'}
-                    type="button"
-                    aria-pressed={listening}
-                    onClick={() => { if (!speechSupported) return; if (listening) { stopSpeech(); } else { resetSpeech(); startSpeech(); } }}
-                  >
-                    <Mic className="h-5 w-5" />
-                  </button>
+                  <div className="h-9 flex items-center">
+                    {voiceActive ? (
+                      <div className="flex items-center gap-1 rounded-full bg-muted/60 px-2 py-1 pr-3 transition-all duration-200 ease-in-out">
+                        <div className="flex items-center gap-1 mr-1" aria-label={listening ? 'Listening…' : 'Processing voice…'}>
+                          <span className="h-4 w-1 rounded-full bg-red-500 animate-[pulse_0.9s_ease-in-out_infinite]" />
+                          <span className="h-4 w-1 rounded-full bg-red-500 animate-[pulse_0.9s_ease-in-out_infinite_0.15s]" />
+                          <span className="h-4 w-1 rounded-full bg-red-500 animate-[pulse_0.9s_ease-in-out_infinite_0.3s]" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleStopVoice}
+                          className="p-1.5 rounded-full bg-red-500/90 text-white hover:bg-red-600 transition-colors"
+                          title="Stop voice input"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        title={speechSupported ? 'Start voice input' : 'Speech not supported'}
+                        onClick={handleStartVoice}
+                        className="hover:text-foreground p-2 transition-colors duration-200"
+                        type="button"
+                      >
+                        <Mic className="h-5 w-5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -635,23 +658,7 @@ export default function Dashboard() {
                 })}
               </div>
             )}
-            {/* Big language toggle */}
-            <div className="flex justify-center mt-4">
-              <div className="flex bg-muted rounded-full p-1">
-                <button
-                  onClick={() => setLanguage('en')}
-                  className={`px-5 py-2 rounded-full text-sm ${language === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
-                >
-                  English
-                </button>
-                <button
-                  onClick={() => setLanguage('as')}
-                  className={`px-5 py-2 rounded-full text-sm ${language === 'as' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
-                >
-                  অসমীয়া
-                </button>
-              </div>
-            </div>
+            {/* Language toggle removed; default English */}
           </div>
 
           {/* Spaces Section */}
