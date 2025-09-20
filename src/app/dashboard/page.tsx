@@ -351,6 +351,12 @@ export default function Dashboard() {
       if (chatId) {
         // Redirect immediately with the prompt in query to auto-send
         const q = new URLSearchParams({ prompt: initial })
+        // Pass toggle states and selected context so Chat page can trigger modes on first send
+        q.set('webSearch', webSearchEnabled ? '1' : '0')
+        q.set('thinkMode', thinkModeEnabled ? '1' : '0')
+        if (selectedDocIds.length) {
+          q.set('docs', selectedDocIds.join(','))
+        }
         window.location.href = `/chat/${chatId}?${q.toString()}`
       } else {
         throw new Error('Failed to create chat')

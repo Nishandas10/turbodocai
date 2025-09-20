@@ -469,6 +469,24 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 firebase_functions_1.logger.warn("Failed to flush streaming token to Firestore", e);
             }
         };
+        const streamOut = async (fullText) => {
+            try {
+                const chunkSize = 48; // characters per flush
+                const delayMs = 24; // pacing for smoother UI
+                buffered = "";
+                for (let i = 0; i < fullText.length; i += chunkSize) {
+                    buffered += fullText.slice(i, i + chunkSize);
+                    await flush(false);
+                    await new Promise((r) => setTimeout(r, delayMs));
+                }
+                await flush(true);
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("streamOut failed; falling back to single flush", e);
+                buffered = fullText;
+                await flush(true);
+            }
+        };
         try {
             if (webSearch) {
                 // Non-streaming Responses API with web_search tool (gpt-4.1)
@@ -488,13 +506,12 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     input,
                     tools: [{ type: "web_search" }],
                 });
-                buffered =
-                    (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                        ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.output) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
-                        ((_m = (_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.data) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.content) === null || _l === void 0 ? void 0 : _l[0]) === null || _m === void 0 ? void 0 : _m.text) ||
-                        ((_q = (_p = (_o = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _o === void 0 ? void 0 : _o[0]) === null || _p === void 0 ? void 0 : _p.message) === null || _q === void 0 ? void 0 : _q.content) ||
-                        "I'm sorry, I couldn't generate a response.";
-                await flush(true);
+                const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                    ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.output) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
+                    ((_m = (_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.data) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.content) === null || _l === void 0 ? void 0 : _l[0]) === null || _m === void 0 ? void 0 : _m.text) ||
+                    ((_q = (_p = (_o = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _o === void 0 ? void 0 : _o[0]) === null || _p === void 0 ? void 0 : _p.message) === null || _q === void 0 ? void 0 : _q.content) ||
+                    "I'm sorry, I couldn't generate a response.";
+                await streamOut(String(fullText));
             }
             else if (thinkMode) {
                 // Non-streaming Responses API for reasoning model o3-mini
@@ -513,13 +530,12 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     model,
                     input,
                 });
-                buffered =
-                    (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                        ((_u = (_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.output) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.content) === null || _t === void 0 ? void 0 : _t[0]) === null || _u === void 0 ? void 0 : _u.text) ||
-                        ((_y = (_x = (_w = (_v = resp === null || resp === void 0 ? void 0 : resp.data) === null || _v === void 0 ? void 0 : _v[0]) === null || _w === void 0 ? void 0 : _w.content) === null || _x === void 0 ? void 0 : _x[0]) === null || _y === void 0 ? void 0 : _y.text) ||
-                        ((_1 = (_0 = (_z = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.message) === null || _1 === void 0 ? void 0 : _1.content) ||
-                        "I'm sorry, I couldn't generate a response.";
-                await flush(true);
+                const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                    ((_u = (_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.output) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.content) === null || _t === void 0 ? void 0 : _t[0]) === null || _u === void 0 ? void 0 : _u.text) ||
+                    ((_y = (_x = (_w = (_v = resp === null || resp === void 0 ? void 0 : resp.data) === null || _v === void 0 ? void 0 : _v[0]) === null || _w === void 0 ? void 0 : _w.content) === null || _x === void 0 ? void 0 : _x[0]) === null || _y === void 0 ? void 0 : _y.text) ||
+                    ((_1 = (_0 = (_z = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.message) === null || _1 === void 0 ? void 0 : _1.content) ||
+                    "I'm sorry, I couldn't generate a response.";
+                await streamOut(String(fullText));
             }
             else {
                 // Normal streaming path

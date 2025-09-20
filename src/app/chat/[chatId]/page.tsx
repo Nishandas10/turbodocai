@@ -95,16 +95,30 @@ export default function ChatPage() {
 		})();
 	}, [user?.uid]);
 
-	// If page loaded with an initial prompt in the URL, auto-send once.
+		// If page loaded with an initial prompt in the URL, auto-send once.
 	useEffect(() => {
-		const p = search?.get("prompt");
-		if (p && user?.uid) {
+			const p = search?.get("prompt");
+			const ws = search?.get("webSearch");
+			const tm = search?.get("thinkMode");
+			const docsParam = search?.get('docs');
+			if (p && user?.uid) {
 			// Clear the prompt from URL to avoid re-sends on hot reloads
 			const url = new URL(window.location.href);
 			url.searchParams.delete("prompt");
+				if (ws !== null) url.searchParams.delete("webSearch");
+				if (tm !== null) url.searchParams.delete("thinkMode");
+				if (docsParam !== null) url.searchParams.delete('docs');
 			window.history.replaceState(null, "", url.toString());
-			// Send without waiting for response; streaming will update UI
-			void send(p);
+				// Prepare overrides from URL for this initial send
+				const wsOn = ws === '1';
+				const tmOn = tm === '1';
+				const initialDocIds = docsParam ? docsParam.split(',').filter(Boolean).slice(0,4) : [];
+				// Reflect in UI state
+				if (wsOn) setWebSearchEnabled(true);
+				if (tmOn) setThinkModeEnabled(true);
+				if (initialDocIds.length) setSelectedDocIds(initialDocIds);
+				// Send without waiting for response; pass overrides to avoid state race
+				void send(p, { webSearch: wsOn, thinkMode: tmOn, docIds: initialDocIds });
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [search, user?.uid]);
@@ -184,7 +198,8 @@ export default function ChatPage() {
 		? (input ? input + ' ' + interimTranscript : interimTranscript)
 		: input;
 
-	const send = async (overrideText?: string) => {
+	type SendOpts = { webSearch?: boolean; thinkMode?: boolean; docIds?: string[] };
+	const send = async (overrideText?: string, opts?: SendOpts) => {
 		const text = (overrideText ?? input).trim();
 		if (!text || !user?.uid || !chatId) return;
 		setSending(true);
@@ -204,14 +219,14 @@ export default function ChatPage() {
 
 			const call = httpsCallable(functions, "sendChatMessage");
 			// Fire and forget; server will stream the assistant message into Firestore
-			void call({
+						void call({
 				userId: user.uid,
 				prompt: text,
 				chatId,
 				language: 'en',
-				docIds: selectedDocIds,
-				webSearch: webSearchEnabled,
-				thinkMode: thinkModeEnabled,
+							docIds: (opts?.docIds && opts.docIds.length ? opts.docIds : selectedDocIds),
+							webSearch: opts?.webSearch ?? webSearchEnabled,
+							thinkMode: opts?.thinkMode ?? thinkModeEnabled,
 			});
 
 			setInput("");

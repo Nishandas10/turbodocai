@@ -555,6 +555,23 @@ export const sendChatMessage = onCall(
           logger.warn("Failed to flush streaming token to Firestore", e);
         }
       };
+      const streamOut = async (fullText: string) => {
+        try {
+          const chunkSize = 48; // characters per flush
+          const delayMs = 24; // pacing for smoother UI
+          buffered = "";
+          for (let i = 0; i < fullText.length; i += chunkSize) {
+            buffered += fullText.slice(i, i + chunkSize);
+            await flush(false);
+            await new Promise((r) => setTimeout(r, delayMs));
+          }
+          await flush(true);
+        } catch (e) {
+          logger.warn("streamOut failed; falling back to single flush", e);
+          buffered = fullText;
+          await flush(true);
+        }
+      };
 
       try {
         if (webSearch) {
@@ -576,13 +593,13 @@ export const sendChatMessage = onCall(
             input,
             tools: [{ type: "web_search" }],
           });
-          buffered =
+          const fullText =
             resp?.output_text ||
             resp?.output?.[0]?.content?.[0]?.text ||
             resp?.data?.[0]?.content?.[0]?.text ||
             resp?.choices?.[0]?.message?.content ||
             "I'm sorry, I couldn't generate a response.";
-          await flush(true);
+          await streamOut(String(fullText));
         } else if (thinkMode) {
           // Non-streaming Responses API for reasoning model o3-mini
           const input = chatMessages.map((m) => ({
@@ -601,13 +618,13 @@ export const sendChatMessage = onCall(
             model,
             input,
           });
-          buffered =
+          const fullText =
             resp?.output_text ||
             resp?.output?.[0]?.content?.[0]?.text ||
             resp?.data?.[0]?.content?.[0]?.text ||
             resp?.choices?.[0]?.message?.content ||
             "I'm sorry, I couldn't generate a response.";
-          await flush(true);
+          await streamOut(String(fullText));
         } else {
           // Normal streaming path
           const stream = await openai.chat.completions.create({
