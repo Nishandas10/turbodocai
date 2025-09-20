@@ -20,7 +20,9 @@ import {
   ChevronRight,
   MoreHorizontal,
   X,
-  Brain
+  Brain,
+  Lock,
+  Unlock
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
@@ -30,10 +32,11 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
-import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace } from "@/lib/firestore"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
+import type { PublicDocumentMeta } from "@/lib/firestore"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { functions } from "@/lib/firebase"
 import { httpsCallable } from "firebase/functions"
@@ -59,6 +62,7 @@ export default function Dashboard() {
   const [recentDocs, setRecentDocs] = useState<UserDoc[]>([])
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const [spaceCounts, setSpaceCounts] = useState<Record<string, number>>({})
+  const [exploreDocs, setExploreDocs] = useState<PublicDocumentMeta[]>([])
   // Prompt options
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   const [thinkModeEnabled, setThinkModeEnabled] = useState(false)
@@ -192,6 +196,14 @@ export default function Dashboard() {
     return () => { unsubs.forEach((u) => { try { u() } catch {} }) }
   }, [spaces, user?.uid])
 
+  // Listen to public Explore docs (newest first)
+  useEffect(() => {
+    const unsub = listenToExploreDocuments((docs) => {
+      setExploreDocs(docs.slice(0, 8))
+    })
+    return () => { try { unsub() } catch {} }
+  }, [])
+
   const relativeTime = (date: unknown) => {
     try {
       let d: Date;
@@ -220,6 +232,39 @@ export default function Dashboard() {
     } catch {
       return ''
     }
+  }
+  const renderPublicDocPreview = (doc: PublicDocumentMeta) => {
+    const url = doc.masterUrl || doc.metadata?.downloadURL
+    const mime = doc.metadata?.mimeType || ''
+    const text = (doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
+    const iconCls = "h-8 w-8 text-muted-foreground"
+
+    if (url && typeof url === 'string' && mime.startsWith('image/')) {
+      return (
+        <div className="absolute inset-0 w-full h-full">
+          <Image 
+            src={url}
+            alt={doc.title}
+            fill
+            className="object-cover"
+            sizes="(max-width: 768px) 100vw, 33vw"
+          />
+        </div>
+      )
+    }
+    if (doc.type === 'youtube') return <Play className={iconCls} />
+    if (doc.type === 'website') return <Globe className={iconCls} />
+    if (doc.type === 'audio') return <Mic className={iconCls} />
+
+    if (text) {
+      const excerpt = text.split(/\n+/).slice(0, 4).join('\n')
+      return (
+        <div className="absolute inset-0 p-3 text-[11px] leading-4 text-foreground/80 whitespace-pre-line overflow-hidden">
+          {excerpt}
+        </div>
+      )
+    }
+    return <FileText className={iconCls} />
   }
 
   const renderDocPreview = (doc: UserDoc) => {
@@ -431,6 +476,47 @@ export default function Dashboard() {
     } catch (e) {
       console.error('Create space failed', e)
       alert('Failed to create space')
+    }
+  }
+
+  // Recents card actions
+  const toggleVisibility = async (doc: UserDoc) => {
+    if (!user?.uid) return
+    try {
+      await updateDocument(doc.id, user.uid, { isPublic: !doc.isPublic })
+    } catch (e) {
+      console.error('Toggle visibility failed', e)
+      alert('Failed to update visibility')
+    }
+  }
+
+  const addDocToSpace = async (doc: UserDoc, spaceId: string) => {
+    if (!user?.uid) return
+    try {
+      await updateDocument(doc.id, user.uid, { spaceId })
+    } catch (e) {
+      console.error('Add to space failed', e)
+      alert('Failed to add to space')
+    }
+  }
+
+  const removeDocFromSpace = async (doc: UserDoc) => {
+    if (!user?.uid) return
+    try {
+      await updateDocument(doc.id, user.uid, { spaceId: '' as unknown as undefined })
+    } catch (e) {
+      console.error('Remove from space failed', e)
+    }
+  }
+
+  const deleteDocPermanently = async (doc: UserDoc) => {
+    if (!user?.uid) return
+    if (!confirm('Delete this document permanently?')) return
+    try {
+      await deleteDocument(doc.id, user.uid)
+    } catch (e) {
+      console.error('Delete doc failed', e)
+      alert('Failed to delete')
     }
   }
 
@@ -786,14 +872,79 @@ export default function Dashboard() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {recentDocs.map((d) => (
-                  <div key={d.id} className="bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer">
+                  <div key={d.id} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative">
                     <div className="relative h-32 bg-muted flex items-center justify-center">
                       {renderDocPreview(d)}
                       <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">{username}&apos;s Space</span>
+                      {/* Three dots menu */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Document menu"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-black" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
+                          <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); toggleVisibility(d) }} className="flex items-center gap-2">
+                            {d.isPublic ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                            <span>{d.isPublic ? 'Make private' : 'Make public'}</span>
+                          </DropdownMenuItem>
+                          <div className="my-1 h-px bg-border" />
+                          {spaces.length === 0 ? (
+                            <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
+                          ) : (
+                            <>
+                              <DropdownMenuItem disabled className="opacity-70">Add to space</DropdownMenuItem>
+                              {spaces.slice(0,6).map(sp => (
+                                <DropdownMenuItem key={sp.id} onSelect={(e)=>{ e.preventDefault(); addDocToSpace(d, sp.id) }}>
+                                  {sp.name || 'Untitled'}
+                                </DropdownMenuItem>
+                              ))}
+                              {d.spaceId ? (
+                                <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); removeDocFromSpace(d) }}>Remove from space</DropdownMenuItem>
+                              ) : null}
+                            </>
+                          )}
+                          <div className="my-1 h-px bg-border" />
+                          <DropdownMenuItem className="text-destructive" onSelect={(e)=>{ e.preventDefault(); deleteDocPermanently(d) }}>Delete</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div className="p-4">
                       <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
                       <p className="text-xs text-muted-foreground">{relativeTime(d.createdAt || d.updatedAt)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Explore Section */}
+          <div className="max-w-6xl mx-auto mt-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground">Explore</h2>
+              <button onClick={() => router.push('/explore')} className="text-sm text-muted-foreground hover:text-foreground">View all</button>
+            </div>
+            {exploreDocs.length === 0 ? (
+              <div className="text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">No public documents yet.</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {exploreDocs.map((d) => (
+                  <div key={d.id} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-default relative">
+                    <div className="relative h-32 bg-muted flex items-center justify-center">
+                      {renderPublicDocPreview(d)}
+                      <span className="absolute left-3 bottom-3 text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 bg-background/80 border border-border">{d.type}</span>
+                    </div>
+                    <div className="p-4">
+                      <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
+                      <p className="text-xs text-muted-foreground">{relativeTime(d.createdAt || d.updatedAt)}</p>
+                      {d.preview && (
+                        <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{d.preview}</p>
+                      )}
                     </div>
                   </div>
                 ))}

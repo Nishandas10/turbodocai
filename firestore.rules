@@ -9,8 +9,10 @@ service cloud.firestore {
     
     // Documents collection - nested structure: documents/{userId}/userDocuments/{documentId}
     match /documents/{userId}/userDocuments/{documentId} {
-      // Users can only access documents in their own user folder
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Public read if isPublic == true, otherwise owner only
+      allow read: if resource.data.isPublic == true || (request.auth != null && request.auth.uid == userId);
+      // Writes restricted to the owner only
+      allow create, update, delete: if request.auth != null && request.auth.uid == userId;
     }
     
     // Processing queue - users can only access their own tasks
@@ -25,6 +27,25 @@ service cloud.firestore {
     match /user_analytics/{userId} {
       allow create: if request.auth != null && request.auth.uid == userId;
       allow read, update: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Public Explore collection - top-level: /userDocuments/{docId}
+    // docId can be `${ownerId}_${originalDocumentId}` or any server-generated id
+    match /userDocuments/{docId} {
+      // Anyone can read documents that are marked public
+      allow read: if resource.data.isPublic == true;
+      // Owners can create/update/delete their own entries; enforce ownership immutability
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+    }
+
+    // New: allDocuments collection (primary global list)
+    match /allDocuments/{docId} {
+      allow read: if resource.data.isPublic == true;
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
     }
 
     // Mind maps (legacy nested path - deprecated)

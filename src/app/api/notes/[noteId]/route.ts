@@ -1,14 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { NextRequest, NextResponse } from "next/server";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextResponse } from "next/server";
 import { getDocument, updateDocument } from "@/lib/firestore";
 import { uploadDocument } from "@/lib/storage";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { noteId: string } }
-) {
+export async function GET(request: Request, context: any) {
   try {
-    const { noteId } = params;
+    const { noteId } = context?.params || {};
     const url = new URL(request.url);
     const userId = url.searchParams.get("userId");
 
@@ -38,12 +36,9 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { noteId: string } }
-) {
+export async function PUT(request: Request, context: any) {
   try {
-    const { noteId } = params;
+    const { noteId } = context?.params || {};
     const body = await request.json();
     const { content, title, userId, lexicalState } = body;
 

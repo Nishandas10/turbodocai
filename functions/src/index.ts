@@ -341,6 +341,91 @@ export const processDocument = onDocumentWritten(
 );
 
 /**
+ * Mirror nested user document to top-level /userDocuments for public Explore.
+ * Doc id format: `${ownerId}_${documentId}` to keep unique and traceable.
+ * On delete, remove mirror.
+ */
+// Single handler: mirror on create, delete on delete, and only update isPublic on updates
+export const syncAllDocuments = onDocumentWritten(
+  "documents/{userId}/userDocuments/{documentId}",
+  async (event) => {
+    const beforeSnap = event.data?.before;
+    const afterSnap = event.data?.after;
+    const { userId, documentId } = event.params as {
+      userId: string;
+      documentId: string;
+    };
+
+    const mirrorId = `${userId}_${documentId}`;
+    const allRef = db.collection("allDocuments").doc(mirrorId);
+
+    // Delete mirror when source is deleted
+    if (!afterSnap?.exists && beforeSnap?.exists) {
+      try {
+        await allRef.delete();
+        logger.info("Deleted mirror in allDocuments", { mirrorId });
+      } catch (err) {
+        logger.warn("Failed to delete mirror doc in allDocuments", {
+          mirrorId,
+          err,
+        });
+      }
+      return;
+    }
+
+    // Create mirror on new document
+    if (!beforeSnap?.exists && afterSnap?.exists) {
+      const data = afterSnap.data() as Record<string, any> | undefined;
+      if (!data) return;
+      try {
+        await allRef.set(data, { merge: false });
+        logger.info("Created mirror in allDocuments", { mirrorId });
+      } catch (err) {
+        logger.error("Failed to create mirror doc in allDocuments", {
+          mirrorId,
+          err,
+        });
+      }
+      return;
+    }
+
+    // Update only when isPublic changes; avoid reacting to other frequent updates
+    if (beforeSnap?.exists && afterSnap?.exists) {
+      const before = (beforeSnap.data() as any) || {};
+      const after = (afterSnap.data() as any) || {};
+      const beforePublic = !!before.isPublic;
+      const afterPublic = !!after.isPublic;
+      if (beforePublic === afterPublic) return;
+      try {
+        // If mirror missing (older docs), upsert full document instead
+        const mirrorExists = (await allRef.get()).exists;
+        if (!mirrorExists) {
+          await allRef.set(after, { merge: false });
+          logger.info(
+            "Backfilled missing mirror in allDocuments on isPublic change",
+            { mirrorId }
+          );
+        } else {
+          await allRef.set(
+            { isPublic: afterPublic, updatedAt: new Date() },
+            { merge: true }
+          );
+          logger.info("Updated isPublic in allDocuments", {
+            mirrorId,
+            isPublic: afterPublic,
+          });
+        }
+      } catch (err) {
+        logger.error("Failed to sync isPublic in allDocuments", {
+          mirrorId,
+          err,
+        });
+      }
+    }
+  }
+);
+
+/**
  * Callable function to create/continue a chat and generate an assistant reply.
  * Data: { userId: string, prompt: string, language?: string, chatId?: string }
  * Returns: { success, data: { chatId, answer } }

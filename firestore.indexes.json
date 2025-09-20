@@ -56,6 +56,60 @@
     }
     ,
     {
+      "collectionGroup": "allDocuments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isPublic", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+    ,
+    {
+      "collectionGroup": "allDocuments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+    ,
+    {
+      "collectionGroup": "allDocuments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+    ,
+    {
+      "collectionGroup": "userDocuments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isPublic", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+    ,
+    {
+      "collectionGroup": "userDocuments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+    ,
+    {
+      "collectionGroup": "userDocuments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+    ,
+    {
       "collectionGroup": "spaces",
       "queryScope": "COLLECTION",
       "fields": [

@@ -7,7 +7,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.sendChatMessage = exports.processDocument = exports.createChat = void 0;
+exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.processDocument = exports.createChat = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -282,6 +282,75 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             processingFailedAt: new Date(),
             processingLock: null,
         });
+    }
+});
+/**
+ * Mirror nested user document to top-level /userDocuments for public Explore.
+ * Doc id format: `${ownerId}_${documentId}` to keep unique and traceable.
+ * On delete, remove mirror.
+ */
+// Single handler: mirror on create, delete on delete, and only update isPublic on updates
+exports.syncAllDocuments = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
+    var _a, _b;
+    const beforeSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before;
+    const afterSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.after;
+    const { userId, documentId } = event.params;
+    const mirrorId = `${userId}_${documentId}`;
+    const allRef = db.collection("allDocuments").doc(mirrorId);
+    // Delete mirror when source is deleted
+    if (!(afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.exists) && (beforeSnap === null || beforeSnap === void 0 ? void 0 : beforeSnap.exists)) {
+        try {
+            await allRef.delete();
+            firebase_functions_1.logger.info("Deleted mirror in allDocuments", { mirrorId });
+        }
+        catch (err) {
+            firebase_functions_1.logger.warn("Failed to delete mirror doc in allDocuments", {
+                mirrorId,
+                err,
+            });
+        }
+        return;
+    }
+    // Create mirror on new document
+    if (!(beforeSnap === null || beforeSnap === void 0 ? void 0 : beforeSnap.exists) && (afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.exists)) {
+        const data = afterSnap.data();
+        if (!data)
+            return;
+        try {
+            await allRef.set(data, { merge: false });
+            firebase_functions_1.logger.info("Created mirror in allDocuments", { mirrorId });
+        }
+        catch (err) {
+            firebase_functions_1.logger.error("Failed to create mirror doc in allDocuments", {
+                mirrorId,
+                err,
+            });
+        }
+        return;
+    }
+    // Update only when isPublic changes; avoid reacting to other frequent updates
+    if ((beforeSnap === null || beforeSnap === void 0 ? void 0 : beforeSnap.exists) && (afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.exists)) {
+        const before = beforeSnap.data() || {};
+        const after = afterSnap.data() || {};
+        const beforePublic = !!before.isPublic;
+        const afterPublic = !!after.isPublic;
+        if (beforePublic === afterPublic)
+            return;
+        try {
+            // If mirror missing (older docs), upsert full document instead
+            const mirrorExists = (await allRef.get()).exists;
+            if (!mirrorExists) {
+                await allRef.set(after, { merge: false });
+                firebase_functions_1.logger.info("Backfilled missing mirror in allDocuments on isPublic change", { mirrorId });
+            }
+            else {
+                await allRef.set({ isPublic: afterPublic, updatedAt: new Date() }, { merge: true });
+                firebase_functions_1.logger.info("Updated isPublic in allDocuments", { mirrorId, isPublic: afterPublic });
+            }
+        }
+        catch (err) {
+            firebase_functions_1.logger.error("Failed to sync isPublic in allDocuments", { mirrorId, err });
+        }
     }
 });
 /**
