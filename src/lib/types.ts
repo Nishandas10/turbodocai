@@ -32,6 +32,9 @@ export interface DocumentMetadata {
   storagePath?: string; // Firebase Storage path
   downloadURL?: string; // Firebase Storage download URL
   originalFile?: File; // Temporary reference to original file (not stored in Firestore)
+  // Provenance when importing a public document from another user
+  sourceOwnerId?: string;
+  sourceDocumentId?: string;
 }
 
 export interface Document {

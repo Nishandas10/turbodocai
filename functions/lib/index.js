@@ -345,11 +345,17 @@ exports.syncAllDocuments = (0, firestore_1.onDocumentWritten)("documents/{userId
             }
             else {
                 await allRef.set({ isPublic: afterPublic, updatedAt: new Date() }, { merge: true });
-                firebase_functions_1.logger.info("Updated isPublic in allDocuments", { mirrorId, isPublic: afterPublic });
+                firebase_functions_1.logger.info("Updated isPublic in allDocuments", {
+                    mirrorId,
+                    isPublic: afterPublic,
+                });
             }
         }
         catch (err) {
-            firebase_functions_1.logger.error("Failed to sync isPublic in allDocuments", { mirrorId, err });
+            firebase_functions_1.logger.error("Failed to sync isPublic in allDocuments", {
+                mirrorId,
+                err,
+            });
         }
     }
 });

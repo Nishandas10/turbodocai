@@ -22,6 +22,7 @@ class QueryService {
      * Query the RAG system with a question
      */
     async queryRAG(question, userId, documentId, topK = 5) {
+        var _a, _b, _c, _d;
         try {
             firebase_functions_1.logger.info(`Processing RAG query for user ${userId}: ${question}`);
             // Step 1: Generate embedding for the question
@@ -29,8 +30,65 @@ class QueryService {
             // Step 2: Search Pinecone for similar chunks
             const similarChunks = await this.pineconeService.querySimilarChunks(queryEmbedding, userId, topK, documentId);
             if (similarChunks.length === 0) {
+                // Fallback: if a documentId is provided, try Firestore content/summary or downloadURL text
+                if (documentId) {
+                    try {
+                        const db = (0, firestore_1.getFirestore)();
+                        const snap = await db
+                            .collection("documents")
+                            .doc(userId)
+                            .collection("userDocuments")
+                            .doc(documentId)
+                            .get();
+                        if (snap.exists) {
+                            const data = snap.data();
+                            let context = (data.summary ||
+                                ((_a = data.content) === null || _a === void 0 ? void 0 : _a.raw) ||
+                                ((_b = data.content) === null || _b === void 0 ? void 0 : _b.processed) ||
+                                "").slice(0, 24000);
+                            if (!context || context.length < 80) {
+                                const url = (_c = data.metadata) === null || _c === void 0 ? void 0 : _c.downloadURL;
+                                if (url) {
+                                    try {
+                                        const res = await fetch(url);
+                                        if (res.ok) {
+                                            const txt = await res.text();
+                                            context = (txt || "").slice(0, 24000);
+                                        }
+                                    }
+                                    catch (e) {
+                                        firebase_functions_1.logger.warn("queryRAG downloadURL fallback failed", e);
+                                    }
+                                }
+                            }
+                            if (context && context.length >= 80) {
+                                const answer = await this.generateAnswer(question, context);
+                                const sourceTitle = data.title || "Document";
+                                const fileName = (_d = data.metadata) === null || _d === void 0 ? void 0 : _d.fileName;
+                                return {
+                                    answer,
+                                    sources: [
+                                        {
+                                            documentId,
+                                            title: sourceTitle,
+                                            fileName,
+                                            chunk: context.slice(0, 200) +
+                                                (context.length > 200 ? "..." : ""),
+                                            score: 0.99,
+                                        },
+                                    ],
+                                    confidence: 70,
+                                };
+                            }
+                        }
+                    }
+                    catch (fbErr) {
+                        firebase_functions_1.logger.warn("queryRAG Firestore/content fallback failed", fbErr);
+                    }
+                }
+                // Still nothing useful
                 return {
-                    answer: "I couldn't find any relevant information to answer your question. Please make sure you have uploaded and processed documents.",
+                    answer: "I couldn't find enough context from this document yet. Try again after processing finishes or ensure the document has accessible text.",
                     sources: [],
                     confidence: 0,
                 };
@@ -211,7 +269,7 @@ Answer:`;
      *  - Prompt OpenAI to emit clean JSON ONLY: [{"front":"...","back":"...","category":"..."}, ...]
      */
     async generateFlashcards(documentId, userId, count = 12) {
-        var _a, _b, _c, _d, _e, _f;
+        var _a, _b, _c, _d, _e, _f, _g;
         try {
             const db = (0, firestore_1.getFirestore)();
             // Cache lookup first
@@ -273,10 +331,26 @@ Answer:`;
                         .get();
                     if (docSnap.exists) {
                         const data = docSnap.data();
-                        const sourceText = (data.summary ||
+                        let sourceText = (data.summary ||
                             ((_a = data.content) === null || _a === void 0 ? void 0 : _a.raw) ||
                             ((_b = data.content) === null || _b === void 0 ? void 0 : _b.processed) ||
                             "").slice(0, 18000);
+                        // If Firestore content is missing, try to fetch from downloadURL as a final fallback
+                        if (!sourceText || sourceText.length < 120) {
+                            const url = (_c = data.metadata) === null || _c === void 0 ? void 0 : _c.downloadURL;
+                            if (url) {
+                                try {
+                                    const res = await fetch(url);
+                                    if (res.ok) {
+                                        const txt = await res.text();
+                                        sourceText = (txt || "").slice(0, 18000);
+                                    }
+                                }
+                                catch (fetchErr) {
+                                    firebase_functions_1.logger.warn("downloadURL fetch failed for flashcards fallback", fetchErr);
+                                }
+                            }
+                        }
                         if (sourceText.length > 120) {
                             const fcPrompt = `Generate ${count} JSON flashcards from the following text. Same JSON array spec as before (front, back, category). Text:\n\n${sourceText}`;
                             const resp = await this.openai.chat.completions.create({
@@ -291,7 +365,7 @@ Answer:`;
                                 temperature: 0.4,
                                 max_tokens: 1400,
                             });
-                            const rawAlt = ((_d = (_c = resp.choices[0]) === null || _c === void 0 ? void 0 : _c.message) === null || _d === void 0 ? void 0 : _d.content) || "";
+                            const rawAlt = ((_e = (_d = resp.choices[0]) === null || _d === void 0 ? void 0 : _d.message) === null || _e === void 0 ? void 0 : _e.content) || "";
                             const start = rawAlt.indexOf("[");
                             const end = rawAlt.lastIndexOf("]");
                             if (start !== -1 && end !== -1) {
@@ -356,7 +430,7 @@ Answer:`;
                 temperature: 0.35,
                 max_tokens: 1600,
             });
-            const raw = ((_f = (_e = response.choices[0]) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.content) || "";
+            const raw = ((_g = (_f = response.choices[0]) === null || _f === void 0 ? void 0 : _f.message) === null || _g === void 0 ? void 0 : _g.content) || "";
             let jsonText = raw.trim();
             // Attempt to salvage JSON if model added prose
             const firstBracket = jsonText.indexOf("[");

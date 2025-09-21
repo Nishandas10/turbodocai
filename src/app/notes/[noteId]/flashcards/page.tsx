@@ -72,7 +72,8 @@ export default function FlashcardsPage() {
       const readyEnough =
         statusInfo.status === 'completed' ||
         statusInfo.status === 'ready' ||
-        statusInfo.status === 'processing'; // Allow processing without progress requirement for now
+        statusInfo.status === 'processing' ||
+        statusInfo.status === 'failed'; // If processing failed, still attempt flashcards via server fallback
       if (!readyEnough) {
         setLoading(false);
         return;
@@ -136,7 +137,7 @@ export default function FlashcardsPage() {
         // 1. Status just became completed/ready
         // 2. We haven't done final generation yet
         // 3. We're not currently loading
-        if ((status === 'completed' || status === 'ready') && 
+  if ((status === 'completed' || status === 'ready' || status === 'failed') && 
             !generationAttemptedRef.current && 
             !loading) {
           fetchFlashcards({ final: true });

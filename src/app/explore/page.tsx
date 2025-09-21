@@ -133,8 +133,10 @@ export default function ExplorePage() {
   const handleOpenDoc = (doc: PublicDocument) => {
     if (!doc?.id) return;
     if (!user?.uid) { setSignupOpen(true); return; }
-    const { documentId } = parseMirrorId(doc.id);
-    router.push(`/notes/${documentId}`);
+    const { ownerId: fromId, documentId } = parseMirrorId(doc.id);
+    const ownerId = doc.ownerId || fromId;
+    // Pass ownerId so the note page can import & process into the current user's workspace
+    router.push(`/notes/${documentId}?owner=${ownerId}`);
   };
 
   const addExploreDocToSpace = async (doc: PublicDocument, spaceId: string) => {

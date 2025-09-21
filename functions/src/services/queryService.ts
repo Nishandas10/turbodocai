@@ -76,9 +76,78 @@ export class QueryService {
       );
 
       if (similarChunks.length === 0) {
+        // Fallback: if a documentId is provided, try Firestore content/summary or downloadURL text
+        if (documentId) {
+          try {
+            const db = getFirestore();
+            const snap = await db
+              .collection("documents")
+              .doc(userId)
+              .collection("userDocuments")
+              .doc(documentId)
+              .get();
+            if (snap.exists) {
+              const data = snap.data() as {
+                title?: string;
+                metadata?: { fileName?: string; downloadURL?: string };
+                content?: { raw?: string; processed?: string };
+                summary?: string;
+              };
+              let context = (
+                data.summary ||
+                data.content?.raw ||
+                data.content?.processed ||
+                ""
+              ).slice(0, 24000);
+              if (!context || context.length < 80) {
+                const url = data.metadata?.downloadURL;
+                if (url) {
+                  try {
+                    const res = await fetch(url);
+                    if (res.ok) {
+                      const txt = await res.text();
+                      context = (txt || "").slice(0, 24000);
+                    }
+                  } catch (e) {
+                    logger.warn(
+                      "queryRAG downloadURL fallback failed",
+                      e as any
+                    );
+                  }
+                }
+              }
+              if (context && context.length >= 80) {
+                const answer = await this.generateAnswer(question, context);
+                const sourceTitle = data.title || "Document";
+                const fileName = data.metadata?.fileName;
+                return {
+                  answer,
+                  sources: [
+                    {
+                      documentId,
+                      title: sourceTitle,
+                      fileName,
+                      chunk:
+                        context.slice(0, 200) +
+                        (context.length > 200 ? "..." : ""),
+                      score: 0.99,
+                    },
+                  ],
+                  confidence: 70,
+                };
+              }
+            }
+          } catch (fbErr) {
+            logger.warn(
+              "queryRAG Firestore/content fallback failed",
+              fbErr as any
+            );
+          }
+        }
+        // Still nothing useful
         return {
           answer:
-            "I couldn't find any relevant information to answer your question. Please make sure you have uploaded and processed documents.",
+            "I couldn't find enough context from this document yet. Try again after processing finishes or ensure the document has accessible text.",
           sources: [],
           confidence: 0,
         };
@@ -377,13 +446,32 @@ Answer:`;
             const data = docSnap.data() as {
               content?: { raw?: string; processed?: string };
               summary?: string;
+              metadata?: { downloadURL?: string };
             };
-            const sourceText = (
+            let sourceText = (
               data.summary ||
               data.content?.raw ||
               data.content?.processed ||
               ""
             ).slice(0, 18000);
+            // If Firestore content is missing, try to fetch from downloadURL as a final fallback
+            if (!sourceText || sourceText.length < 120) {
+              const url = data.metadata?.downloadURL;
+              if (url) {
+                try {
+                  const res = await fetch(url);
+                  if (res.ok) {
+                    const txt = await res.text();
+                    sourceText = (txt || "").slice(0, 18000);
+                  }
+                } catch (fetchErr) {
+                  logger.warn(
+                    "downloadURL fetch failed for flashcards fallback",
+                    fetchErr as any
+                  );
+                }
+              }
+            }
             if (sourceText.length > 120) {
               const fcPrompt = `Generate ${count} JSON flashcards from the following text. Same JSON array spec as before (front, back, category). Text:\n\n${sourceText}`;
               const resp = await this.openai.chat.completions.create({
