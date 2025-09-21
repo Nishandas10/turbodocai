@@ -253,64 +253,70 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
         )}
       </div>
 
-      {/* User footer */}
+      {/* User footer / Auth */}
       <div className="px-2 py-3 border-t border-sidebar-border">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className={`w-full ${collapsed ? "justify-center" : "justify-between"} flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent`}>
-              <span className="flex items-center gap-2 min-w-0">
-                <span className="h-8 w-8 rounded-full bg-sidebar-accent flex items-center justify-center text-xs text-sidebar-accent-foreground">
-                  {user?.displayName?.[0] || user?.email?.[0] || "U"}
-                </span>
-                {!collapsed && (
-                  <span className="min-w-0 text-left">
-                    <span className="block text-sm text-sidebar-foreground truncate">{user?.displayName || "Nishant Das"}</span>
+        {user ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className={`w-full ${collapsed ? "justify-center" : "justify-between"} flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent`}>
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="h-8 w-8 rounded-full bg-sidebar-accent flex items-center justify-center text-xs text-sidebar-accent-foreground">
+                    {user?.displayName?.[0] || user?.email?.[0] || "U"}
                   </span>
-                )}
-              </span>
-              {!collapsed && <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="end" className="w-56">
-            <DropdownMenuItem asChild>
-              <Link href="/settings" className="w-full">
-                <SettingsIcon className="h-4 w-4" />
-                <span>Settings</span>
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/pricing" className="w-full">
-                <Crown className="h-4 w-4" />
-                <span>Pricing</span>
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="#" className="w-full">
-                <Clock className="h-4 w-4" />
-                <span>History</span>
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuCheckboxItem
-              checked={theme === 'dark'}
-              onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
-            >
-              <Moon className="h-4 w-4" />
-              <span>Dark mode</span>
-            </DropdownMenuCheckboxItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault()
-                void signOut()
-              }}
-              variant="destructive"
-            >
-              <LogOut className="h-4 w-4" />
-              <span>Log out</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                  {!collapsed && (
+                    <span className="min-w-0 text-left">
+                      <span className="block text-sm text-sidebar-foreground truncate">{user?.displayName || user?.email || "User"}</span>
+                    </span>
+                  )}
+                </span>
+                {!collapsed && <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end" className="w-56">
+              <DropdownMenuItem asChild>
+                <Link href="/settings" className="w-full">
+                  <SettingsIcon className="h-4 w-4" />
+                  <span>Settings</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/pricing" className="w-full">
+                  <Crown className="h-4 w-4" />
+                  <span>Pricing</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="#" className="w-full">
+                  <Clock className="h-4 w-4" />
+                  <span>History</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={theme === 'dark'}
+                onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+              >
+                <Moon className="h-4 w-4" />
+                <span>Dark mode</span>
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault()
+                  void signOut()
+                }}
+                variant="destructive"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>Log out</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Link href="/signup" className={`w-full ${collapsed ? "justify-center" : "justify-center gap-2"} flex items-center rounded-md px-2 py-1.5 border border-sidebar-border hover:bg-sidebar-accent text-sidebar-foreground`}>
+            <span className="text-sm">Sign in</span>
+          </Link>
+        )}
       </div>
     </aside>
   )
