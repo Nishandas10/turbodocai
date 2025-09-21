@@ -32,7 +32,7 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
-import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument } from "@/lib/firestore"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument, createWebsiteDocument } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
@@ -520,6 +520,46 @@ export default function Dashboard() {
     }
   }
 
+  // Open a user's own recent document
+  const openRecentDoc = (doc: UserDoc) => {
+    router.push(`/notes/${doc.id}`)
+  }
+
+  // Parse mirror id of public docs: `${ownerId}_${documentId}`
+  const parseMirrorId = (mirrorId: string) => {
+    const idx = mirrorId.indexOf('_')
+    if (idx === -1) return { ownerId: '', documentId: mirrorId }
+    return { ownerId: mirrorId.slice(0, idx), documentId: mirrorId.slice(idx + 1) }
+  }
+
+  // Open a public explore document (dashboard explore section)
+  const openExploreDoc = (doc: PublicDocumentMeta) => {
+    const { ownerId: fromId, documentId } = parseMirrorId(doc.id)
+    const ownerId = (doc as unknown as { ownerId?: string })?.ownerId || fromId
+    router.push(`/notes/${documentId}?owner=${ownerId}`)
+  }
+
+  // Add a public explore document to user's space from Dashboard Explore section
+  const addExploreDocToSpace = async (doc: PublicDocumentMeta, spaceId: string) => {
+    if (!user?.uid) return
+    const { ownerId: fromId, documentId } = parseMirrorId(doc.id)
+    const ownerId = (doc as unknown as { ownerId?: string })?.ownerId || fromId
+    try {
+      if (ownerId && ownerId === user.uid) {
+        // Own document: attach directly
+        await updateDocument(documentId, user.uid, { spaceId })
+      } else {
+        // Not own: save a link into the space
+        const url = `${window.location.origin}/notes/${documentId}`
+        await createWebsiteDocument(user.uid, url, doc.title, spaceId)
+      }
+      alert('Added to space')
+    } catch (e) {
+      console.error('Add to space failed', e)
+      alert('Failed to add to space')
+    }
+  }
+
   return (
     <ProtectedRoute>
       <div className="h-screen bg-background flex overflow-hidden">
@@ -872,7 +912,11 @@ export default function Dashboard() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {recentDocs.map((d) => (
-                  <div key={d.id} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative">
+                  <div
+                    key={d.id}
+                    className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative"
+                    onClick={() => openRecentDoc(d)}
+                  >
                     <div className="relative h-32 bg-muted flex items-center justify-center">
                       {renderDocPreview(d)}
                       <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">{username}&apos;s Space</span>
@@ -934,10 +978,40 @@ export default function Dashboard() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {exploreDocs.map((d) => (
-                  <div key={d.id} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-default relative">
+                  <div
+                    key={d.id}
+                    className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative"
+                    onClick={() => openExploreDoc(d)}
+                  >
                     <div className="relative h-32 bg-muted flex items-center justify-center">
                       {renderPublicDocPreview(d)}
                       <span className="absolute left-3 bottom-3 text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 bg-background/80 border border-border">{d.type}</span>
+                      {/* Hover menu for adding to spaces */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md bg-black/90 text-white hover:bg-black"
+                            onClick={(e) => { e.stopPropagation() }}
+                            aria-label="Document menu"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
+                          {spaces.length === 0 ? (
+                            <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
+                          ) : (
+                            <>
+                              <DropdownMenuItem disabled className="opacity-70">Add to space</DropdownMenuItem>
+                              {spaces.slice(0,6).map(sp => (
+                                <DropdownMenuItem key={sp.id} onSelect={(e)=>{ e.preventDefault(); addExploreDocToSpace(d, sp.id) }}>
+                                  {sp.name || 'Untitled'}
+                                </DropdownMenuItem>
+                              ))}
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div className="p-4">
                       <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
