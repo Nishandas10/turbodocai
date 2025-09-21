@@ -8,7 +8,7 @@ import { db } from "@/lib/firebase";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
-import { listenToUserSpaces, updateDocument, createWebsiteDocument } from "@/lib/firestore";
+import { listenToUserSpaces, updateDocument, createWebsiteDocument, getDocument as getUserDoc } from "@/lib/firestore";
 import type { Space as SpaceType } from "@/lib/types";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
@@ -50,6 +50,7 @@ export default function ExplorePage() {
   const router = useRouter();
   const [signupOpen, setSignupOpen] = useState(false);
   const [spaces, setSpaces] = useState<SpaceType[]>([]);
+  const [previewMap, setPreviewMap] = useState<Record<string, string>>({});
   const TOPICS: string[] = [
     "For You",
     "Chemistry","Education","Arts, Design & Media","Languages & Literature",
@@ -77,6 +78,38 @@ export default function ExplorePage() {
     fetchDocs();
   }, []);
 
+  // After docs load, fetch summary/content from the source userDocuments to ensure rich previews
+  useEffect(() => {
+    let cancelled = false;
+    const loadPreviews = async () => {
+      if (!docs.length) { setPreviewMap({}); return; }
+      try {
+        const entries = await Promise.all(
+          docs.map(async (d) => {
+            const idx = d.id.indexOf("_");
+            const ownerId = idx === -1 ? d.ownerId : d.id.slice(0, idx) || d.ownerId;
+            const documentId = idx === -1 ? d.id : d.id.slice(idx + 1);
+            if (!ownerId || !documentId) return [d.id, ""] as const;
+            try {
+              const full = await getUserDoc(documentId, ownerId);
+              const text = (full?.summary || full?.content?.processed || full?.content?.raw || "").trim();
+              return [d.id, text] as const;
+            } catch {
+              return [d.id, ""] as const;
+            }
+          })
+        );
+        if (!cancelled) {
+          const map: Record<string, string> = {};
+          for (const [id, text] of entries) map[id] = text;
+          setPreviewMap(map);
+        }
+      } catch {/* noop */}
+    };
+    loadPreviews();
+    return () => { cancelled = true; };
+  }, [docs]);
+
   // Load user's spaces (recent first) for the Add-to-space menu
   useEffect(() => {
     if (!user?.uid) { setSpaces([]); return; }
@@ -87,7 +120,8 @@ export default function ExplorePage() {
   const renderPreview = (doc: PublicDocument) => {
     const url = doc.masterUrl || doc.metadata?.downloadURL;
     const mime = doc.metadata?.mimeType || "";
-    const text = (doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || "").trim();
+    const override = previewMap[doc.id];
+    const text = (override || doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || "").trim();
 
     const iconCls = "h-8 w-8 text-muted-foreground";
 
@@ -108,7 +142,7 @@ export default function ExplorePage() {
     if (doc.type === "website") return <span className={iconCls}>🌐</span>;
     if (doc.type === "audio") return <span className={iconCls}>🎙️</span>;
 
-    if (text) {
+  if (text) {
       const excerpt = text.split(/\n+/).slice(0, 4).join("\n");
       return (
         <div className="absolute inset-0 p-3 text-[11px] leading-4 text-foreground/80 whitespace-pre-line overflow-hidden">

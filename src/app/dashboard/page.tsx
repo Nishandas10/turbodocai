@@ -32,7 +32,7 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
-import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument, createWebsiteDocument } from "@/lib/firestore"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument, createWebsiteDocument, getDocument as getUserDoc } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
@@ -63,6 +63,7 @@ export default function Dashboard() {
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const [spaceCounts, setSpaceCounts] = useState<Record<string, number>>({})
   const [exploreDocs, setExploreDocs] = useState<PublicDocumentMeta[]>([])
+  const [explorePreviewMap, setExplorePreviewMap] = useState<Record<string, string>>({})
   // Prompt options
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   const [thinkModeEnabled, setThinkModeEnabled] = useState(false)
@@ -204,6 +205,37 @@ export default function Dashboard() {
     return () => { try { unsub() } catch {} }
   }, [])
 
+  // Fetch preview text for Explore docs from source userDocuments (summary/content)
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!exploreDocs.length) { setExplorePreviewMap({}); return }
+      try {
+        const pairs = await Promise.all(exploreDocs.map(async (d) => {
+          const idx = d.id.indexOf('_')
+          const parsedOwner = idx === -1 ? '' : d.id.slice(0, idx)
+          const ownerId = d.ownerId || parsedOwner
+          const documentId = idx === -1 ? d.id : d.id.slice(idx + 1)
+          if (!ownerId || !documentId) return [d.id, ''] as const
+          try {
+            const full = await getUserDoc(documentId, ownerId)
+            const text = (full?.summary || full?.content?.processed || full?.content?.raw || '').trim()
+            return [d.id, text] as const
+          } catch {
+            return [d.id, ''] as const
+          }
+        }))
+        if (!cancelled) {
+          const map: Record<string, string> = {}
+          for (const [id, text] of pairs) map[id] = text
+          setExplorePreviewMap(map)
+        }
+      } catch {}
+    }
+    load()
+    return () => { cancelled = true }
+  }, [exploreDocs])
+
   const relativeTime = (date: unknown) => {
     try {
       let d: Date;
@@ -236,7 +268,8 @@ export default function Dashboard() {
   const renderPublicDocPreview = (doc: PublicDocumentMeta) => {
     const url = doc.masterUrl || doc.metadata?.downloadURL
     const mime = doc.metadata?.mimeType || ''
-    const text = (doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
+    const override = explorePreviewMap[doc.id]
+    const text = (override || doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
     const iconCls = "h-8 w-8 text-muted-foreground"
 
     if (url && typeof url === 'string' && mime.startsWith('image/')) {
@@ -570,7 +603,7 @@ export default function Dashboard() {
         <div className="flex-1 p-8 overflow-y-auto">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard</h1>
+            <h1 className="text-3xl font-bold text-foreground mb-2">Welcome {username}</h1>
             <p className="text-muted-foreground">Create new notes</p>
           </div>
 
