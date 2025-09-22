@@ -286,7 +286,10 @@ export default function ExplorePage() {
                     )}
                     {doc.tags && doc.tags.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-1">
-                        {doc.tags.slice(0, 3).map((t) => (
+                        {doc.tags
+                          .filter((t) => t !== "uploaded")
+                          .slice(0, 3)
+                          .map((t) => (
                           <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-muted text-muted-foreground">{t}</span>
                         ))}
                       </div>

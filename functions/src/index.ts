@@ -41,6 +41,151 @@ const createServices = () => {
   };
 };
 
+// ===== Topic classification config & helpers =====
+// Keep in sync with Explore UI topics (excluding "For You")
+const TOPICS: string[] = [
+  "Chemistry",
+  "Education",
+  "Arts, Design & Media",
+  "Languages & Literature",
+  "History & Archaeology",
+  "Philosophy & Ethics",
+  "Social & Behavioural Sciences",
+  "Journalism & Information",
+  "Business Administration",
+  "Law & Policy",
+  "Biological Sciences",
+  "Environmental Sciences",
+  "Earth Sciences",
+  "Physics",
+  "Mathematics & Statistics",
+  "Computer Science",
+  "AI",
+];
+
+// Short descriptions improve embedding separation
+const TOPIC_DESCRIPTIONS: Record<string, string> = {
+  Chemistry:
+    "Chemistry, molecules, reactions, organic, inorganic, physical chemistry, spectroscopy, lab methods",
+  Education:
+    "Teaching, learning, pedagogy, curriculum, assessment, classrooms, students, teachers",
+  "Arts, Design & Media":
+    "Art, design, graphic design, UX, UI, film, photography, music, media studies, visual arts",
+  "Languages & Literature":
+    "Linguistics, grammar, translation, literature analysis, novels, poetry, rhetoric",
+  "History & Archaeology":
+    "History, historical events, archaeology, ancient civilizations, cultural heritage",
+  "Philosophy & Ethics":
+    "Philosophy, ethics, morality, epistemology, metaphysics, logic, ethical dilemmas",
+  "Social & Behavioural Sciences":
+    "Psychology, sociology, anthropology, human behavior, surveys, social science",
+  "Journalism & Information":
+    "Journalism, news, reporting, information science, libraries, media law, fact-checking",
+  "Business Administration":
+    "Business, management, marketing, finance, operations, entrepreneurship, strategy",
+  "Law & Policy":
+    "Law, legal systems, regulation, public policy, governance, compliance, constitutional law",
+  "Biological Sciences":
+    "Biology, genetics, microbiology, physiology, ecology, evolution, biotechnology",
+  "Environmental Sciences":
+    "Environment, climate change, sustainability, ecology, conservation, pollution",
+  "Earth Sciences":
+    "Geology, geophysics, meteorology, oceanography, earth systems, tectonics, minerals",
+  Physics:
+    "Physics, mechanics, electromagnetism, quantum, thermodynamics, relativity, optics",
+  "Mathematics & Statistics":
+    "Mathematics, calculus, algebra, probability, statistics, data analysis, theorems",
+  "Computer Science":
+    "Computer science, algorithms, data structures, programming, systems, databases, software",
+  AI: "Artificial intelligence, machine learning, deep learning, neural networks, LLMs, NLP, computer vision",
+};
+
+let cachedTopicEmbeddings: { labels: string[]; vectors: number[][] } | null =
+  null;
+
+function cosineSim(a: number[], b: number[]): number {
+  let dot = 0,
+    na = 0,
+    nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const va = a[i];
+    const vb = b[i];
+    dot += va * vb;
+    na += va * va;
+    nb += vb * vb;
+  }
+  if (!na || !nb) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+async function getTopicEmbeddings(embeddingService: EmbeddingService) {
+  if (cachedTopicEmbeddings) return cachedTopicEmbeddings;
+  try {
+    const inputs = TOPICS.map((t) => `${t}: ${TOPIC_DESCRIPTIONS[t] || t}`);
+    const vectors = await embeddingService.embedChunks(inputs);
+    cachedTopicEmbeddings = { labels: TOPICS.slice(), vectors };
+    return cachedTopicEmbeddings;
+  } catch (err) {
+    logger.warn(
+      "Failed to precompute topic embeddings; classification disabled",
+      err as any
+    );
+    cachedTopicEmbeddings = { labels: TOPICS.slice(), vectors: [] };
+    return cachedTopicEmbeddings;
+  }
+}
+
+function selectDocTextForClassification(data: Record<string, any>): string {
+  const title = String(data.title || "").slice(0, 200);
+  const summary = String(data.summary || "").slice(0, 4000);
+  const processed = String(data.content?.processed || "").slice(0, 4000);
+  const raw = String(data.content?.raw || "").slice(0, 4000);
+  const meta = [data.type, data.metadata?.fileName, data.metadata?.mimeType]
+    .filter(Boolean)
+    .join(" ");
+  const base = [title, summary, processed, raw, meta]
+    .filter(Boolean)
+    .join("\n");
+  return base || title || meta || "";
+}
+
+async function classifyTopics(
+  data: Record<string, any>,
+  embeddingService: EmbeddingService
+): Promise<string[]> {
+  try {
+    const text = selectDocTextForClassification(data);
+    if (!text || text.length < 10) return [];
+    const topicEmb = await getTopicEmbeddings(embeddingService);
+    if (!topicEmb.vectors.length) return [];
+    const docVec = await embeddingService.embedQuery(text);
+    const scores = topicEmb.vectors.map((v, i) => ({
+      label: topicEmb.labels[i],
+      score: cosineSim(docVec, v),
+    }));
+    // Pick top 1-3 topics above threshold; ensure AI + CS example maps well
+    scores.sort((a, b) => b.score - a.score);
+    const threshold = 0.25; // conservative; adjust with real data
+    const top = scores.filter((s) => s.score >= threshold).slice(0, 3);
+    if (top.length) return top.map((t) => t.label);
+    // Fallback: just the best one if nothing crossed threshold
+    return scores.slice(0, 1).map((s) => s.label);
+  } catch (err) {
+    logger.warn("Topic classification failed", err as any);
+    return [];
+  }
+}
+
+function mergeTags(existing: any, computed: string[]): string[] {
+  const base = Array.isArray(existing) ? existing.map(String) : [];
+  const set = new Set<string>(base);
+  for (const t of computed) set.add(t);
+  // Remove undesired system tags
+  set.delete("uploaded");
+  return Array.from(set);
+}
+
 /**
  * Lightweight callable to create a chat and return chatId immediately.
  * Data: { userId: string, language?: string, title?: string }
@@ -378,8 +523,19 @@ export const syncAllDocuments = onDocumentWritten(
       const data = afterSnap.data() as Record<string, any> | undefined;
       if (!data) return;
       try {
-        await allRef.set(data, { merge: false });
-        logger.info("Created mirror in allDocuments", { mirrorId });
+        // Attempt to classify topics using embeddings
+        const { embeddingService } = createServices();
+        const topics = await classifyTopics(data, embeddingService);
+        const payload = {
+          ...data,
+          tags: mergeTags(data.tags, topics),
+          updatedAt: new Date(),
+        } as Record<string, any>;
+        await allRef.set(payload, { merge: false });
+        logger.info("Created mirror in allDocuments (with topics)", {
+          mirrorId,
+          topics,
+        });
       } catch (err) {
         logger.error("Failed to create mirror doc in allDocuments", {
           mirrorId,
@@ -389,34 +545,70 @@ export const syncAllDocuments = onDocumentWritten(
       return;
     }
 
-    // Update only when isPublic changes; avoid reacting to other frequent updates
+    // Update mirror on key changes: isPublic toggles OR processing completed (to reclassify with full text)
     if (beforeSnap?.exists && afterSnap?.exists) {
       const before = (beforeSnap.data() as any) || {};
       const after = (afterSnap.data() as any) || {};
       const beforePublic = !!before.isPublic;
       const afterPublic = !!after.isPublic;
-      if (beforePublic === afterPublic) return;
+      const processingCompletedNow =
+        before.processingStatus !== "completed" &&
+        after.processingStatus === "completed";
+      const titleChanged =
+        String(before.title || "") !== String(after.title || "");
+      const summaryChanged =
+        String(before.summary || "") !== String(after.summary || "");
+      const contentRawChanged =
+        String(before.content?.raw || "") !== String(after.content?.raw || "");
+      const shouldReclassify =
+        processingCompletedNow ||
+        titleChanged ||
+        summaryChanged ||
+        contentRawChanged;
+
+      if (!shouldReclassify && beforePublic === afterPublic) return;
+
       try {
-        // If mirror missing (older docs), upsert full document instead
-        const mirrorExists = (await allRef.get()).exists;
+        const mirrorSnap = await allRef.get();
+        const mirrorExists = mirrorSnap.exists;
+
+        // Prepare payload
+        let payload: Record<string, any> = { updatedAt: new Date() };
+
+        // Always sync isPublic changes
+        if (beforePublic !== afterPublic) {
+          payload.isPublic = afterPublic;
+        }
+
+        // If we have meaningful content updates, recompute topics
+        if (shouldReclassify) {
+          try {
+            const { embeddingService } = createServices();
+            const topics = await classifyTopics(after, embeddingService);
+            payload.tags = mergeTags(
+              mirrorExists ? (mirrorSnap.data() as any)?.tags : after.tags,
+              topics
+            );
+            logger.info("Reclassified topics for mirror", { mirrorId, topics });
+          } catch (e) {
+            logger.warn("Reclassification failed", { mirrorId, e });
+          }
+        }
+
         if (!mirrorExists) {
-          await allRef.set(after, { merge: false });
-          logger.info(
-            "Backfilled missing mirror in allDocuments on isPublic change",
-            { mirrorId }
-          );
-        } else {
-          await allRef.set(
-            { isPublic: afterPublic, updatedAt: new Date() },
-            { merge: true }
-          );
-          logger.info("Updated isPublic in allDocuments", {
+          await allRef.set({ ...after, ...payload }, { merge: false });
+          logger.info("Backfilled mirror in allDocuments on update", {
             mirrorId,
-            isPublic: afterPublic,
+          });
+        } else if (Object.keys(payload).length > 0) {
+          await allRef.set(payload, { merge: true });
+          logger.info("Updated mirror in allDocuments", {
+            mirrorId,
+            fields: Object.keys(payload),
           });
         }
       } catch (err) {
-        logger.error("Failed to sync isPublic in allDocuments", {
+        logger.error("Failed to update mirror in allDocuments", {
           mirrorId,
           err,
         });
