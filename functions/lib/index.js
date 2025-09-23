@@ -7,7 +7,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.processDocument = exports.createChat = void 0;
+exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.recommendPublicDocs = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.processDocument = exports.createChat = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -441,7 +441,18 @@ exports.syncAllDocuments = (0, firestore_1.onDocumentWritten)("documents/{userId
             // Attempt to classify topics using embeddings
             const { embeddingService } = createServices();
             const topics = await classifyTopics(data, embeddingService);
-            const payload = Object.assign(Object.assign({}, data), { tags: mergeTags(data.tags, topics), updatedAt: new Date() });
+            // Compute a single keyword embedding for later discovery
+            let keywordEmbedding = undefined;
+            try {
+                const text = selectDocTextForClassification(data);
+                if (text && text.length > 10) {
+                    keywordEmbedding = await embeddingService.embedQuery(text);
+                }
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("keywordEmbedding generation failed (create)", e);
+            }
+            const payload = Object.assign(Object.assign(Object.assign(Object.assign({}, data), { tags: mergeTags(data.tags, topics) }), (keywordEmbedding ? { keywordEmbedding } : {})), { updatedAt: new Date() });
             await allRef.set(payload, { merge: false });
             firebase_functions_1.logger.info("Created mirror in allDocuments (with topics)", {
                 mirrorId,
@@ -488,6 +499,19 @@ exports.syncAllDocuments = (0, firestore_1.onDocumentWritten)("documents/{userId
                     const { embeddingService } = createServices();
                     const topics = await classifyTopics(after, embeddingService);
                     payload.tags = mergeTags(mirrorExists ? (_e = mirrorSnap.data()) === null || _e === void 0 ? void 0 : _e.tags : after.tags, topics);
+                    // Recompute keyword embedding for updated content
+                    try {
+                        const text = selectDocTextForClassification(after);
+                        if (text && text.length > 10) {
+                            payload.keywordEmbedding = await embeddingService.embedQuery(text);
+                        }
+                    }
+                    catch (e) {
+                        firebase_functions_1.logger.warn("keywordEmbedding generation failed (update)", {
+                            mirrorId,
+                            e,
+                        });
+                    }
                     firebase_functions_1.logger.info("Reclassified topics for mirror", { mirrorId, topics });
                 }
                 catch (e) {
@@ -875,6 +899,108 @@ exports.queryDocuments = (0, https_1.onCall)({
     }
     catch (error) {
         firebase_functions_1.logger.error("Error in queryDocuments:", error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+        };
+    }
+});
+/**
+ * Recommend public docs similar to a user's document using keyword embeddings.
+ * Input: { userId: string, documentId: string, limit?: number }
+ * Returns: ranked list of { id, title, ownerId, tags, score }
+ */
+exports.recommendPublicDocs = (0, https_1.onCall)({ enforceAppCheck: false }, async (request) => {
+    try {
+        const { userId, documentId, limit } = request.data || {};
+        if (!userId || !documentId) {
+            throw new Error("Missing required parameters: userId and documentId");
+        }
+        if (request.auth && request.auth.uid && request.auth.uid !== userId) {
+            throw new Error("Authenticated user mismatch");
+        }
+        // Load the user's source doc to get a query embedding
+        const userDocSnap = await db
+            .collection("documents")
+            .doc(userId)
+            .collection("userDocuments")
+            .doc(documentId)
+            .get();
+        if (!userDocSnap.exists)
+            throw new Error("Document not found");
+        const src = userDocSnap.data();
+        let queryEmbedding = undefined;
+        try {
+            // Prefer stored keywordEmbedding from mirror if available, else compute from source
+            const mirrorId = `${userId}_${documentId}`;
+            const mirrorSnap = await db
+                .collection("allDocuments")
+                .doc(mirrorId)
+                .get();
+            const mirror = mirrorSnap.data();
+            if (Array.isArray(mirror === null || mirror === void 0 ? void 0 : mirror.keywordEmbedding)) {
+                queryEmbedding = mirror.keywordEmbedding;
+            }
+        }
+        catch (_a) {
+            /* ignore */
+        }
+        if (!queryEmbedding) {
+            const { embeddingService } = createServices();
+            const text = selectDocTextForClassification(src);
+            if (!text || text.length < 10)
+                throw new Error("No content to compute embedding");
+            queryEmbedding = await embeddingService.embedQuery(text);
+        }
+        // Fetch a pool of public docs (exclude the owner's own doc)
+        const poolSnap = await db
+            .collection("allDocuments")
+            .where("isPublic", "==", true)
+            .orderBy("createdAt", "desc")
+            .limit(Math.min(Number(limit) || 80, 200))
+            .get();
+        const rawCandidates = poolSnap.docs.map((d) => ({
+            id: d.id,
+            data: d.data(),
+        }));
+        const myPrefix = `${userId}_`;
+        const candidates = rawCandidates.filter((d) => {
+            var _a, _b;
+            return Array.isArray((_a = d.data) === null || _a === void 0 ? void 0 : _a.keywordEmbedding) &&
+                ((_b = d.data) === null || _b === void 0 ? void 0 : _b.ownerId) !== userId &&
+                !String(d.id).startsWith(myPrefix);
+        });
+        // Rank by cosine similarity and return enriched fields
+        const scored = candidates
+            .map((c) => {
+            const score = cosineSim(queryEmbedding, c.data.keywordEmbedding);
+            const out = {
+                id: c.id,
+                ownerId: c.data.ownerId,
+                title: c.data.title,
+                type: c.data.type,
+                status: c.data.status,
+                isPublic: c.data.isPublic,
+                tags: c.data.tags,
+                preview: c.data.preview,
+                storagePath: c.data.storagePath,
+                masterUrl: c.data.masterUrl,
+                content: c.data.content,
+                summary: c.data.summary,
+                metadata: c.data.metadata,
+                createdAt: c.data.createdAt,
+                updatedAt: c.data.updatedAt,
+                stats: c.data.stats,
+                score,
+            };
+            return out;
+        })
+            .sort((a, b) => b.score - a.score)
+            .slice(0, Math.min(Number(limit) || 20, 50));
+        return { success: true, data: scored };
+    }
+    catch (error) {
+        firebase_functions_1.logger.error("recommendPublicDocs failed", error);
         return {
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",

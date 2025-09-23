@@ -8,10 +8,12 @@ import { db } from "@/lib/firebase";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
-import { listenToUserSpaces, updateDocument, createWebsiteDocument, getDocument as getUserDoc } from "@/lib/firestore";
+import { listenToUserSpaces, updateDocument, createWebsiteDocument, getDocument as getUserDoc, getUserDocuments } from "@/lib/firestore";
 import type { Space as SpaceType } from "@/lib/types";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
+import { functions } from "@/lib/firebase";
+import { httpsCallable } from "firebase/functions";
 
 type PublicStats = { views?: number; likes?: number } | undefined;
 
@@ -51,6 +53,8 @@ export default function ExplorePage() {
   const [signupOpen, setSignupOpen] = useState(false);
   const [spaces, setSpaces] = useState<SpaceType[]>([]);
   const [previewMap, setPreviewMap] = useState<Record<string, string>>({});
+  const [recommended, setRecommended] = useState<PublicDocument[] | null>(null);
+  const [recLoading, setRecLoading] = useState(false);
   const TOPICS: string[] = [
     "For You",
     "Chemistry","Education","Arts, Design & Media","Languages & Literature",
@@ -77,6 +81,65 @@ export default function ExplorePage() {
     };
     fetchDocs();
   }, []);
+
+  // Fetch personalized recommendations for "For You" using user's latest document
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!user?.uid) { setRecommended(null); return; }
+      try {
+        setRecLoading(true);
+        const myDocs = await getUserDocuments(user.uid, 1);
+        const latest = myDocs?.[0];
+        if (!latest) { setRecommended(null); return; }
+        const call = httpsCallable(functions, "recommendPublicDocs");
+        const resp = await call({ userId: user.uid, documentId: latest.id, limit: 24 });
+        type ResultItem = {
+          id: string;
+          ownerId: string;
+          title: string;
+          type: string;
+          status: string;
+          isPublic: boolean;
+          tags?: string[];
+          preview?: string;
+          storagePath?: string;
+          masterUrl?: string;
+          content?: { processed?: string; raw?: string };
+          summary?: string;
+          metadata?: PublicDocument["metadata"];
+          stats?: PublicStats;
+        };
+        const payload = (resp?.data as unknown) as { success: boolean; data?: ResultItem[] } | undefined;
+        const items = payload?.data;
+        if (!items || !Array.isArray(items)) { if (!cancelled) setRecommended(null); return; }
+        const mapped: PublicDocument[] = items.map((d) => ({
+          id: d.id,
+          ownerId: d.ownerId,
+          title: d.title,
+          type: d.type,
+          status: d.status,
+          isPublic: d.isPublic,
+          tags: d.tags,
+          preview: d.preview,
+          storagePath: d.storagePath,
+          masterUrl: d.masterUrl,
+          content: d.content,
+          summary: d.summary,
+          metadata: d.metadata,
+          stats: d.stats,
+        }));
+        if (!cancelled) setRecommended(mapped);
+      } catch (e) {
+        console.error("recommendPublicDocs failed", e);
+        if (!cancelled) setRecommended(null);
+      } finally {
+        if (!cancelled) setRecLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true };
+  }, [user?.uid]);
 
   // After docs load, fetch summary/content from the source userDocuments to ensure rich previews
   useEffect(() => {
@@ -155,7 +218,7 @@ export default function ExplorePage() {
 
   // Apply client-side topic filtering when a topic is selected (other than "For You")
   const filteredDocs = selectedTopic === "For You"
-    ? docs
+    ? (recommended && recommended.length ? recommended : docs)
     : docs.filter(d => Array.isArray(d.tags) && d.tags?.includes(selectedTopic));
 
   const parseMirrorId = (mirrorId: string) => {
@@ -230,6 +293,8 @@ export default function ExplorePage() {
 
           {loading ? (
             <div className="text-sm text-muted-foreground">Loading public documents…</div>
+          ) : (selectedTopic === "For You" && recLoading) ? (
+            <div className="text-sm text-muted-foreground">Finding recommendations…</div>
           ) : filteredDocs.length === 0 ? (
             <div className="text-sm text-muted-foreground">No public documents{selectedTopic!=="For You"?` for "${selectedTopic}"`:''} yet.</div>
           ) : (

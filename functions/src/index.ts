@@ -526,9 +526,20 @@ export const syncAllDocuments = onDocumentWritten(
         // Attempt to classify topics using embeddings
         const { embeddingService } = createServices();
         const topics = await classifyTopics(data, embeddingService);
+        // Compute a single keyword embedding for later discovery
+        let keywordEmbedding: number[] | undefined = undefined;
+        try {
+          const text = selectDocTextForClassification(data);
+          if (text && text.length > 10) {
+            keywordEmbedding = await embeddingService.embedQuery(text);
+          }
+        } catch (e) {
+          logger.warn("keywordEmbedding generation failed (create)", e as any);
+        }
         const payload = {
           ...data,
           tags: mergeTags(data.tags, topics),
+          ...(keywordEmbedding ? { keywordEmbedding } : {}),
           updatedAt: new Date(),
         } as Record<string, any>;
         await allRef.set(payload, { merge: false });
@@ -589,6 +600,20 @@ export const syncAllDocuments = onDocumentWritten(
               mirrorExists ? (mirrorSnap.data() as any)?.tags : after.tags,
               topics
             );
+            // Recompute keyword embedding for updated content
+            try {
+              const text = selectDocTextForClassification(after);
+              if (text && text.length > 10) {
+                payload.keywordEmbedding = await embeddingService.embedQuery(
+                  text
+                );
+              }
+            } catch (e) {
+              logger.warn("keywordEmbedding generation failed (update)", {
+                mirrorId,
+                e,
+              });
+            }
             logger.info("Reclassified topics for mirror", { mirrorId, topics });
           } catch (e) {
             logger.warn("Reclassification failed", { mirrorId, e });
@@ -1009,6 +1034,118 @@ export const queryDocuments = onCall(
       return { success: true, data: result };
     } catch (error) {
       logger.error("Error in queryDocuments:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+);
+
+/**
+ * Recommend public docs similar to a user's document using keyword embeddings.
+ * Input: { userId: string, documentId: string, limit?: number }
+ * Returns: ranked list of { id, title, ownerId, tags, score }
+ */
+export const recommendPublicDocs = onCall(
+  { enforceAppCheck: false },
+  async (request) => {
+    try {
+      const { userId, documentId, limit } = request.data || {};
+      if (!userId || !documentId) {
+        throw new Error("Missing required parameters: userId and documentId");
+      }
+      if (request.auth && request.auth.uid && request.auth.uid !== userId) {
+        throw new Error("Authenticated user mismatch");
+      }
+
+      // Load the user's source doc to get a query embedding
+      const userDocSnap = await db
+        .collection("documents")
+        .doc(userId)
+        .collection("userDocuments")
+        .doc(documentId)
+        .get();
+      if (!userDocSnap.exists) throw new Error("Document not found");
+      const src = userDocSnap.data() as any;
+
+      let queryEmbedding: number[] | undefined = undefined;
+      try {
+        // Prefer stored keywordEmbedding from mirror if available, else compute from source
+        const mirrorId = `${userId}_${documentId}`;
+        const mirrorSnap = await db
+          .collection("allDocuments")
+          .doc(mirrorId)
+          .get();
+        const mirror = mirrorSnap.data() as any | undefined;
+        if (Array.isArray(mirror?.keywordEmbedding)) {
+          queryEmbedding = mirror.keywordEmbedding as number[];
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!queryEmbedding) {
+        const { embeddingService } = createServices();
+        const text = selectDocTextForClassification(src);
+        if (!text || text.length < 10)
+          throw new Error("No content to compute embedding");
+        queryEmbedding = await embeddingService.embedQuery(text);
+      }
+
+      // Fetch a pool of public docs (exclude the owner's own doc)
+      const poolSnap = await db
+        .collection("allDocuments")
+        .where("isPublic", "==", true)
+        .orderBy("createdAt", "desc")
+        .limit(Math.min(Number(limit) || 80, 200))
+        .get();
+
+      const rawCandidates = poolSnap.docs.map((d) => ({
+        id: d.id,
+        data: d.data() as any,
+      }));
+      const myPrefix = `${userId}_`;
+      const candidates = rawCandidates.filter(
+        (d) =>
+          Array.isArray(d.data?.keywordEmbedding) &&
+          d.data?.ownerId !== userId &&
+          !String(d.id).startsWith(myPrefix)
+      );
+
+      // Rank by cosine similarity and return enriched fields
+      const scored = candidates
+        .map((c) => {
+          const score = cosineSim(
+            queryEmbedding as number[],
+            c.data.keywordEmbedding as number[]
+          );
+          const out = {
+            id: c.id,
+            ownerId: c.data.ownerId,
+            title: c.data.title,
+            type: c.data.type,
+            status: c.data.status,
+            isPublic: c.data.isPublic,
+            tags: c.data.tags,
+            preview: c.data.preview,
+            storagePath: c.data.storagePath,
+            masterUrl: c.data.masterUrl,
+            content: c.data.content,
+            summary: c.data.summary,
+            metadata: c.data.metadata,
+            createdAt: c.data.createdAt,
+            updatedAt: c.data.updatedAt,
+            stats: c.data.stats,
+            score,
+          } as any;
+          return out;
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.min(Number(limit) || 20, 50));
+
+      return { success: true, data: scored };
+    } catch (error) {
+      logger.error("recommendPublicDocs failed", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
