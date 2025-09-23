@@ -11,6 +11,7 @@ import DocumentUploadModal from "@/app/components/DocumentUploadModal"
 import YouTubeVideoModal from "@/app/components/YouTubeVideoModal"
 import WebsiteLinkModal from "@/app/components/WebsiteLinkModal"
 import CameraModal from "@/app/components/CameraModal"
+import CreateTestModal from "@/app/components/CreateTestModal"
 import { useAuth } from "@/contexts/AuthContext"
 import { listenToSpace, listenToSpaceDocuments, updateSpace } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
@@ -27,6 +28,7 @@ export default function SpacePage() {
   const [websiteLinkModalOpen, setWebsiteLinkModalOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [nameInput, setNameInput] = useState("")
+  const [createExamOpen, setCreateExamOpen] = useState(false)
 
   const spaceId = params?.spacesId
 
@@ -210,8 +212,8 @@ export default function SpacePage() {
           <div className="max-w-6xl mx-auto mt-2">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-foreground">{space?.name || `${username}'s Space`}</h2>
-              <button className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/15">
-                <span>Create Exam</span>
+              <button onClick={() => setCreateExamOpen(true)} className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/15">
+                <span>Create Test</span>
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -242,6 +244,8 @@ export default function SpacePage() {
   <DocumentUploadModal isOpen={documentUploadModalOpen} onClose={closeDocumentUploadModal} spaceId={spaceId as string} />
         <YouTubeVideoModal isOpen={youtubeVideoModalOpen} onClose={closeYoutubeVideoModal} spaceId={spaceId as string} />
         <WebsiteLinkModal isOpen={websiteLinkModalOpen} onClose={closeWebsiteLinkModal} spaceId={spaceId as string} />
+  {/* Create Test Modal */}
+  <CreateTestModal isOpen={createExamOpen} onClose={() => setCreateExamOpen(false)} spaceId={spaceId as string} />
       </div>
     </ProtectedRoute>
   )
