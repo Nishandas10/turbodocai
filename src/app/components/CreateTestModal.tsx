@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, Loader2, Target, FileText, Check } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
-import { listenToSpaceDocuments } from "@/lib/firestore"
+import { listenToSpaceDocuments, createSpaceTest } from "@/lib/firestore"
 import type { Document as UserDoc } from "@/lib/types"
 import { useRouter } from "next/navigation"
 
@@ -113,8 +113,23 @@ export default function CreateTestModal(props: any) {
   const toggle = (id: string) =>
     setSelected((s) => ({ ...s, [id]: !s[id] }))
 
-  const proceed = () => {
+  const proceed = async () => {
     if (!selectedIds.length) return
+    // Persist test metadata in Firestore (non-blocking)
+    try {
+      if (user?.uid) {
+        await createSpaceTest(user.uid, spaceId, {
+          documentIds: selectedIds,
+          type: qType,
+          difficulty,
+          questionCount: count,
+          durationMin: Math.max(1, Math.min(240, duration || 30)),
+          title: `Test - ${new Date().toLocaleString()}`,
+        })
+      }
+    } catch (e) {
+      console.error("Failed to create test record", e)
+    }
     // If one doc selected, reuse existing single-document quiz page for now
     if (selectedIds.length === 1 && qType === "mcq") {
       router.push(`/notes/${selectedIds[0]}/quiz?difficulty=${difficulty}&count=${count}&duration=${duration}`)

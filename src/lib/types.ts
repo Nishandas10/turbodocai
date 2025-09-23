@@ -187,3 +187,27 @@ export interface CreateSpaceData {
   name: string;
   description?: string;
 }
+
+// Test Types
+export interface SpaceTest {
+  id: string;
+  userId: string; // owner
+  spaceId: string;
+  documentIds: string[]; // selected documents for this test
+  type: "mcq" | "long" | "mixed";
+  difficulty: "mixed" | "easy" | "medium" | "hard";
+  questionCount: number;
+  durationMin: number; // in minutes
+  title?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CreateSpaceTestData {
+  documentIds: string[];
+  type: "mcq" | "long" | "mixed";
+  difficulty: "mixed" | "easy" | "medium" | "hard";
+  questionCount: number;
+  durationMin: number; // in minutes
+  title?: string;
+}
