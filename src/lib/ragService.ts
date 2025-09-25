@@ -89,6 +89,21 @@ export interface PodcastResponse {
   summary: string;
 }
 
+// Long-answer evaluation API
+export interface EvaluateLongAnswerParams {
+  userId: string;
+  userAnswer: string;
+  referenceAnswer: string;
+  minLength?: number; // characters threshold to consider sufficient for a long answer
+}
+export interface EvaluateLongAnswerResult {
+  verdict: "correct" | "incorrect" | "insufficient";
+  score: number; // 0-100 semantic coverage
+  reasoning: string;
+  keyPoints?: string[];
+  missingPoints?: string[];
+}
+
 /**
  * Query documents using the RAG system
  */
@@ -156,6 +171,21 @@ export const generatePodcast = async (
   };
   if (data.success && data.data) return data.data;
   throw new Error(data.error || "Failed to generate podcast");
+};
+
+/** Evaluate a long-form user answer against a reference answer (semantic, not keyword-based) */
+export const evaluateLongAnswer = async (
+  params: EvaluateLongAnswerParams
+): Promise<EvaluateLongAnswerResult> => {
+  const fn = httpsCallable(functions, "evaluateLongAnswer");
+  const result = await fn(params);
+  const data = result.data as {
+    success: boolean;
+    data?: EvaluateLongAnswerResult;
+    error?: string;
+  };
+  if (data.success && data.data) return data.data;
+  throw new Error(data.error || "Failed to evaluate answer");
 };
 
 /** Fetch full raw text of a document (concatenated from Pinecone or Firestore fallback) */

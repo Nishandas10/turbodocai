@@ -95,5 +95,29 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+
+    // Tests nested collections:
+    // Path: /tests/{userId}/spaces/{spaceId}/tests/{testId}
+    match /tests/{userId}/spaces/{spaceId}/tests/{testId} {
+      // Create: authenticated user only, must match path userId and set userId + spaceId correctly
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.userId == userId
+        && request.resource.data.spaceId == spaceId;
+
+      // Read: owner only (by path userId)
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Update: owner only and cannot change ownership or space binding
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && resource.data.userId == userId
+        && resource.data.spaceId == spaceId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.spaceId == resource.data.spaceId;
+
+      // Delete: owner only
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }
