@@ -89,9 +89,25 @@ export default function CreateTestModal(props: any) {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [count, setCount] = useState(10)
+  const [countText, setCountText] = useState("10")
   const [difficulty, setDifficulty] = useState<"mixed" | "easy" | "medium" | "hard">("mixed")
   const [qType, setQType] = useState<"mcq" | "long" | "mixed">("mcq")
   const [duration, setDuration] = useState<number>(30)
+  const [durationText, setDurationText] = useState("30")
+
+  // Helpers to normalize/clamp numeric fields only when committing (blur/enter/proceed)
+  const commitCount = () => {
+    const n = parseInt(countText, 10)
+    const v = isNaN(n) ? count : Math.max(5, Math.min(50, n))
+    setCount(v)
+    setCountText(String(v))
+  }
+  const commitDuration = () => {
+    const n = parseInt(durationText, 10)
+    const v = isNaN(n) ? duration : Math.max(1, Math.min(240, n))
+    setDuration(v)
+    setDurationText(String(v))
+  }
 
   useEffect(() => {
     if (!isOpen || !user?.uid || !spaceId) return
@@ -130,15 +146,12 @@ export default function CreateTestModal(props: any) {
     } catch (e) {
       console.error("Failed to create test record", e)
     }
-    // If one doc selected, reuse existing single-document quiz page for now
-    if (selectedIds.length === 1 && qType === "mcq") {
-      router.push(`/notes/${selectedIds[0]}/quiz?difficulty=${difficulty}&count=${count}&duration=${duration}`)
-      onClose()
-      return
-    }
     const q = new URLSearchParams()
     q.set("docs", selectedIds.join(","))
-    q.set("count", String(count))
+  // Ensure committed values before routing
+  commitCount()
+  commitDuration()
+  q.set("count", String(Math.max(5, Math.min(50, count))))
     q.set("difficulty", difficulty)
     q.set("type", qType)
     q.set("duration", String(Math.max(1, Math.min(240, duration || 30))))
@@ -168,10 +181,13 @@ export default function CreateTestModal(props: any) {
               <label className="block text-xs text-muted-foreground mb-1">Questions</label>
               <input
                 type="number"
+                inputMode="numeric"
                 min={5}
                 max={50}
-                value={count}
-                onChange={(e) => setCount(Math.max(5, Math.min(50, Number(e.target.value) || 10)))}
+                value={countText}
+                onChange={(e) => setCountText(e.target.value)}
+                onBlur={commitCount}
+                onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-card-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
               />
             </div>
@@ -206,10 +222,13 @@ export default function CreateTestModal(props: any) {
               <label className="block text-xs text-muted-foreground mb-1">Duration (min)</label>
               <input
                 type="number"
+                inputMode="numeric"
                 min={1}
                 max={240}
-                value={duration}
-                onChange={(e) => setDuration(Math.max(1, Math.min(240, Number(e.target.value) || 30)))}
+                value={durationText}
+                onChange={(e) => setDurationText(e.target.value)}
+                onBlur={commitDuration}
+                onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-card-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
               />
             </div>
