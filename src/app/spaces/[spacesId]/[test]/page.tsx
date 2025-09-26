@@ -391,10 +391,38 @@ export default function SpaceTestPage() {
           return { kind: 'long', docId: it.docId, verdict: r?.verdict || 'skipped', correct: r?.correct || false, skipped: r?.skipped ?? true, front: it.front, back: it.back }
         })
       } else {
-        items = mixedItems.map(mi => mi.kind === 'mcq'
-          ? { kind: 'mcq', docId: mi.q.docId, category: mi.q.category, picked: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) ?? null, correct: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.correct) ?? false, skipped: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) == null, question: mi.q.question, options: mi.q.options, correctAnswer: mi.q.correctAnswer, explanation: mi.q.explanation, id: mi.q.id, answerText: mi.q.options[mi.q.correctAnswer] || '' }
-          : { kind: 'long', docId: mi.fc.docId, verdict: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.verdict)||'skipped', correct: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.correct)||false, skipped: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.skipped) ?? true, front: mi.fc.front, back: mi.fc.back }
-        )
+        items = mixedItems.map((mi, i) => {
+          const existing = mixedResultsRef.current[i] as (ResultItem | undefined)
+          if (mi.kind === 'mcq') {
+            if (existing && existing.kind === 'mcq') return existing as McqResultRecord
+            return {
+              kind: 'mcq',
+              docId: mi.q.docId,
+              category: mi.q.category,
+              picked: null,
+              correct: false,
+              skipped: true,
+              question: mi.q.question,
+              options: mi.q.options,
+              correctAnswer: mi.q.correctAnswer,
+              explanation: mi.q.explanation,
+              id: mi.q.id,
+              answerText: mi.q.options[mi.q.correctAnswer] || ''
+            }
+          } else {
+            if (existing && existing.kind === 'long') return existing as LongResultRecord
+            const r = longResultsRef.current.find(r => r.front === mi.fc.front)
+            return {
+              kind: 'long',
+              docId: mi.fc.docId,
+              verdict: r?.verdict || 'skipped',
+              correct: r?.correct || false,
+              skipped: r?.skipped ?? true,
+              front: mi.fc.front,
+              back: mi.fc.back
+            }
+          }
+        })
       }
       const skipped = items.filter(it => it.skipped).length
       const correct = items.filter(it => it.correct).length
@@ -485,6 +513,21 @@ export default function SpaceTestPage() {
         setPickedLocal(i)
         setShowLocal(true)
         if (i === mcq.correctAnswer) setScore((s) => s + 1)
+        const recorded: McqResultRecord = {
+          kind: 'mcq',
+          docId: mcq.docId,
+          category: mcq.category,
+          picked: i,
+          correct: i === mcq.correctAnswer,
+          skipped: false,
+          question: mcq.question,
+          options: mcq.options,
+          correctAnswer: mcq.correctAnswer,
+          explanation: mcq.explanation,
+          id: mcq.id,
+          answerText: mcq.options[mcq.correctAnswer] || ''
+        }
+        mixedResultsRef.current[idx] = recorded
       }
       const nextLocal = () => {
         if (pickedLocal === null) return
