@@ -16,9 +16,11 @@ export default function SpaceTestPage() {
   const qType = (sp.get("type") as "mcq" | "long" | "mixed") || "mcq"
   const durationMin = Math.max(1, Math.min(240, Number(sp.get("duration") || 0))) || 0
 
-  const [questions, setQuestions] = useState<QuizQuestion[]>([])
-  const [longItems, setLongItems] = useState<Flashcard[]>([])
-  type MixedItem = { kind: "mcq"; q: QuizQuestion } | { kind: "long"; fc: Flashcard }
+  type AugQuizQuestion = QuizQuestion & { docId: string }
+  type AugFlashcard = Flashcard & { docId: string }
+  const [questions, setQuestions] = useState<AugQuizQuestion[]>([])
+  const [longItems, setLongItems] = useState<AugFlashcard[]>([])
+  type MixedItem = { kind: "mcq"; q: AugQuizQuestion } | { kind: "long"; fc: AugFlashcard }
   const [mixedItems, setMixedItems] = useState<MixedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,6 +31,19 @@ export default function SpaceTestPage() {
   const [done, setDone] = useState(false)
   const [timeLeft, setTimeLeft] = useState<number | null>(null) // seconds
   const endTimeRef = useRef<number | null>(null)
+  const startTimeRef = useRef<number>(Date.now())
+
+  // Tracking answer details for results page
+  interface McqAnswerRecord { picked: number | null; correct: boolean }
+  interface LongResultRecord { kind: 'long'; docId: string; verdict: 'correct' | 'incorrect' | 'insufficient' | 'skipped'; correct: boolean; skipped: boolean; front: string; back: string }
+  interface McqResultRecord { kind: 'mcq'; docId: string; category?: string; picked: number | null; correct: boolean; skipped: boolean; question: string; options: string[] }
+  type ResultItem = LongResultRecord | McqResultRecord
+  const mcqAnswersRef = useRef<McqAnswerRecord[]>([])
+  const mixedResultsRef = useRef<ResultItem[]>([])
+  const longResultsRef = useRef<LongResultRecord[]>([])
+  // Prevent duplicate session storage (React strict mode/double render of done state)
+  const sessionStoredRef = useRef(false)
+  const storedSessionIdRef = useRef<string | null>(null)
 
   // Start timer on questions load if duration provided
   useEffect(() => {
@@ -58,11 +73,12 @@ export default function SpaceTestPage() {
         setError(null)
         if (qType === "long") {
           const perDoc = Math.max(1, Math.floor(count / docIds.length))
-          const all: Flashcard[] = []
+          const all: AugFlashcard[] = []
           for (const id of docIds) {
             try {
               const cards = await generateFlashcards({ documentId: id, userId: user.uid, count: perDoc })
-              all.push(...cards)
+              const aug = cards.map(c => ({ ...c, docId: id }))
+              all.push(...aug)
             } catch {
               /* ignore */
             }
@@ -70,7 +86,8 @@ export default function SpaceTestPage() {
           if (all.length < count && docIds[0]) {
             try {
               const extra = await generateFlashcards({ documentId: docIds[0], userId: user.uid, count: count - all.length })
-              all.push(...extra)
+              const augExtra = extra.map(c => ({ ...c, docId: docIds[0] }))
+              all.push(...augExtra)
             } catch {}
           }
           // Shuffle and trim
@@ -86,33 +103,37 @@ export default function SpaceTestPage() {
 
           // Fetch MCQs
           const perDocMcq = Math.max(1, Math.floor(mcqTarget / docIds.length))
-          const allMcq: QuizQuestion[] = []
+          const allMcq: AugQuizQuestion[] = []
           for (const id of docIds) {
             try {
               const qs = await generateQuiz({ documentId: id, userId: user.uid, count: perDocMcq, difficulty })
-              allMcq.push(...qs)
+              const augQs = qs.map(q => ({ ...q, docId: id }))
+              allMcq.push(...augQs)
             } catch {/* ignore */}
           }
           if (allMcq.length < mcqTarget && docIds[0]) {
             try {
               const extra = await generateQuiz({ documentId: docIds[0], userId: user.uid, count: mcqTarget - allMcq.length, difficulty })
-              allMcq.push(...extra)
+              const augExtra = extra.map(q => ({ ...q, docId: docIds[0] }))
+              allMcq.push(...augExtra)
             } catch {/* ignore */}
           }
 
           // Fetch Long
           const perDocLong = Math.max(1, Math.floor(longTarget / docIds.length))
-          const allLong: Flashcard[] = []
+          const allLong: AugFlashcard[] = []
           for (const id of docIds) {
             try {
               const cards = await generateFlashcards({ documentId: id, userId: user.uid, count: perDocLong })
-              allLong.push(...cards)
+              const augCards = cards.map(c => ({ ...c, docId: id }))
+              allLong.push(...augCards)
             } catch {/* ignore */}
           }
           if (allLong.length < longTarget && docIds[0]) {
             try {
               const extra = await generateFlashcards({ documentId: docIds[0], userId: user.uid, count: longTarget - allLong.length })
-              allLong.push(...extra)
+              const augExtra = extra.map(c => ({ ...c, docId: docIds[0] }))
+              allLong.push(...augExtra)
             } catch {/* ignore */}
           }
 
@@ -130,18 +151,19 @@ export default function SpaceTestPage() {
           const items: MixedItem[] = []
           const maxLen = Math.max(allMcq.length, allLong.length)
           for (let i = 0; i < maxLen; i++) {
-            if (i < allMcq.length) items.push({ kind: "mcq", q: allMcq[i] })
-            if (i < allLong.length) items.push({ kind: "long", fc: allLong[i] })
+            if (i < allMcq.length) items.push({ kind: "mcq", q: allMcq[i] as AugQuizQuestion })
+            if (i < allLong.length) items.push({ kind: "long", fc: allLong[i] as AugFlashcard })
           }
           setMixedItems(items.slice(0, count))
         } else {
           // default MCQ path
           const perDoc = Math.max(1, Math.floor(count / docIds.length))
-          const all: QuizQuestion[] = []
+          const all: AugQuizQuestion[] = []
           for (const id of docIds) {
             try {
               const qs = await generateQuiz({ documentId: id, userId: user.uid, count: perDoc, difficulty })
-              all.push(...qs)
+              const augQs = qs.map(q => ({ ...q, docId: id }))
+              all.push(...augQs)
             } catch {
               // continue; one doc failing shouldn't block others
             }
@@ -149,7 +171,8 @@ export default function SpaceTestPage() {
           if (all.length < count && docIds[0]) {
             try {
               const extra = await generateQuiz({ documentId: docIds[0], userId: user.uid, count: count - all.length, difficulty })
-              all.push(...extra)
+              const augExtra = extra.map(q => ({ ...q, docId: docIds[0] }))
+              all.push(...augExtra)
             } catch {}
           }
           for (let i = all.length - 1; i > 0; i--) {
@@ -177,6 +200,9 @@ export default function SpaceTestPage() {
     setPicked(i)
     setShow(true)
     if (current && i === current.correctAnswer) setScore((s) => s + 1)
+    if (qType === 'mcq') {
+      mcqAnswersRef.current[idx] = { picked: i, correct: current ? i === current.correctAnswer : false }
+    }
   }
 
   const next = () => {
@@ -279,7 +305,42 @@ export default function SpaceTestPage() {
     )
   }
 
+  const finalizeSession = () => {
+    if (sessionStoredRef.current) return storedSessionIdRef.current
+    try {
+      const endTime = Date.now()
+      const sessionId = `${endTime}`
+      const dynamicSpaceId = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean)[1] || '' : ''
+      const baseInfo = { sessionId, spaceId: dynamicSpaceId, docs: docIds, type: qType, difficulty, count, durationMin, startTime: startTimeRef.current, endTime }
+      let items: ResultItem[] = []
+      if (qType === 'mcq') {
+        items = questions.map((q, i): McqResultRecord => ({ kind: 'mcq', docId: q.docId, category: q.category, picked: mcqAnswersRef.current[i]?.picked ?? null, correct: mcqAnswersRef.current[i]?.correct ?? false, skipped: mcqAnswersRef.current[i]?.picked == null, question: q.question, options: q.options }))
+      } else if (qType === 'long') {
+        items = longItems.map(it => {
+          const r = longResultsRef.current.find(x => x.docId === it.docId && x.front === it.front)
+          return { kind: 'long', docId: it.docId, verdict: r?.verdict || 'skipped', correct: r?.correct || false, skipped: r?.skipped ?? true, front: it.front, back: it.back }
+        })
+      } else {
+        items = mixedItems.map(mi => mi.kind === 'mcq'
+          ? { kind: 'mcq', docId: mi.q.docId, category: mi.q.category, picked: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) ?? null, correct: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.correct) ?? false, skipped: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) == null, question: mi.q.question, options: mi.q.options }
+          : { kind: 'long', docId: mi.fc.docId, verdict: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.verdict)||'skipped', correct: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.correct)||false, skipped: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.skipped) ?? true, front: mi.fc.front, back: mi.fc.back }
+        )
+      }
+      const skipped = items.filter(it => it.skipped).length
+      const correct = items.filter(it => it.correct).length
+      const payload = { ...baseInfo, items, skipped, score: correct }
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem(`testSession:${sessionId}`, JSON.stringify(payload)) } catch {}
+      }
+      sessionStoredRef.current = true
+      storedSessionIdRef.current = sessionId
+      return sessionId
+    } catch { /* swallow */ }
+    return null
+  }
+
   if (done) {
+    const sessionId = finalizeSession()
     const base = qType === "long" ? longItems.length : qType === "mixed" ? mixedItems.length : questions.length
     const pct = Math.round((score / Math.max(1, base)) * 100)
     return (
@@ -301,6 +362,11 @@ export default function SpaceTestPage() {
             <button onClick={reset} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 mx-auto">
               <RotateCcw className="h-5 w-5" /> Retake
             </button>
+            {sessionId && (
+              <div className="mt-6">
+                <a href={`/spaces/${sp.get('spacesId') || ''}/test/results?session=${sessionId}`} className="text-sm text-blue-600 hover:underline">View Detailed Breakdown</a>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -423,7 +489,6 @@ export default function SpaceTestPage() {
                 <LongAnswerBlock
                   key={`mix-${idx}`}
                   referenceAnswer={card.back || ""}
-                  userId={user?.uid || ""}
                   onNext={goNext}
                   isLast={idx >= mixedItems.length - 1}
                   onSubmit={async (text, setResult) => {
@@ -436,8 +501,10 @@ export default function SpaceTestPage() {
                       })
                       setResult(res)
                       if (res.verdict === "correct") setScore((s) => s + 1)
-                    } catch (e) {
+                      mixedResultsRef.current[idx] = { kind: 'long', docId: card.docId, verdict: res.verdict as LongResultRecord['verdict'], correct: res.verdict === 'correct', skipped: false, front: card.front, back: card.back }
+                    } catch {
                       setResult({ verdict: "incorrect", score: 0, reasoning: "Evaluation failed. Please try again.", keyPoints: [], missingPoints: [] })
+                      mixedResultsRef.current[idx] = { kind: 'long', docId: card.docId, verdict: 'incorrect', correct: false, skipped: false, front: card.front, back: card.back }
                     }
                   }}
                 />
@@ -488,7 +555,6 @@ export default function SpaceTestPage() {
                 <LongAnswerBlock
                   key={`${idx}`}
                   referenceAnswer={item?.back || ""}
-                  userId={user?.uid || ""}
                   onNext={goNext}
                   isLast={idx >= longItems.length - 1}
                   onSubmit={async (text, setResult) => {
@@ -501,8 +567,10 @@ export default function SpaceTestPage() {
                       })
                       setResult(res)
                       if (res.verdict === "correct") setScore((s) => s + 1)
-                    } catch (e) {
+                      if (item) longResultsRef.current[idx] = { kind: 'long', docId: item.docId, verdict: res.verdict as LongResultRecord['verdict'], correct: res.verdict === 'correct', skipped: false, front: item.front, back: item.back }
+                    } catch {
                       setResult({ verdict: "incorrect", score: 0, reasoning: "Evaluation failed. Please try again.", keyPoints: [], missingPoints: [] })
+                      if (item) longResultsRef.current[idx] = { kind: 'long', docId: item.docId, verdict: 'incorrect', correct: false, skipped: false, front: item.front, back: item.back }
                     }
                   }}
                 />
@@ -597,13 +665,11 @@ export default function SpaceTestPage() {
 // Long answer interaction component (kept local to this file)
 function LongAnswerBlock({
   referenceAnswer,
-  userId,
   onNext,
   isLast,
   onSubmit,
 }: {
   referenceAnswer: string
-  userId: string
   onNext: () => void
   isLast: boolean
   onSubmit: (text: string, setResult: (r: { verdict: "correct" | "incorrect" | "insufficient" | "skipped"; score: number; reasoning: string; keyPoints?: string[]; missingPoints?: string[] }) => void) => Promise<void> | void
