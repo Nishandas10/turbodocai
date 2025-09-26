@@ -165,17 +165,26 @@ export default function TestResultsPage() {
   }
 
   const retake = () => {
+    // Replay exact same questions
     const params = new URLSearchParams()
     params.set('docs', data.docs.join(','))
     params.set('count', String(data.count))
     params.set('difficulty', data.difficulty)
     params.set('type', data.type)
     params.set('duration', String(data.durationMin))
-  router.push(`/spaces/${spacesId}/test?${params.toString()}`)
+    params.set('sessionReplay', data.sessionId)
+    router.push(`/spaces/${spacesId}/test?${params.toString()}`)
   }
 
   const newQuestions = () => {
-    retake() // same behavior for now (fresh generation occurs on load)
+    // Fresh generation (omit sessionReplay param)
+    const params = new URLSearchParams()
+    params.set('docs', data.docs.join(','))
+    params.set('count', String(data.count))
+    params.set('difficulty', data.difficulty)
+    params.set('type', data.type)
+    params.set('duration', String(data.durationMin))
+    router.push(`/spaces/${spacesId}/test?${params.toString()}`)
   }
 
   return (

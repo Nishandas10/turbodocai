@@ -39,6 +39,7 @@ export interface GenerateFlashcardsParams {
   documentId: string;
   userId: string;
   count?: number;
+  forceNew?: boolean; // Bypass cache for fresh generation
 }
 
 export interface QuizQuestion {
@@ -56,6 +57,7 @@ export interface GenerateQuizParams {
   userId: string;
   count?: number;
   difficulty?: "mixed" | "easy" | "medium" | "hard";
+  forceNew?: boolean; // Bypass cache for fresh generation
 }
 
 export interface GetDocumentTextParams {

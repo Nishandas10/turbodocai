@@ -11,6 +11,8 @@ export default function SpaceTestPage() {
   const { user } = useAuth()
   const sp = useSearchParams()
   const docIds = useMemo(() => (sp.get("docs") || "").split(",").filter(Boolean), [sp])
+  // If present, we will replay (reuse) a previous session's exact questions instead of generating new
+  const replaySessionId = sp.get('sessionReplay') || null
   const count = Number(sp.get("count") || 10)
   const difficulty = (sp.get("difficulty") as "mixed" | "easy" | "medium" | "hard") || "mixed"
   const qType = (sp.get("type") as "mcq" | "long" | "mixed") || "mcq"
@@ -36,7 +38,7 @@ export default function SpaceTestPage() {
   // Tracking answer details for results page
   interface McqAnswerRecord { picked: number | null; correct: boolean }
   interface LongResultRecord { kind: 'long'; docId: string; verdict: 'correct' | 'incorrect' | 'insufficient' | 'skipped'; correct: boolean; skipped: boolean; front: string; back: string }
-  interface McqResultRecord { kind: 'mcq'; docId: string; category?: string; picked: number | null; correct: boolean; skipped: boolean; question: string; options: string[] }
+  interface McqResultRecord { kind: 'mcq'; docId: string; category?: string; picked: number | null; correct: boolean; skipped: boolean; question: string; options: string[]; correctAnswer: number; explanation: string; id: string; answerText: string }
   type ResultItem = LongResultRecord | McqResultRecord
   const mcqAnswersRef = useRef<McqAnswerRecord[]>([])
   const mixedResultsRef = useRef<ResultItem[]>([])
@@ -44,6 +46,7 @@ export default function SpaceTestPage() {
   // Prevent duplicate session storage (React strict mode/double render of done state)
   const sessionStoredRef = useRef(false)
   const storedSessionIdRef = useRef<string | null>(null)
+  const [replayIntegrityNote, setReplayIntegrityNote] = useState<string | null>(null)
 
   // Start timer on questions load if duration provided
   useEffect(() => {
@@ -67,6 +70,70 @@ export default function SpaceTestPage() {
 
   useEffect(() => {
     if (!user?.uid || !docIds.length) return
+    // If we are replaying an older session, load its items from localStorage and reconstruct question arrays.
+    if (replaySessionId) {
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem(`testSession:${replaySessionId}`) : null
+        if (raw) {
+          interface StoredItemBase { kind: 'mcq' | 'long'; docId: string }
+          interface StoredMcq extends StoredItemBase { kind: 'mcq'; id?: string; question?: string; options?: string[]; correctAnswer?: number; explanation?: string; category?: string; picked?: number; correct?: boolean }
+          interface StoredLong extends StoredItemBase { kind: 'long'; front?: string; back?: string; category?: string; question?: string }
+          interface StoredSessionShape { items?: (StoredMcq | StoredLong)[] }
+          const prev: StoredSessionShape = JSON.parse(raw)
+          if (prev && Array.isArray(prev.items)) {
+            const items = prev.items.filter(it => docIds.includes(it.docId))
+            const mcqs: AugQuizQuestion[] = []
+            const longs: AugFlashcard[] = []
+            const mixed: MixedItem[] = []
+            let inferredCount = 0
+            for (const it of items) {
+              if (it.kind === 'mcq') {
+                let correctAnswerIndex: number
+                if (typeof it.correctAnswer === 'number') correctAnswerIndex = it.correctAnswer
+                else {
+                  // Attempt inference only if stored picked was correct (older sessions) else default 0
+                  const legacyPicked = (it as StoredMcq).picked as unknown
+                  const legacyCorrect = (it as StoredMcq).correct as unknown
+                  const anyPicked = typeof legacyPicked === 'number' ? legacyPicked : null
+                  const wasCorrect = typeof legacyCorrect === 'boolean' ? legacyCorrect : false
+                  if (typeof anyPicked === 'number' && wasCorrect) {
+                    correctAnswerIndex = anyPicked
+                  } else {
+                    correctAnswerIndex = 0
+                  }
+                  inferredCount++
+                }
+                const q: AugQuizQuestion = {
+                  id: it.id || `${it.docId}-${mcqs.length}`,
+                  question: it.question || 'Question',
+                  options: it.options || [],
+                  correctAnswer: correctAnswerIndex,
+                  explanation: it.explanation || '',
+                  category: it.category || 'General',
+                  difficulty: difficulty === 'mixed' ? 'easy' : difficulty, // fallback mapping
+                  docId: it.docId,
+                }
+                mcqs.push(q)
+                if (qType === 'mixed') mixed.push({ kind: 'mcq', q })
+              } else if (it.kind === 'long') {
+                const fc: AugFlashcard = { front: it.front || it.question || 'Question', back: it.back || '', category: it.category || 'Long', docId: it.docId }
+                longs.push(fc)
+                if (qType === 'mixed') mixed.push({ kind: 'long', fc })
+              }
+            }
+            if (inferredCount > 0) {
+              setReplayIntegrityNote(`Some answer keys were missing and inferred for replay ( ${inferredCount} ). For 100% accuracy, use New-Question Retake to refresh this test.`)
+            }
+            if (qType === 'mcq') setQuestions(mcqs.slice(0, count))
+            else if (qType === 'long') setLongItems(longs.slice(0, count))
+            else setMixedItems(mixed.slice(0, count))
+            setLoading(false)
+            return
+          }
+        }
+      } catch { /* ignore replay load issues */ }
+      // If replay failed, fall back to generation
+    }
     const load = async () => {
       try {
         setLoading(true)
@@ -76,7 +143,7 @@ export default function SpaceTestPage() {
           const all: AugFlashcard[] = []
           for (const id of docIds) {
             try {
-              const cards = await generateFlashcards({ documentId: id, userId: user.uid, count: perDoc })
+              const cards = await generateFlashcards({ documentId: id, userId: user.uid, count: perDoc, forceNew: !replaySessionId })
               const aug = cards.map(c => ({ ...c, docId: id }))
               all.push(...aug)
             } catch {
@@ -85,7 +152,7 @@ export default function SpaceTestPage() {
           }
           if (all.length < count && docIds[0]) {
             try {
-              const extra = await generateFlashcards({ documentId: docIds[0], userId: user.uid, count: count - all.length })
+              const extra = await generateFlashcards({ documentId: docIds[0], userId: user.uid, count: count - all.length, forceNew: !replaySessionId })
               const augExtra = extra.map(c => ({ ...c, docId: docIds[0] }))
               all.push(...augExtra)
             } catch {}
@@ -106,14 +173,14 @@ export default function SpaceTestPage() {
           const allMcq: AugQuizQuestion[] = []
           for (const id of docIds) {
             try {
-              const qs = await generateQuiz({ documentId: id, userId: user.uid, count: perDocMcq, difficulty })
+              const qs = await generateQuiz({ documentId: id, userId: user.uid, count: perDocMcq, difficulty, forceNew: !replaySessionId })
               const augQs = qs.map(q => ({ ...q, docId: id }))
               allMcq.push(...augQs)
             } catch {/* ignore */}
           }
           if (allMcq.length < mcqTarget && docIds[0]) {
             try {
-              const extra = await generateQuiz({ documentId: docIds[0], userId: user.uid, count: mcqTarget - allMcq.length, difficulty })
+              const extra = await generateQuiz({ documentId: docIds[0], userId: user.uid, count: mcqTarget - allMcq.length, difficulty, forceNew: !replaySessionId })
               const augExtra = extra.map(q => ({ ...q, docId: docIds[0] }))
               allMcq.push(...augExtra)
             } catch {/* ignore */}
@@ -124,14 +191,14 @@ export default function SpaceTestPage() {
           const allLong: AugFlashcard[] = []
           for (const id of docIds) {
             try {
-              const cards = await generateFlashcards({ documentId: id, userId: user.uid, count: perDocLong })
+              const cards = await generateFlashcards({ documentId: id, userId: user.uid, count: perDocLong, forceNew: !replaySessionId })
               const augCards = cards.map(c => ({ ...c, docId: id }))
               allLong.push(...augCards)
             } catch {/* ignore */}
           }
           if (allLong.length < longTarget && docIds[0]) {
             try {
-              const extra = await generateFlashcards({ documentId: docIds[0], userId: user.uid, count: longTarget - allLong.length })
+              const extra = await generateFlashcards({ documentId: docIds[0], userId: user.uid, count: longTarget - allLong.length, forceNew: !replaySessionId })
               const augExtra = extra.map(c => ({ ...c, docId: docIds[0] }))
               allLong.push(...augExtra)
             } catch {/* ignore */}
@@ -161,7 +228,7 @@ export default function SpaceTestPage() {
           const all: AugQuizQuestion[] = []
           for (const id of docIds) {
             try {
-              const qs = await generateQuiz({ documentId: id, userId: user.uid, count: perDoc, difficulty })
+              const qs = await generateQuiz({ documentId: id, userId: user.uid, count: perDoc, difficulty, forceNew: !replaySessionId })
               const augQs = qs.map(q => ({ ...q, docId: id }))
               all.push(...augQs)
             } catch {
@@ -170,7 +237,7 @@ export default function SpaceTestPage() {
           }
           if (all.length < count && docIds[0]) {
             try {
-              const extra = await generateQuiz({ documentId: docIds[0], userId: user.uid, count: count - all.length, difficulty })
+              const extra = await generateQuiz({ documentId: docIds[0], userId: user.uid, count: count - all.length, difficulty, forceNew: !replaySessionId })
               const augExtra = extra.map(q => ({ ...q, docId: docIds[0] }))
               all.push(...augExtra)
             } catch {}
@@ -189,7 +256,7 @@ export default function SpaceTestPage() {
       }
     }
     load()
-  }, [user?.uid, docIds, count, difficulty, qType])
+  }, [user?.uid, docIds, count, difficulty, qType, replaySessionId])
 
   const current = qType === "long" ? undefined : questions[idx]
   const totalItems = qType === "long" ? longItems.length : qType === "mixed" ? mixedItems.length : questions.length
@@ -275,6 +342,9 @@ export default function SpaceTestPage() {
             <h1 className="text-xl font-semibold text-foreground">Creating Test…</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-1">Generating AI questions from selected documents…</p>
+          {replayIntegrityNote && (
+            <div className="mt-2 text-xs text-amber-700 bg-amber-100 border border-amber-200 rounded p-2">{replaySessionId ? 'Replay:' : ''} {replayIntegrityNote}</div>
+          )}
         </div>
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -314,7 +384,7 @@ export default function SpaceTestPage() {
       const baseInfo = { sessionId, spaceId: dynamicSpaceId, docs: docIds, type: qType, difficulty, count, durationMin, startTime: startTimeRef.current, endTime }
       let items: ResultItem[] = []
       if (qType === 'mcq') {
-        items = questions.map((q, i): McqResultRecord => ({ kind: 'mcq', docId: q.docId, category: q.category, picked: mcqAnswersRef.current[i]?.picked ?? null, correct: mcqAnswersRef.current[i]?.correct ?? false, skipped: mcqAnswersRef.current[i]?.picked == null, question: q.question, options: q.options }))
+        items = questions.map((q, i): McqResultRecord => ({ kind: 'mcq', docId: q.docId, category: q.category, picked: mcqAnswersRef.current[i]?.picked ?? null, correct: mcqAnswersRef.current[i]?.correct ?? false, skipped: mcqAnswersRef.current[i]?.picked == null, question: q.question, options: q.options, correctAnswer: q.correctAnswer, explanation: q.explanation, id: q.id, answerText: q.options[q.correctAnswer] || '' }))
       } else if (qType === 'long') {
         items = longItems.map(it => {
           const r = longResultsRef.current.find(x => x.docId === it.docId && x.front === it.front)
@@ -322,7 +392,7 @@ export default function SpaceTestPage() {
         })
       } else {
         items = mixedItems.map(mi => mi.kind === 'mcq'
-          ? { kind: 'mcq', docId: mi.q.docId, category: mi.q.category, picked: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) ?? null, correct: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.correct) ?? false, skipped: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) == null, question: mi.q.question, options: mi.q.options }
+          ? { kind: 'mcq', docId: mi.q.docId, category: mi.q.category, picked: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) ?? null, correct: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.correct) ?? false, skipped: (mcqAnswersRef.current[questions.findIndex(q=>q.id===mi.q.id)]?.picked) == null, question: mi.q.question, options: mi.q.options, correctAnswer: mi.q.correctAnswer, explanation: mi.q.explanation, id: mi.q.id, answerText: mi.q.options[mi.q.correctAnswer] || '' }
           : { kind: 'long', docId: mi.fc.docId, verdict: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.verdict)||'skipped', correct: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.correct)||false, skipped: (longResultsRef.current.find(r=>r.front===mi.fc.front)?.skipped) ?? true, front: mi.fc.front, back: mi.fc.back }
         )
       }

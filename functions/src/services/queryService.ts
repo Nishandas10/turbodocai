@@ -364,31 +364,36 @@ Answer:`;
   async generateFlashcards(
     documentId: string,
     userId: string,
-    count: number = 12
+    count: number = 12,
+    forceNew: boolean = false
   ): Promise<GeneratedFlashcard[]> {
     try {
       const db = getFirestore();
-      // Cache lookup first
-      try {
-        const cacheDoc = await db
-          .collection("documents")
-          .doc(userId)
-          .collection("userDocuments")
-          .doc(documentId)
-          .collection("aiArtifacts")
-          .doc("flashcards_v1")
-          .get();
-        if (cacheDoc.exists) {
-          const data = cacheDoc.data() as { flashcards?: GeneratedFlashcard[] };
-          if (data.flashcards && data.flashcards.length) {
-            logger.info("Serving flashcards from cache", {
-              len: data.flashcards.length,
-            });
-            return data.flashcards.slice(0, count);
+      // Cache lookup first (skip if forceNew is true)
+      if (!forceNew) {
+        try {
+          const cacheDoc = await db
+            .collection("documents")
+            .doc(userId)
+            .collection("userDocuments")
+            .doc(documentId)
+            .collection("aiArtifacts")
+            .doc("flashcards_v1")
+            .get();
+          if (cacheDoc.exists) {
+            const data = cacheDoc.data() as {
+              flashcards?: GeneratedFlashcard[];
+            };
+            if (data.flashcards && data.flashcards.length) {
+              logger.info("Serving flashcards from cache", {
+                len: data.flashcards.length,
+              });
+              return data.flashcards.slice(0, count);
+            }
           }
+        } catch (e) {
+          logger.warn("Flashcard cache read failed", e);
         }
-      } catch (e) {
-        logger.warn("Flashcard cache read failed", e);
       }
 
       logger.info("Flashcards generation start", {
@@ -649,33 +654,36 @@ Answer:`;
     documentId: string,
     userId: string,
     count: number = 10,
-    difficulty: "mixed" | "easy" | "medium" | "hard" = "mixed"
+    difficulty: "mixed" | "easy" | "medium" | "hard" = "mixed",
+    forceNew: boolean = false
   ): Promise<GeneratedQuizQuestion[]> {
     try {
       const db = getFirestore();
-      // Cache lookup first
+      // Cache lookup first (skip if forceNew is true)
       const cacheKey = `quiz_v1_${difficulty}_${count}`;
-      try {
-        const cacheDoc = await db
-          .collection("documents")
-          .doc(userId)
-          .collection("userDocuments")
-          .doc(documentId)
-          .collection("aiArtifacts")
-          .doc(cacheKey)
-          .get();
-        if (cacheDoc.exists) {
-          const data = cacheDoc.data() as { quiz?: GeneratedQuizQuestion[] };
-          if (data.quiz && data.quiz.length) {
-            logger.info("Serving quiz from cache", {
-              len: data.quiz.length,
-              difficulty,
-            });
-            return data.quiz.slice(0, count);
+      if (!forceNew) {
+        try {
+          const cacheDoc = await db
+            .collection("documents")
+            .doc(userId)
+            .collection("userDocuments")
+            .doc(documentId)
+            .collection("aiArtifacts")
+            .doc(cacheKey)
+            .get();
+          if (cacheDoc.exists) {
+            const data = cacheDoc.data() as { quiz?: GeneratedQuizQuestion[] };
+            if (data.quiz && data.quiz.length) {
+              logger.info("Serving quiz from cache", {
+                len: data.quiz.length,
+                difficulty,
+              });
+              return data.quiz.slice(0, count);
+            }
           }
+        } catch (e) {
+          logger.warn("Quiz cache read failed", e);
         }
-      } catch (e) {
-        logger.warn("Quiz cache read failed", e);
       }
 
       logger.info("Quiz generation start", {

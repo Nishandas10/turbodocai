@@ -1198,7 +1198,7 @@ export const generateFlashcards = onCall(
   },
   async (request) => {
     try {
-      const { documentId, userId, count } = request.data || {};
+      const { documentId, userId, count, forceNew } = request.data || {};
       if (!documentId || !userId) {
         throw new Error("Missing required parameters: documentId and userId");
       }
@@ -1206,7 +1206,8 @@ export const generateFlashcards = onCall(
       const cards = await queryService.generateFlashcards(
         documentId,
         userId,
-        count || 12
+        count || 12,
+        forceNew
       );
       return { success: true, data: { flashcards: cards } };
     } catch (error) {
@@ -1228,7 +1229,8 @@ export const generateQuiz = onCall(
   },
   async (request) => {
     try {
-      const { documentId, userId, count, difficulty } = request.data || {};
+      const { documentId, userId, count, difficulty, forceNew } =
+        request.data || {};
       if (!documentId || !userId) {
         throw new Error("Missing required parameters: documentId and userId");
       }
@@ -1237,7 +1239,8 @@ export const generateQuiz = onCall(
         documentId,
         userId,
         count || 10,
-        difficulty || "mixed"
+        difficulty || "mixed",
+        forceNew
       );
       return { success: true, data: { quiz: questions } };
     } catch (error) {
