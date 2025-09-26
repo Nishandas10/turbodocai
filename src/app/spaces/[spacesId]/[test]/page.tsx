@@ -438,7 +438,7 @@ export default function SpaceTestPage() {
   }
 
   if (done) {
-    const sessionId = finalizeSession()
+  const sessionId = finalizeSession()
     const base = qType === "long" ? longItems.length : qType === "mixed" ? mixedItems.length : questions.length
     const pct = Math.round((score / Math.max(1, base)) * 100)
     return (
@@ -457,14 +457,36 @@ export default function SpaceTestPage() {
             </div>
             <div className="text-6xl font-bold text-blue-600 mb-4">{pct}%</div>
             <p className="text-lg text-foreground mb-6">You got {score} of {base} correct.</p>
-            <button onClick={reset} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 mx-auto">
-              <RotateCcw className="h-5 w-5" /> Retake
-            </button>
-            {sessionId && (
-              <div className="mt-6">
-                <a href={`/spaces/${sp.get('spacesId') || ''}/test/results?session=${sessionId}`} className="text-sm text-blue-600 hover:underline">View Detailed Breakdown</a>
-              </div>
-            )}
+            <div className="flex flex-col items-center gap-3">
+              <button onClick={reset} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                <RotateCcw className="h-5 w-5" /> Retake
+              </button>
+              {/* New-question retake (fresh generation) */}
+              <button
+                onClick={() => {
+                  if (!docIds.length) return
+                  const params = new URLSearchParams()
+                  params.set('docs', docIds.join(','))
+                  params.set('count', String(count))
+                  params.set('difficulty', difficulty)
+                  params.set('type', qType)
+                  params.set('duration', String(durationMin))
+                  // Indirect forceNew: we rely on backend param detection via absence of replay; optionally add explicit flag if page consumer adopts it later
+                  window.location.href = `/spaces/${(typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean)[1] : '') || ''}/test?${params.toString()}&forceNew=1`
+                }}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm"
+              >New Question Set</button>
+              {sessionId && (
+                <button
+                  onClick={() => {
+                    const spaceIdFromPath = (typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean)[1] : '') || ''
+                    const target = `/spaces/${spaceIdFromPath}/test/results?session=${sessionId}`
+                    window.location.href = target
+                  }}
+                  className="text-sm text-blue-600 hover:underline"
+                >View Detailed Breakdown</button>
+              )}
+            </div>
           </div>
         </div>
       </div>
