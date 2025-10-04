@@ -106,6 +106,7 @@ export default function SpacePage() {
     return <FileText className={iconCls} />
   }
 
+  // Legacy modal open handlers retained for existing quick action tiles, but Add content button now routes to dashboard
   const openAudioModal = () => setAudioModalOpen(true)
   const openDocumentUploadModal = () => setDocumentUploadModalOpen(true)
   const openYoutubeVideoModal = () => setYoutubeVideoModalOpen(true)
@@ -122,7 +123,7 @@ export default function SpacePage() {
   return (
     <ProtectedRoute>
       <div className="h-screen bg-background flex overflow-hidden">
-        <DashboardSidebar onAddContentClick={openDocumentUploadModal} onSearchClick={() => {}} />
+  <DashboardSidebar onAddContentClick={() => { window.location.href = '/dashboard' }} onSearchClick={() => {}} />
 
         <div className="flex-1 p-8 overflow-y-auto">
           <div className="mb-8">

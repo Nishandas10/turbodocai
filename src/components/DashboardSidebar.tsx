@@ -2,6 +2,8 @@
 
 import React, { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import dynamic from 'next/dynamic'
 import {
   Plus,
   Search,
@@ -21,6 +23,7 @@ import {
   Globe,
   Image as ImageIcon,
   MoreHorizontal,
+  GitBranch,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
@@ -47,12 +50,17 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
   const { theme, setTheme } = useTheme()
   const [recents, setRecents] = useState<AppDocument[]>([])
   const [spaces, setSpaces] = useState<SpaceType[]>([])
+  const router = useRouter()
+  const [searchOpen, setSearchOpen] = useState(false)
 
-  // Realtime recents (last 5 by createdAt desc)
+  // Lazy load SearchModal to avoid initial bundle weight
+  const SearchModal = React.useMemo(() => dynamic(() => import('./SearchModal'), { ssr: false }), [])
+
+  // Realtime recents (store full list; UI will truncate to 5)
   React.useEffect(() => {
     if (!user?.uid) return
     const unsubscribe = listenToUserDocuments(user.uid, (docs) => {
-      setRecents(docs.slice(0, 5))
+      setRecents(docs)
     })
     return unsubscribe
   }, [user?.uid])
@@ -101,21 +109,44 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
         {/* Primary actions */}
         <nav className="space-y-1 mb-4">
           <button
-            onClick={onAddContentClick}
+            onClick={() => {
+              if (onAddContentClick) return onAddContentClick()
+              // Default fallback: navigate to dashboard
+              router.push('/dashboard')
+            }}
             className={`w-full flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-3"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
           >
             <Plus className="h-4 w-4" />
             {!collapsed && <span className="text-sm">Add content</span>}
           </button>
+          {/* Mind Maps */}
+          <Link
+            href="/mindmaps"
+            className={`flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-3"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
+          >
+            <GitBranch className="h-4 w-4" />
+            {!collapsed && <span className="text-sm">Mind Maps</span>}
+          </Link>
+          {/* Explore */}
+          <Link
+            href="/explore"
+            className={`flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-3"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
+          >
+            <Globe className="h-4 w-4" />
+            {!collapsed && <span className="text-sm">Explore</span>}
+          </Link>
           <button
-            onClick={onSearchClick}
+            onClick={() => {
+              if (onSearchClick) return onSearchClick()
+              setSearchOpen(true)
+            }}
             className={`w-full flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-3"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
           >
             <Search className="h-4 w-4" />
             {!collapsed && <span className="text-sm">Search</span>}
           </button>
           <Link
-            href="#"
+            href="/notes"
             className={`flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-3"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
           >
             <Clock className="h-4 w-4" />
@@ -123,7 +154,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
           </Link>
         </nav>
 
-        {/* Recents */}
+        {/* Recents (show first five + Show More) */}
         <div className="px-2 py-2">
           {!collapsed && (
             <div className="text-xs uppercase tracking-wide text-sidebar-accent-foreground mb-2 select-none">Recents</div>
@@ -134,26 +165,34 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
                 No recent documents
               </div>
             ) : (
-              recents.map((doc, idx) => (
-                <Link
-                  key={doc.id}
-                  href={`/notes/${doc.id}`}
-                  className={`flex items-center ${collapsed ? "justify-center gap-0" : "gap-2"} px-2 py-2 rounded-md hover:bg-sidebar-accent`}
-                  title={doc.title || "Untitled"}
-                >
-                  {!collapsed && (
-                    <span className={`inline-flex h-2 w-2 rounded-full ${idx === 0 ? "bg-green-500" : "bg-transparent"}`} />
-                  )}
-                  <span className="inline-flex items-center justify-center h-5 w-5 rounded-sm bg-sidebar-primary/10">
-                    {renderTypeIcon(doc.type)}
-                  </span>
-                  {!collapsed && (
-                    <span className="text-sm text-sidebar-foreground truncate">
-                      {doc.title || "Untitled"}
+              <>
+                {recents.slice(0,5).map((doc, idx) => (
+                  <Link
+                    key={doc.id}
+                    href={`/notes/${doc.id}`}
+                    className={`flex items-center ${collapsed ? "justify-center gap-0" : "gap-2"} px-2 py-2 rounded-md hover:bg-sidebar-accent`}
+                    title={doc.title || "Untitled"}
+                  >
+                    {!collapsed && (
+                      <span className={`inline-flex h-2 w-2 rounded-full ${idx === 0 ? "bg-green-500" : "bg-transparent"}`} />
+                    )}
+                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-sm bg-sidebar-primary/10">
+                      {renderTypeIcon(doc.type)}
                     </span>
-                  )}
-                </Link>
-              ))
+                    {!collapsed && (
+                      <span className="text-sm text-sidebar-foreground truncate">
+                        {doc.title || "Untitled"}
+                      </span>
+                    )}
+                  </Link>
+                ))}
+                {recents.length > 5 && !collapsed && (
+                  <Link href="/notes" className="flex items-center gap-2 px-2 py-2 rounded-md text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent text-sm">
+                    <span className="inline-flex h-4 w-4 items-center justify-center">›</span>
+                    <span>Show More</span>
+                  </Link>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -318,6 +357,9 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
           </Link>
         )}
       </div>
+      {searchOpen && (
+        <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      )}
     </aside>
   )
 }

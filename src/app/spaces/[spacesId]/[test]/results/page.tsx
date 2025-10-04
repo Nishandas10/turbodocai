@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams, useRouter, useParams } from 'next/navigation'
 import { RotateCcw, ArrowLeft, Share2, ChevronLeft, ChevronRight } from 'lucide-react'
+import DashboardSidebar from '@/components/DashboardSidebar'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { useAuth } from '@/contexts/AuthContext'
 import { listenToSpaceDocuments } from '@/lib/firestore'
@@ -189,8 +190,10 @@ export default function TestResultsPage() {
 
   return (
     <ProtectedRoute>
-      <div className='min-h-screen flex flex-col'>
-        <div className='p-4 flex items-center justify-between border-border'>
+      <div className='h-screen bg-background flex overflow-hidden'>
+        <DashboardSidebar onAddContentClick={() => { window.location.href = '/dashboard' }} />
+        <div className='flex-1 flex flex-col min-w-0'>
+        <div className='p-4 flex items-center justify-between border-b border-border'>
           <div className='flex items-center gap-4'>
             <button onClick={() => history.back()} className='p-2 rounded hover:bg-muted'><ArrowLeft className='h-5 w-5'/></button>
             <h1 className='text-lg font-semibold'>Test Results</h1>
@@ -223,7 +226,7 @@ export default function TestResultsPage() {
           </div>
         </div>
 
-        <div className='p-8 flex flex-col items-center text-center gap-6'>
+  <div className='p-8 flex flex-col items-center text-center gap-6 overflow-y-auto'>
           <h2 className='text-xl font-medium'>Learning takes time, keep going!</h2>
           <div className='flex gap-12'>
             <div>
@@ -249,7 +252,7 @@ export default function TestResultsPage() {
           </div>
         </div>
 
-        <div className='max-w-5xl w-full mx-auto px-6 pb-32'>
+  <div className='max-w-5xl w-full mx-auto px-6 pb-32'>
           <div className='bg-card border border-border rounded-xl p-0 overflow-hidden'>
             <div className='p-6 pb-4'>
               <h3 className='font-semibold mb-2'>Questions Breakdown</h3>
@@ -305,6 +308,7 @@ export default function TestResultsPage() {
             </button>
             <button onClick={newQuestions} className='px-6 py-2 rounded-lg bg-blue-600 text-white text-sm'>New-Question Retake</button>
           </div>
+        </div>
         </div>
       </div>
     </ProtectedRoute>
