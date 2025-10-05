@@ -78,7 +78,7 @@ export default function SignupPage() {
       <div className="relative z-10">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white">Turbonotes AI</h1>
+          <h1 className="text-4xl font-bold text-white">BlumeNote AI</h1>
         </div>
 
         {/* Main Card */}
@@ -116,7 +116,7 @@ export default function SignupPage() {
               <div className="mb-6">
                 <Button 
                   variant="outline" 
-                  className="w-full h-11 justify-start gap-3 bg-white hover:bg-gray-50 text-white border-gray-300 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full h-11 justify-start gap-3 bg-white hover:bg-gray-50 text-gray-900 border-gray-300 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   onClick={handleGoogleSignIn}
                   disabled={isLoading || isReturningWithLink}
                 >
