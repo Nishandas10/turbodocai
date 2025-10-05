@@ -363,11 +363,6 @@ export default function Dashboard() {
     setSearchResults(filtered)
   }
 
-  const openSearchModal = () => {
-    setSearchModalOpen(true)
-    setSearchQuery('')
-    setSearchResults([])
-  }
 
   const openCamera = () => {
     setCameraModalOpen(true)
@@ -597,7 +592,7 @@ export default function Dashboard() {
     <ProtectedRoute>
       <div className="h-screen bg-background flex overflow-hidden">
   {/* Left Sidebar */}
-  <DashboardSidebar onSearchClick={openSearchModal} onAddContentClick={openDocumentUploadModal} onCreateSpaceClick={handleCreateSpace} />
+  <DashboardSidebar onCreateSpaceClick={handleCreateSpace} />
 
         {/* Main Content */}
         <div className="flex-1 p-8 overflow-y-auto">

@@ -123,7 +123,7 @@ export default function SpacePage() {
   return (
     <ProtectedRoute>
       <div className="h-screen bg-background flex overflow-hidden">
-  <DashboardSidebar onAddContentClick={() => { window.location.href = '/dashboard' }} onSearchClick={() => {}} />
+  <DashboardSidebar onAddContentClick={() => { window.location.href = '/dashboard' }} />
 
         <div className="flex-1 p-8 overflow-y-auto">
           <div className="mb-8">

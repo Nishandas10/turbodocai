@@ -260,10 +260,7 @@ export default function ExplorePage() {
     <>
     <div className="h-screen bg-background flex overflow-hidden">
       {/* Left Sidebar (same component as Dashboard) */}
-      <DashboardSidebar
-        onAddContentClick={() => router.push('/dashboard')}
-        onSearchClick={() => router.push('/notes')}
-      />
+      <DashboardSidebar onAddContentClick={() => router.push('/dashboard')} />
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto">
