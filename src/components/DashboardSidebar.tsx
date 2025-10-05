@@ -1,6 +1,7 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect, useCallback } from "react"
+import { createPortal } from 'react-dom'
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import dynamic from 'next/dynamic'
@@ -52,6 +53,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const router = useRouter()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
 
   // Lazy load SearchModal to avoid initial bundle weight
   const SearchModal = React.useMemo(() => dynamic(() => import('./SearchModal'), { ssr: false }), [])
@@ -166,16 +168,13 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
               </div>
             ) : (
               <>
-                {recents.slice(0,5).map((doc, idx) => (
+                {recents.slice(0,5).map((doc) => (
                   <Link
                     key={doc.id}
                     href={`/notes/${doc.id}`}
                     className={`flex items-center ${collapsed ? "justify-center gap-0" : "gap-2"} px-2 py-2 rounded-md hover:bg-sidebar-accent`}
                     title={doc.title || "Untitled"}
                   >
-                    {!collapsed && (
-                      <span className={`inline-flex h-2 w-2 rounded-full ${idx === 0 ? "bg-green-500" : "bg-transparent"}`} />
-                    )}
                     <span className="inline-flex items-center justify-center h-5 w-5 rounded-sm bg-sidebar-primary/10">
                       {renderTypeIcon(doc.type)}
                     </span>
@@ -268,18 +267,17 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
             <div className="text-xs uppercase tracking-wide text-sidebar-accent-foreground mb-2 select-none">Help & Tools</div>
           )}
           <div className="space-y-1">
-            <Link href="#" className={`flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-2"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}>
+            <button
+              type="button"
+              onClick={() => setFeedbackOpen(true)}
+              className={`w-full flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-2"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
+            >
               <ThumbsUp className="h-4 w-4" />
               {!collapsed && <span className="text-sm">Feedback</span>}
-            </Link>
-            <Link href="#" className={`flex items-center ${collapsed ? "justify-center gap-0 px-2" : "justify-between gap-3 px-2"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}>
-              <span className="inline-flex items-center gap-3">
-                <BookOpen className="h-4 w-4" />
-                {!collapsed && <span className="text-sm">Quick Guide</span>}
-              </span>
-              {!collapsed && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">New</span>
-              )}
+            </button>
+            <Link href="mailto:dasbudhe@gmail.com" className={`flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-2"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}>
+              <BookOpen className="h-4 w-4" />
+              {!collapsed && <span className="text-sm">Contact us</span>}
             </Link>
           </div>
         </div>
@@ -360,6 +358,40 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
       {searchOpen && (
         <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       )}
+      {feedbackOpen && (
+        <FeedbackModal onClose={() => setFeedbackOpen(false)} />
+      )}
     </aside>
   )
+}
+
+// Lightweight feedback modal (portal-less; top-level in sidebar root with high z-index)
+function FeedbackModal({ onClose }: { onClose: () => void }) {
+  const escHandler = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }, [onClose])
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', escHandler)
+    return () => {
+      document.body.style.overflow = ''
+      window.removeEventListener('keydown', escHandler)
+    }
+  }, [escHandler])
+  const modal = (
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
+      {/* Backdrop behind the card */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+          <h2 className="text-sm font-medium">Feedback</h2>
+          <button onClick={onClose} className="text-xs px-2 py-1 rounded-md hover:bg-muted">Close</button>
+        </div>
+        <iframe
+          title="Feedback Form"
+          src="https://form.jotform.com/250843541251451"
+          className="flex-1 w-full h-full bg-white"
+        />
+      </div>
+    </div>
+  )
+  return createPortal(modal, document.body)
 }
