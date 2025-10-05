@@ -3,8 +3,9 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
-import { BookOpen, FileText, MessageSquare, Upload, Video, Zap } from "lucide-react"
+import { BookOpen, MessageSquare, Upload, Video, Zap, Headphones, FileAudio, Pencil, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import Image from "next/image"
 import Navbar from "./components/navbar"
 import FeatureCard from "./components/feature-card"
 import HowItWorks from "./components/how-it-works"
@@ -17,6 +18,16 @@ import Link from "next/link"
 export default function Home() {
   const { user, loading } = useAuth()
   const router = useRouter()
+
+  // Organization logos for the Trusted By section
+  const logos = [
+    { src: "/orgs/iitj.png", alt: "IIT Jodhpur" },
+    { src: "/orgs/National_Institute_of_Technology,_Nagaland_Logo.png", alt: "NIT Nagaland" },
+    { src: "/orgs/Gauhati_University_Logo.png", alt: "Gauhati University" },
+    { src: "/orgs/Deloitte-Logo.wine.png", alt: "Deloitte" },
+    { src: "/orgs/google-logo.png", alt: "Google" },
+    { src: "/orgs/trellix.png", alt: "Trellix" },
+  ]
 
   useEffect(() => {
     if (!loading && user) {
@@ -96,24 +107,19 @@ export default function Home() {
                 <Button size="lg" className="bg-blue-600/80 hover:bg-blue-700/80 text-white text-lg px-12 py-4 h-auto backdrop-blur-sm border border-blue-500/50 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105" asChild>
                   <Link href="/signup">Get Started</Link>
                   </Button>
-              </div>
-              <div className="mb-8">
-                <p className="text-gray-400 text-sm mb-4">Works seamlessly with your favorite apps</p>
-                <div className="flex items-center justify-center space-x-8">
-                  <div className="bg-white rounded-lg p-3 w-12 h-12 flex items-center justify-center">
-                    <span className="text-black font-bold text-xl">N</span>
-                  </div>
-                  <div className="bg-purple-600 rounded-lg p-3 w-12 h-12 flex items-center justify-center">
-                    <div className="w-6 h-6 bg-white rounded-sm"></div>
-                  </div>
-                  <div className="bg-blue-600 rounded-lg p-3 w-12 h-12 flex items-center justify-center">
-                    <div className="w-6 h-6 bg-white rounded-sm"></div>
-                  </div>
-                  <div className="bg-yellow-500 rounded-lg p-3 w-12 h-12 flex items-center justify-center">
-                    <div className="w-6 h-6 bg-white rounded-sm"></div>
-                  </div>
-                  <div className="bg-green-600 rounded-lg p-3 w-12 h-12 flex items-center justify-center">
-                    <div className="w-6 h-6 bg-white rounded-sm"></div>
+                <div className="mt-6 flex flex-col items-center space-y-3">
+                  <div className="flex items-center space-x-2 text-sm text-gray-300">
+                    {/* Simple avatar circles using brand accents */}
+                    <span className="flex -space-x-2">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-purple-600 text-[10px] font-semibold text-white ring-2 ring-black">F</span>
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 text-[10px] font-semibold text-white ring-2 ring-black">R</span>
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-[10px] font-semibold text-white ring-2 ring-black">Z</span>
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
+                    </span>
+                    <span className="text-gray-300">
+                      <span className="font-semibold text-white">17,857+</span> users getting ahead of the competition
+                    </span>
                   </div>
                 </div>
               </div>
@@ -122,74 +128,177 @@ export default function Home() {
         </section>
 
         {/* Trusted By Section */}
-        <section className="py-8 relative">
+  <section className="py-8 relative">
           <div className="container mx-auto px-4 text-center mb-12">
             <h2 className="text-lg md:text-xl font-medium text-white mb-4">
               Turbonotes AI is trusted by students and professionals at
             </h2>
           </div>
-          
+
           {/* Animated Logo Scroll */}
-          <div className="relative overflow-hidden max-w-4xl mx-auto">
+          <div className="relative overflow-hidden max-w-5xl mx-auto">
             <div className="flex animate-scroll-left space-x-16">
               {/* First set of logos */}
               <div className="flex items-center space-x-16 flex-shrink-0">
-                <span className="text-white/70 font-semibold text-2xl">IIT</span>
-                <span className="text-white/70 font-semibold text-2xl">NIT</span>
-                <span className="text-white/70 font-semibold text-2xl">IIM</span>
-                <span className="text-white/70 font-semibold text-2xl">NIFT</span>
-                <span className="text-white/70 font-semibold text-2xl">Deloitte</span>
-                <span className="text-white/70 font-semibold text-2xl">Google</span>
-                <span className="text-white/70 font-semibold text-2xl">Microsoft</span>
+                {logos.map(l => (
+                  <div key={l.alt} className="flex items-center justify-center">
+                    <Image
+                      src={l.src}
+                      alt={l.alt}
+                      width={140}
+                      height={60}
+                      className="h-12 w-auto object-contain"
+                      priority
+                    />
+                  </div>
+                ))}
               </div>
-              
               {/* Second set for seamless loop */}
               <div className="flex items-center space-x-16 flex-shrink-0">
-                <span className="text-white/70 font-semibold text-2xl">IIT</span>
-                <span className="text-white/70 font-semibold text-2xl">NIT</span>
-                <span className="text-white/70 font-semibold text-2xl">IIM</span>
-                <span className="text-white/70 font-semibold text-2xl">NIFT</span>
-                <span className="text-white/70 font-semibold text-2xl">Deloitte</span>
-                <span className="text-white/70 font-semibold text-2xl">Google</span>
-                <span className="text-white/70 font-semibold text-2xl">Microsoft</span>
+                {logos.map(l => (
+                  <div key={l.alt + '-2'} className="flex items-center justify-center">
+                    <Image
+                      src={l.src}
+                      alt={l.alt}
+                      width={140}
+                      height={60}
+                      className="h-12 w-auto object-contain"
+                    />
+                  </div>
+                ))}
               </div>
-              
               {/* Third set for seamless loop */}
               <div className="flex items-center space-x-16 flex-shrink-0">
-                <span className="text-white/70 font-semibold text-2xl">IIT</span>
-                <span className="text-white/70 font-semibold text-2xl">NIT</span>
-                <span className="text-white/70 font-semibold text-2xl">IIM</span>
-                <span className="text-white/70 font-semibold text-2xl">NIFT</span>
-                <span className="text-white/70 font-semibold text-2xl">Deloitte</span>
-                <span className="text-white/70 font-semibold text-2xl">Google</span>
-                <span className="text-white/70 font-semibold text-2xl">Microsoft</span>
+                {logos.map(l => (
+                  <div key={l.alt + '-3'} className="flex items-center justify-center">
+                    <Image
+                      src={l.src}
+                      alt={l.alt}
+                      width={140}
+                      height={60}
+                      className="h-12 w-auto object-contain"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         </section>
 
         {/* Features Section */}
-        <section className="py-20 bg-black/30 backdrop-blur-sm border-t border-gray-800/50" id="features">
+  <section className="py-20 border-t border-gray-800/40" id="features">
           <div className="container mx-auto px-4">
             <div className="text-center mb-16">
-              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+              {/* <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
                 Powerful Learning Features
               </h2>
               <p className="text-lg text-gray-300 max-w-2xl mx-auto">
                 Our platform transforms any content into interactive learning materials using advanced AI.
-              </p>
+              </p> */}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {/* Spotlight Feature: Smart Summaries */}
+            <div className="max-w-7xl mx-auto mb-32 px-2">
+              <div className="space-y-14">
+                <div className="space-y-7 text-center">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-blue-600/20 border border-blue-500/30 text-blue-300 text-[11px] font-medium tracking-wide uppercase">Unified Intelligence</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-purple-600/20 border border-purple-500/30 text-purple-300 text-[11px] font-medium tracking-wide uppercase">AI Powered</span>
+                  </div>
+                  <h3 className="text-3xl md:text-5xl font-bold text-white leading-tight tracking-tight max-w-5xl mx-auto">
+                    Beyond Summaries: Your <span className="text-blue-500">All‑In‑One</span> Learning Workspace
+                  </h3>
+                  <p className="text-gray-300 text-lg leading-relaxed max-w-4xl mx-auto">
+                    Turn raw content into a living knowledge layer. Upload anything—PDFs, lecture videos, meetings, research papers—then watch it transform into structured summaries, interactive study assets, and real-time AI collaboration.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 max-w-6xl mx-auto">
+                    {/* Feature Tile */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-blue-600/25 border border-blue-500/30 flex items-center justify-center text-blue-300">
+                        <Brain className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Semantic Summaries</p>
+                        <p className="text-sm text-gray-400 leading-snug">Layered structure with key concepts & context linking.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-purple-600/25 border border-purple-500/30 flex items-center justify-center text-purple-300">
+                        <MessageSquare className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Chat Any Document</p>
+                        <p className="text-sm text-gray-400 leading-snug">Follow‑ups with citations & reasoning traceability.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-emerald-600/25 border border-emerald-500/30 flex items-center justify-center text-emerald-300">
+                        <Zap className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Flashcards & Quizzes</p>
+                        <p className="text-sm text-gray-400 leading-snug">Adaptive recall + spaced assessment generation.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-pink-600/25 border border-pink-500/30 flex items-center justify-center text-pink-300">
+                        <Headphones className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">AI Podcast Mode</p>
+                        <p className="text-sm text-gray-400 leading-snug">Natural narrated audio of your compiled insights.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-orange-500/25 border border-orange-500/40 flex items-center justify-center text-orange-300">
+                        <Pencil className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Live Cursor Editor</p>
+                        <p className="text-sm text-gray-400 leading-snug">Real-time AI drafting & refinement collaboration.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-indigo-600/25 border border-indigo-500/30 flex items-center justify-center text-indigo-300">
+                        <FileAudio className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Context Memory Engine</p>
+                        <p className="text-sm text-gray-400 leading-snug">Cross‑doc synthesis & persistent reasoning context.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 pt-6">
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">No copy-paste prep</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Source traceability</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Study acceleration</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Retention focused</span>
+                  </div>
+                </div>
+                <div className="relative group max-w-6xl mx-auto">
+                  <div className="absolute -inset-4 bg-gradient-to-tr from-blue-600/40 via-purple-600/30 to-fuchsia-600/20 rounded-3xl blur-2xl opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                  <div className="relative rounded-3xl overflow-hidden border border-gray-800/70 bg-gray-900/70 backdrop-blur-sm shadow-[0_0_45px_-8px_rgba(59,130,246,0.55)] p-4">
+                    <div className="relative w-full">
+                      <Image
+                        src="/ss/summary.jpg"
+                        alt="Unified AI learning workspace screenshot"
+                        width={2200}
+                        height={1700}
+                        className="w-full h-auto object-contain mx-auto"
+                        priority
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Remaining Feature Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
               <FeatureCard
                 icon={<Upload className="h-10 w-10 text-blue-400" />}
                 title="Multi-Format Upload"
                 description="Upload audio, video, PDFs, YouTube links, or meeting notes. Our platform handles it all."
-              />
-              <FeatureCard
-                icon={<FileText className="h-10 w-10 text-blue-400" />}
-                title="Smart Summaries"
-                description="Get concise, accurate summaries of your content, highlighting key concepts and takeaways."
               />
               <FeatureCard
                 icon={<BookOpen className="h-10 w-10 text-blue-400" />}
@@ -228,8 +337,7 @@ export default function Home() {
         <FAQ />
 
         {/* CTA Section */}
-        <section className="py-20 bg-blue-900/20 backdrop-blur-sm text-white relative border-t border-gray-800/50">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-900/30 to-purple-900/30"></div>
+        <section className="py-20 text-white relative border-t border-gray-800/40">
           <div className="container mx-auto px-4 text-center relative z-10">
             <h2 className="text-3xl md:text-4xl font-bold mb-6">Ready to Transform Your Learning Experience?</h2>
             <p className="text-lg md:text-xl mb-8 max-w-2xl mx-auto">

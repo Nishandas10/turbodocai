@@ -343,7 +343,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
 
       {/* Header / Greeting */}
       <div className="px-4 pt-6 pb-3 text-center">
-        <h1 className="text-2xl md:text-3xl font-bold text-white">Hey, I&apos;m Turbo</h1>
+        <h1 className="text-2xl md:text-3xl font-bold text-white">Hey, I&apos;m Blume AI</h1>
         <p className="text-gray-400 text-sm md:text-base mt-1">Ask questions or tell me what to write — I can type into your doc with a live cursor.</p>
       </div>
 
@@ -447,7 +447,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
             <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
               <span className="text-white text-sm font-bold">⚡</span>
             </div>
-            <span className="text-gray-300 font-medium text-sm truncate">Turbonotes AI</span>
+            <span className="text-gray-300 font-medium text-sm truncate">BlumeNote AI</span>
           </div>
         </div>
       </div>
