@@ -109,6 +109,20 @@ export default function TestResultsPage() {
     return Math.round((data.score / Math.max(1, valid.length)) * 100)
   }, [data])
 
+  // Derived aggregate metrics
+  const { totalQuestions, correctCount, incorrectCount, skippedCount } = useMemo(() => {
+    if(!data) return { totalQuestions: 0, correctCount: 0, incorrectCount: 0, skippedCount: 0 }
+    let correct = 0, skipped = 0, total = 0
+    for(const it of data.items || []) {
+      if(!it) continue
+      total += 1
+      if(it.skipped) skipped += 1
+      else if(it.correct) correct += 1
+    }
+    const incorrect = Math.max(0, total - correct - skipped)
+    return { totalQuestions: total, correctCount: correct, incorrectCount: incorrect, skippedCount: skipped }
+  }, [data])
+
   // (Legacy perDoc breakdown removed; superseded by hierarchical structure below)
 
   // Map docId -> title (live listener)
@@ -190,7 +204,7 @@ export default function TestResultsPage() {
 
   return (
     <ProtectedRoute>
-      <div className='h-screen bg-background flex overflow-hidden'>
+      <div className='h-screen bg-background flex'>
         <DashboardSidebar onAddContentClick={() => { window.location.href = '/dashboard' }} />
         <div className='flex-1 flex flex-col min-w-0'>
         <div className='p-4 flex items-center justify-between border-b border-border'>
@@ -226,87 +240,110 @@ export default function TestResultsPage() {
           </div>
         </div>
 
-  <div className='p-8 flex flex-col items-center text-center gap-6 overflow-y-auto'>
-          <h2 className='text-xl font-medium'>Learning takes time, keep going!</h2>
-          <div className='flex gap-12'>
-            <div>
-              <div className='text-2xl font-semibold'>{data.skipped}</div>
-              <div className='text-xs text-muted-foreground mt-1'>Skipped</div>
-            </div>
-            <div className='flex flex-col items-center'>
-              <div className='relative w-36 h-36'>
-                <svg viewBox='0 0 100 100' className='w-36 h-36'>
-                  <circle cx='50' cy='50' r='45' className='stroke-gray-200 fill-none' strokeWidth='10'/>
-                  <circle cx='50' cy='50' r='45' className='stroke-blue-600 fill-none' strokeWidth='10' strokeDasharray={`${percent * 2.83} 999`} strokeLinecap='round' transform='rotate(-90 50 50)'/>
-                </svg>
-                <div className='absolute inset-0 flex flex-col items-center justify-center'>
-                  <div className='text-xl font-semibold'>{percent}%</div>
-                  <div className='text-xs text-muted-foreground'>Score</div>
+        {/* Unified scrollable content */}
+        <div className='flex-1 overflow-y-auto'>
+          <div className='p-10 flex flex-col items-stretch gap-10 max-w-5xl mx-auto w-full'>
+            {/* Stats + Circle placeholder (will redesign below) */}
+            <div id='stats-section'>
+              <h2 className='text-xl font-medium text-center mb-8'>Learning takes time, keep going!</h2>
+              <div className='flex flex-col md:flex-row items-center md:items-stretch justify-center gap-14'>
+                {/* Left metrics */}
+                <div className='flex md:flex-col gap-10 md:gap-6 text-center md:text-left order-2 md:order-1'>
+                  <div className='flex flex-col items-center md:items-start'>
+                    <div className='text-3xl font-semibold text-green-600'>{correctCount}</div>
+                    <div className='text-xs text-muted-foreground mt-1'>Correct</div>
+                  </div>
+                  <div className='flex flex-col items-center md:items-start'>
+                    <div className='text-3xl font-semibold text-red-500'>{incorrectCount}</div>
+                    <div className='text-xs text-muted-foreground mt-1'>Incorrect</div>
+                  </div>
+                </div>
+
+                {/* Center circle */}
+                <div className='order-1 md:order-2'>
+                  <div className='relative w-40 h-40'>
+                    <svg viewBox='0 0 100 100' className='w-40 h-40'>
+                      <circle cx='50' cy='50' r='45' className='stroke-muted fill-none' strokeWidth='10'/>
+                      <circle cx='50' cy='50' r='45' className='stroke-blue-600 fill-none' strokeWidth='10' strokeDasharray={`${percent * 2.83} 999`} strokeLinecap='round' transform='rotate(-90 50 50)'/>
+                    </svg>
+                    <div className='absolute inset-0 flex flex-col items-center justify-center'>
+                      <div className='text-2xl font-semibold'>{percent}%</div>
+                      <div className='text-xs text-muted-foreground'>Score</div>
+                      <div className='text-[11px] text-muted-foreground mt-1'>{correctCount}/{totalQuestions}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right metrics */}
+                <div className='flex md:flex-col gap-10 md:gap-6 text-center md:text-right order-3'>
+                  <div className='flex flex-col items-center md:items-end'>
+                    <div className='text-3xl font-semibold'>{durationTaken}</div>
+                    <div className='text-xs text-muted-foreground mt-1'>Time Taken</div>
+                  </div>
+                  <div className='flex flex-col items-center md:items-end'>
+                    <div className='text-3xl font-semibold'>{skippedCount}</div>
+                    <div className='text-xs text-muted-foreground mt-1'>Skipped</div>
+                  </div>
                 </div>
               </div>
             </div>
-            <div>
-              <div className='text-2xl font-semibold'>{durationTaken}</div>
-              <div className='text-xs text-muted-foreground mt-1'>Time Taken</div>
-            </div>
-          </div>
-        </div>
 
-  <div className='max-w-5xl w-full mx-auto px-6 pb-32'>
-          <div className='bg-card border border-border rounded-xl p-0 overflow-hidden'>
-            <div className='p-6 pb-4'>
-              <h3 className='font-semibold mb-2'>Questions Breakdown</h3>
-              <p className='text-xs text-muted-foreground'>Per document with each question. “Review” retakes only that document.</p>
-            </div>
-            <div>
-              {hierarchical.map(doc => {
-                const docPct = Math.round((doc.correct / Math.max(1, doc.total)) * 100)
-                return (
-                  <div key={doc.docId} className='px-6 pt-4 last:pb-6 border-t first:border-t-0 border-border/70'>
-                    <div className='flex items-center justify-between mb-3'>
-                      <div className='font-semibold truncate'>{docTitles[doc.docId] || doc.docId}</div>
-                      <div className='flex items-center gap-3'>
-                        <div className='text-xs text-muted-foreground'>{doc.correct}/{doc.total} correct</div>
-                        <div className='w-40 h-2 bg-muted rounded-full overflow-hidden'>
-                          <div className='h-full bg-blue-600 transition-all' style={{ width: `${docPct}%` }} />
+            {/* Breakdown */}
+            <div className='bg-card border border-border rounded-xl p-0 overflow-hidden'>
+              <div className='p-6 pb-4'>
+                <h3 className='font-semibold mb-2'>Questions Breakdown</h3>
+                <p className='text-xs text-muted-foreground'>Per document with each question. “Review” retakes only that document.</p>
+              </div>
+              <div>
+                {hierarchical.map(doc => {
+                  const docPct = Math.round((doc.correct / Math.max(1, doc.total)) * 100)
+                  return (
+                    <div key={doc.docId} className='px-6 pt-4 last:pb-6 border-t first:border-t-0 border-border/70'>
+                      <div className='flex items-center justify-between mb-3'>
+                        <div className='font-semibold truncate'>{docTitles[doc.docId] || doc.docId}</div>
+                        <div className='flex items-center gap-3'>
+                          <div className='text-xs text-muted-foreground'>{doc.correct}/{doc.total} correct</div>
+                          <div className='w-40 h-2 bg-muted rounded-full overflow-hidden'>
+                            <div className='h-full bg-blue-600 transition-all' style={{ width: `${docPct}%` }} />
+                          </div>
+                          <div className='text-xs text-muted-foreground'>{docPct}%</div>
                         </div>
-                        <div className='text-xs text-muted-foreground'>{docPct}%</div>
+                      </div>
+                      <div className='space-y-2 mb-5'>
+                        {doc.questions.map(q => (
+                          <div key={q.id} className='flex items-center gap-4'>
+                            <div className='flex-1 text-sm truncate'>{q.text}</div>
+                            <div className='text-[10px] text-muted-foreground w-16 text-right'>{q.correct ? '✔' : q.skipped ? 'Skipped' : '✖'}</div>
+                            <button
+                              onClick={() => {
+                                const params = new URLSearchParams()
+                                params.set('docs', doc.docId)
+                                params.set('count', String(doc.total))
+                                params.set('difficulty', data.difficulty)
+                                params.set('type', data.type)
+                                params.set('duration', String(data.durationMin || 0))
+                                router.push(`/spaces/${data.spaceId || spacesId}/test?${params.toString()}`)
+                              }}
+                              className='px-3 py-1 rounded-full text-[11px] bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
+                            >Review ›</button>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    <div className='space-y-2 mb-5'>
-                      {doc.questions.map(q => (
-                        <div key={q.id} className='flex items-center gap-4'>
-                          <div className='flex-1 text-sm truncate'>{q.text}</div>
-                          <div className='text-[10px] text-muted-foreground w-16 text-right'>{q.correct ? '✔' : q.skipped ? 'Skipped' : '✖'}</div>
-                          <button
-                            onClick={() => {
-                              const params = new URLSearchParams()
-                              params.set('docs', doc.docId)
-                              params.set('count', String(doc.total))
-                              params.set('difficulty', data.difficulty)
-                              params.set('type', data.type)
-                              params.set('duration', String(data.durationMin || 0))
-                              router.push(`/spaces/${data.spaceId || spacesId}/test?${params.toString()}`)
-                            }}
-                            className='px-3 py-1 rounded-full text-[11px] bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
-                          >Review ›</button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-              {hierarchical.length === 0 && (
-                <div className='px-6 pb-6 text-sm text-muted-foreground'>No questions recorded.</div>
-              )}
+                  )
+                })}
+                {hierarchical.length === 0 && (
+                  <div className='px-6 pb-6 text-sm text-muted-foreground'>No questions recorded.</div>
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className='flex justify-center gap-4 mt-10'>
-            <button onClick={retake} className='px-6 py-2 rounded-lg border flex items-center gap-2 text-sm'>
-              <RotateCcw className='h-4 w-4'/> Try Again
-            </button>
-            <button onClick={newQuestions} className='px-6 py-2 rounded-lg bg-blue-600 text-white text-sm'>New-Question Retake</button>
+            <div className='flex justify-center gap-4'>
+              <button onClick={retake} className='px-6 py-2 rounded-lg border flex items-center gap-2 text-sm'>
+                <RotateCcw className='h-4 w-4'/> Try Again
+              </button>
+              <button onClick={newQuestions} className='px-6 py-2 rounded-lg bg-blue-600 text-white text-sm'>New-Question Retake</button>
+            </div>
           </div>
         </div>
         </div>

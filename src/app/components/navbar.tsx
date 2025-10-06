@@ -4,7 +4,6 @@ import { useState } from "react"
 import Link from "next/link"
 import { Menu, X, PenTool } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ThemeToggle } from "./theme-toggle"
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -16,7 +15,7 @@ export default function Navbar() {
           {/* Logo and Brand */}
           <div className="flex items-center space-x-2">
             <PenTool className="h-5 w-5 text-white" />
-            <span className="text-white font-medium text-sm">Turbonotes AI</span>
+            <span className="text-white font-medium text-sm">BlumeNote AI</span>
           </div>
 
           {/* Desktop Navigation */}
@@ -49,7 +48,6 @@ export default function Navbar() {
 
           {/* Right Side Actions */}
           <div className="hidden md:flex items-center space-x-4">
-            <ThemeToggle />
             <Button 
               className="bg-transparent border border-gray-400 text-white hover:bg-white/10 text-sm px-4 py-1.5 rounded-full"
               asChild
@@ -60,7 +58,6 @@ export default function Navbar() {
 
           {/* Mobile Menu Button */}
           <div className="md:hidden flex items-center space-x-2">
-            <ThemeToggle />
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="text-gray-300 hover:text-blue-400 focus:outline-none"

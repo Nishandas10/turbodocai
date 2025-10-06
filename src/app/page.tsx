@@ -3,7 +3,7 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
-import { BookOpen, MessageSquare, Upload, Video, Zap, Headphones, FileAudio, Pencil, Brain } from "lucide-react"
+import { BookOpen, MessageSquare, Upload, Video, Zap, Headphones, FileAudio, Pencil, Brain, GitBranch, PenTool, Eye, Share2, Move, Plus, Lock, FileUp, Settings2, RefreshCcw, BarChart3, Timer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
 import Navbar from "./components/navbar"
@@ -52,7 +52,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black relative overflow-hidden">
       {/* Space Background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-black via-slate-900 via-purple-900/20 to-black"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-black via-purple-900/20 to-black"></div>
       
       {/* Nebula Effects */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(120,119,198,0.3),transparent_50%)]"></div>
@@ -131,7 +131,7 @@ export default function Home() {
   <section className="py-8 relative">
           <div className="container mx-auto px-4 text-center mb-12">
             <h2 className="text-lg md:text-xl font-medium text-white mb-4">
-              Turbonotes AI is trusted by students and professionals at
+              BlumeNote AI is trusted by students and professionals at
             </h2>
           </div>
 
@@ -286,6 +286,165 @@ export default function Home() {
                         height={1700}
                         className="w-full h-auto object-contain mx-auto"
                         priority
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Mindmaps Spotlight */}
+            <div className="max-w-7xl mx-auto mb-32 px-2">
+              <div className="space-y-14">
+                <div className="space-y-7 text-center">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-green-600/20 border border-green-500/30 text-green-300 text-[11px] font-medium tracking-wide uppercase">Visual Learning</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 text-[11px] font-medium tracking-wide uppercase">Active Recall</span>
+                  </div>
+                  <h3 className="text-3xl md:text-5xl font-bold text-white leading-tight tracking-tight max-w-5xl mx-auto">
+                    Mindmaps: Structure <span className="text-green-400">Ideas</span>, Strengthen <span className="text-indigo-400">Memory</span>
+                  </h3>
+                  <p className="text-gray-300 text-lg leading-relaxed max-w-4xl mx-auto">
+                    Instantly convert complex topics into living, explorable knowledge graphs. Perfect for rapid revision, conceptual clarity, and visual memory retention. Build, expand, and refine ideas in a fluid canvas that grows with your understanding.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 max-w-6xl mx-auto">
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-green-600/25 border border-green-500/30 flex items-center justify-center text-green-300">
+                        <GitBranch className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Organic Knowledge Graphs</p>
+                        <p className="text-sm text-gray-400 leading-snug">Break big subjects into digestible, linked concept nodes.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-indigo-600/25 border border-indigo-500/30 flex items-center justify-center text-indigo-300">
+                        <PenTool className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Inline Editing</p>
+                        <p className="text-sm text-gray-400 leading-snug">Rename, annotate & color‑code nodes without breaking focus.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-fuchsia-600/25 border border-fuchsia-500/30 flex items-center justify-center text-fuchsia-300">
+                        <Move className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Fluid Drag & Arrange</p>
+                        <p className="text-sm text-gray-400 leading-snug">Smooth physics-inspired repositioning and clustering.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-purple-600/25 border border-purple-500/30 flex items-center justify-center text-purple-300">
+                        <Plus className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Instant Expansion</p>
+                        <p className="text-sm text-gray-400 leading-snug">Add sibling or child nodes with a single intelligent action.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-cyan-600/25 border border-cyan-500/30 flex items-center justify-center text-cyan-300">
+                        <Eye className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Revision Heat Zones</p>
+                        <p className="text-sm text-gray-400 leading-snug">Visual emphasis on weak or under-explored areas.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-amber-600/25 border border-amber-500/30 flex items-center justify-center text-amber-300">
+                        <Share2 className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Share & Co‑Create</p>
+                        <p className="text-sm text-gray-400 leading-snug">Collaborate or export snapshots for spaced repetition decks.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 pt-6">
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Spatial memory boost</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Rapid revision views</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Cognitive mapping</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Focus-driven layout</span>
+                  </div>
+                </div>
+                <div className="relative group max-w-6xl mx-auto">
+                  <div className="absolute -inset-4 bg-gradient-to-tr from-green-500/35 via-indigo-500/30 to-fuchsia-500/20 rounded-3xl blur-2xl opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                  <div className="relative rounded-3xl overflow-hidden border border-gray-800/70 bg-gray-900/70 backdrop-blur-sm shadow-[0_0_45px_-8px_rgba(16,185,129,0.45)] p-4">
+                    <div className="relative w-full">
+                      <Image
+                        src="/ss/mindmap.png"
+                        alt="Mindmap feature canvas screenshot"
+                        width={2200}
+                        height={1700}
+                        className="w-full h-auto object-contain mx-auto"
+                        priority
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Spaces & Testing Spotlight */}
+            <div className="max-w-7xl mx-auto mb-32 px-2">
+              <div className="space-y-14">
+                <div className="space-y-7 text-center">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-yellow-500/20 border border-yellow-400/30 text-yellow-300 text-[11px] font-medium tracking-wide uppercase">Private Spaces</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-teal-500/20 border border-teal-400/30 text-teal-300 text-[11px] font-medium tracking-wide uppercase">Custom Testing</span>
+                  </div>
+                  <h3 className="text-3xl md:text-5xl font-bold text-white leading-tight tracking-tight max-w-5xl mx-auto">
+                    Your Secure <span className="text-yellow-300">Spaces</span> & Fully <span className="text-teal-300">Custom Tests</span>
+                  </h3>
+                  <p className="text-gray-300 text-lg leading-relaxed max-w-4xl mx-auto">
+                    Organize learning inside private spaces where you can upload any format—PDFs, Docs, images, audio, links, or videos. Generate highly customizable tests (MCQs to long answers) with adjustable difficulty, timing, regeneration, and rich analytics for every attempt.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 max-w-6xl mx-auto">
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-yellow-500/25 border border-yellow-400/30 flex items-center justify-center text-yellow-200"><Lock className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Private & Organized</p><p className="text-sm text-gray-400 leading-snug">Separate work, study, and research collections effortlessly.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-teal-500/25 border border-teal-400/30 flex items-center justify-center text-teal-200"><FileUp className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Multi‑Format Ingestion</p><p className="text-sm text-gray-400 leading-snug">PDF, video, audio, links, images—unified processing pipeline.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-sky-500/25 border border-sky-400/30 flex items-center justify-center text-sky-200"><Settings2 className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Adaptive Multi‑Format Testing</p><p className="text-sm text-gray-400 leading-snug">Difficulty tuning + MCQ & long answer generation in one smart engine.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-emerald-500/25 border border-emerald-400/30 flex items-center justify-center text-emerald-200"><Timer className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Custom Timing</p><p className="text-sm text-gray-400 leading-snug">Set focused sprint timers or full practice exam durations.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-indigo-500/25 border border-indigo-400/30 flex items-center justify-center text-indigo-200"><RefreshCcw className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Regenerate Attempts</p><p className="text-sm text-gray-400 leading-snug">Fresh question sets or targeted reattempt by document.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-rose-500/25 border border-rose-400/30 flex items-center justify-center text-rose-200"><BarChart3 className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Deep Performance Analytics</p><p className="text-sm text-gray-400 leading-snug">Granular per‑doc, per‑question, and trend breakdowns.</p></div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 pt-6">
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Unlimited iterations</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Retention tracking</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Exam prep mode</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Progress insights</span>
+                  </div>
+                </div>
+                <div className="relative group max-w-6xl mx-auto">
+                  <div className="absolute -inset-4 bg-gradient-to-tr from-yellow-400/35 via-teal-400/30 to-indigo-400/20 rounded-3xl blur-2xl opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                  <div className="relative rounded-3xl overflow-hidden border border-gray-800/70 bg-gray-900/70 backdrop-blur-sm shadow-[0_0_45px_-8px_rgba(234,179,8,0.4)] p-4">
+                    <div className="relative w-full">
+                      <Image
+                        src="/ss/spaces.png"
+                        alt="Private spaces dashboard with test customization"
+                        width={2200}
+                        height={1700}
+                        className="w-full h-auto object-contain mx-auto"
                       />
                     </div>
                   </div>
