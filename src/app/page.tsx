@@ -92,7 +92,7 @@ export default function Home() {
         <Navbar />
 
         {/* Hero Section */}
-        <section className="relative py-20 md:py-28 overflow-hidden">
+  <section className="relative mt-20 py-20 md:py-28 overflow-hidden">
           <div className="container mx-auto px-4 relative z-10">
             <div className="text-center max-w-4xl mx-auto">
               <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight text-white mb-6">
