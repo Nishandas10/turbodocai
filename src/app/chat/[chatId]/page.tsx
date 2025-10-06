@@ -208,6 +208,7 @@ export default function ChatPage() {
 			await addDoc(collection(db, "chats", chatId, "messages"), {
 				role: "user",
 				content: text,
+				userId: user.uid,
 				createdAt: serverTimestamp(),
 			});
 			// Touch chat updatedAt

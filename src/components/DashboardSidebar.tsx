@@ -96,7 +96,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
       {/* Header */}
       <div className="px-3 pt-4 pb-2 flex items-center justify-between">
         {!collapsed && (
-          <div className="text-sidebar-foreground font-semibold text-xl leading-none">YouLearn</div>
+          <div className="text-sidebar-foreground font-semibold text-xl leading-none">BlumeNote AI</div>
         )}
         <button
           onClick={() => setCollapsed((c) => !c)}

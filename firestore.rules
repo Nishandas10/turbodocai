@@ -83,16 +83,24 @@ service cloud.firestore {
 
     // Chats top-level collection: /chats/{chatId}
     match /chats/{chatId} {
-      // Create: via Cloud Functions only (Admin). Client shouldn't create directly.
-      allow create: if false;
-      // Read/Update/Delete: only the owner can access their chat metadata
-      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      // Allow authenticated user to create a chat document they own (with userId field)
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      // Read/Update/Delete: only the owner can access/modify (cannot change ownership)
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
 
       // Messages subcollection: /chats/{chatId}/messages/{messageId}
       match /messages/{messageId} {
-        // Messages are written by Cloud Functions (Admin). Allow client reads for owner only.
-        allow read: if request.auth != null && get(/databases/$(database)/documents/chats/$(chatId)).data.userId == request.auth.uid;
-        allow write: if false;
+        function chatOwner() { return get(/databases/$(database)/documents/chats/$(chatId)).data.userId; }
+        allow read: if request.auth != null && chatOwner() == request.auth.uid;
+        // Allow client to create ONLY their own user role messages; assistant/system messages must come from server (could use admin sdk bypass rules)
+        allow create: if request.auth != null
+          && chatOwner() == request.auth.uid
+          && request.resource.data.role == 'user'
+          && request.resource.data.userId == request.auth.uid;
+        // Prevent client updates/deletes to existing messages (immutable history from client perspective)
+        allow update, delete: if false;
       }
     }
 
