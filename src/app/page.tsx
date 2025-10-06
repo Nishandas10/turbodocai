@@ -3,11 +3,10 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
-import { BookOpen, MessageSquare, Upload, Video, Zap, Headphones, FileAudio, Pencil, Brain, GitBranch, PenTool, Eye, Share2, Move, Plus, Lock, FileUp, Settings2, RefreshCcw, BarChart3, Timer } from "lucide-react"
+import { MessageSquare, Zap, Headphones, FileAudio, Pencil, Brain, GitBranch, PenTool, Eye, Share2, Move, Plus, Lock, FileUp, Settings2, RefreshCcw, BarChart3, Timer, Globe, Mic, Camera, Link2, LayoutDashboard, FilePlus, Compass, Layers, Tags, Sparkles, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
 import Navbar from "./components/navbar"
-import FeatureCard from "./components/feature-card"
 import HowItWorks from "./components/how-it-works"
 import Testimonials from "./components/testimonials"
 import Pricing from "./components/pricing"
@@ -195,6 +194,107 @@ export default function Home() {
               <p className="text-lg text-gray-300 max-w-2xl mx-auto">
                 Our platform transforms any content into interactive learning materials using advanced AI.
               </p> */}
+            </div>
+
+            {/* Dashboard Creation & Capture Spotlight */}
+            <div className="max-w-7xl mx-auto mb-32 px-2">
+              <div className="space-y-14">
+                <div className="space-y-7 text-center">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-cyan-600/20 border border-cyan-500/30 text-cyan-300 text-[11px] font-medium tracking-wide uppercase">Unified Workspace</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-pink-600/20 border border-pink-500/30 text-pink-300 text-[11px] font-medium tracking-wide uppercase">Capture & Create</span>
+                  </div>
+                  <h3 className="text-3xl md:text-5xl font-bold text-white leading-tight tracking-tight max-w-5xl mx-auto">
+                    Your Command Center: <span className="text-cyan-400">Create</span>, <span className="text-pink-400">Capture</span> & Organize
+                  </h3>
+                  <p className="text-gray-300 text-lg leading-relaxed max-w-4xl mx-auto">
+                    Start from a blank page or ingest anything you encounter—documents, slides, audio, video, links, or live moments. Our feature‑rich dashboard unifies note‑taking, real‑time recording, upload processing, and structured organization inside personalized spaces.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 max-w-6xl mx-auto">
+                    {/* Rich Editor / Blank Doc */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-cyan-600/25 border border-cyan-500/30 flex items-center justify-center text-cyan-300">
+                        <FilePlus className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Rich Note & Doc Editor</p>
+                        <p className="text-sm text-gray-400 leading-snug">Start blank with AI outlines, formatting, and markdown enhancements.</p>
+                      </div>
+                    </div>
+                    {/* Real-Time Audio Recording */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-pink-600/25 border border-pink-500/30 flex items-center justify-center text-pink-300">
+                        <Mic className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Live Audio Recording</p>
+                        <p className="text-sm text-gray-400 leading-snug">Capture lectures & meetings—auto transcribed, time‑stamped & searchable.</p>
+                      </div>
+                    </div>
+                    {/* Multi-Format Uploads */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-emerald-600/25 border border-emerald-500/30 flex items-center justify-center text-emerald-300">
+                        <FileUp className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Multi‑Format Ingestion</p>
+                        <p className="text-sm text-gray-400 leading-snug">PDF, PPTX, DOCX, audio, images—normalized into one processing pipeline.</p>
+                      </div>
+                    </div>
+                    {/* Links & YouTube */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-indigo-600/25 border border-indigo-500/30 flex items-center justify-center text-indigo-300">
+                        <Link2 className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">YouTube & Web Links</p>
+                        <p className="text-sm text-gray-400 leading-snug">Extract timelines, key sections & semantic summaries from any URL.</p>
+                      </div>
+                    </div>
+                    {/* Camera Capture */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-fuchsia-600/25 border border-fuchsia-500/30 flex items-center justify-center text-fuchsia-300">
+                        <Camera className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Camera & Snapshot Notes</p>
+                        <p className="text-sm text-gray-400 leading-snug">Convert whiteboards & handwriting via OCR + clarity enhancement.</p>
+                      </div>
+                    </div>
+                    {/* Personalized Spaces */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-rose-600/25 border border-rose-500/30 flex items-center justify-center text-rose-300">
+                        <LayoutDashboard className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Personalized Spaces</p>
+                        <p className="text-sm text-gray-400 leading-snug">Organize themes, share selectively, and power downstream testing.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 pt-6">
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Zero‑friction creation</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Live transcription</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">One pipeline for everything</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Capture → structure</span>
+                  </div>
+                </div>
+                <div className="relative group max-w-6xl mx-auto">
+                  <div className="absolute -inset-4 bg-gradient-to-tr from-cyan-500/35 via-pink-500/30 to-rose-500/25 rounded-3xl blur-2xl opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                  <div className="relative rounded-3xl overflow-hidden border border-gray-800/70 bg-gray-900/70 backdrop-blur-sm shadow-[0_0_45px_-8px_rgba(34,211,238,0.45)] p-4">
+                    <div className="relative w-full">
+                      <Image
+                        src="/ss/dashboard.jpg"
+                        alt="Feature-rich dashboard with creation & capture tools"
+                        width={2200}
+                        height={1700}
+                        className="w-full h-auto object-contain mx-auto"
+                        priority
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Spotlight Feature: Smart Summaries */}
@@ -452,34 +552,171 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Remaining Feature Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
-              <FeatureCard
-                icon={<Upload className="h-10 w-10 text-blue-400" />}
-                title="Multi-Format Upload"
-                description="Upload audio, video, PDFs, YouTube links, or meeting notes. Our platform handles it all."
-              />
-              <FeatureCard
-                icon={<BookOpen className="h-10 w-10 text-blue-400" />}
-                title="Interactive Quizzes"
-                description="AI-generated quizzes to test your knowledge and reinforce learning with adaptive difficulty."
-              />
-              <FeatureCard
-                icon={<Zap className="h-10 w-10 text-blue-400" />}
-                title="Flashcards"
-                description="Study efficiently with automatically generated flashcards covering important concepts."
-              />
-              <FeatureCard
-                icon={<MessageSquare className="h-10 w-10 text-blue-400" />}
-                title="Context-Aware Chatbot"
-                description="Ask questions about your content and get accurate, contextual answers from our AI assistant."
-              />
-              <FeatureCard
-                icon={<Video className="h-10 w-10 text-blue-400" />}
-                title="Video Insights"
-                description="Extract key moments and insights from video content with timestamps and transcripts."
-              />
+            {/* Chat & Reasoning Spotlight */}
+            <div className="max-w-7xl mx-auto mb-32 px-2">
+              <div className="space-y-14">
+                <div className="space-y-7 text-center">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-300 text-[11px] font-medium tracking-wide uppercase">Conversational AI</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-violet-500/20 border border-violet-400/30 text-violet-300 text-[11px] font-medium tracking-wide uppercase">Learn Pro Reasoning</span>
+                  </div>
+                  <h3 className="text-3xl md:text-5xl font-bold text-white leading-tight tracking-tight max-w-5xl mx-auto">
+                    Chat, Reason, & Search — <span className="text-blue-400">All Context‑Aware</span>
+                  </h3>
+                  <p className="text-gray-300 text-lg leading-relaxed max-w-4xl mx-auto">
+                    An AI chat built for deep study. Attach your uploaded documents for grounded answers, toggle advanced reasoning (Learn Pro) for multi‑step synthesis, and pull in the latest facts via real‑time web search—without losing citation traceability.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 max-w-6xl mx-auto">
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-blue-500/25 border border-blue-400/30 flex items-center justify-center text-blue-200"><MessageSquare className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Contextual Chat Core</p><p className="text-sm text-gray-400 leading-snug">Understands your docs + prior turns for coherent dialogue.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-violet-500/25 border border-violet-400/30 flex items-center justify-center text-violet-200"><Brain className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Learn Pro Reasoning</p><p className="text-sm text-gray-400 leading-snug">Chain‑of‑thought style decomposition for harder queries.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-emerald-500/25 border border-emerald-400/30 flex items-center justify-center text-emerald-200"><FileUp className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Attach Up To 4 Docs</p><p className="text-sm text-gray-400 leading-snug">Drop in recent materials to guide each answer.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-cyan-500/25 border border-cyan-400/30 flex items-center justify-center text-cyan-200"><Globe className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Real‑Time Web Search</p><p className="text-sm text-gray-400 leading-snug">Blend fresh external knowledge with local context.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-amber-500/25 border border-amber-400/30 flex items-center justify-center text-amber-200"><RefreshCcw className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Adaptive Follow‑Ups</p><p className="text-sm text-gray-400 leading-snug">Refine, drill deeper, or pivot topics instantly.</p></div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-rose-500/25 border border-rose-400/30 flex items-center justify-center text-rose-200"><BarChart3 className="h-5 w-5" /></div>
+                      <div className="space-y-1"><p className="font-medium text-white">Citation & Traceability</p><p className="text-sm text-gray-400 leading-snug">Source anchors ensure verifiable responses.</p></div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 pt-6">
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Grounded answers</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Reasoning mode</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Live knowledge</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Doc fusion</span>
+                  </div>
+                </div>
+                <div className="relative group max-w-6xl mx-auto">
+                  <div className="absolute -inset-4 bg-gradient-to-tr from-blue-400/35 via-violet-500/30 to-rose-500/25 rounded-3xl blur-2xl opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                  <div className="relative rounded-3xl overflow-hidden border border-gray-800/70 bg-gray-900/70 backdrop-blur-sm shadow-[0_0_45px_-8px_rgba(96,165,250,0.45)] p-4">
+                    <div className="relative w-full">
+                      <Image
+                        src="/ss/chat.jpg"
+                        alt="AI chat interface with document context and reasoning toggles"
+                        width={2200}
+                        height={1700}
+                        className="w-full h-auto object-contain mx-auto"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
+
+            {/* Explore Spotlight */}
+            <div className="max-w-7xl mx-auto mb-32 px-2">
+              <div className="space-y-14">
+                <div className="space-y-7 text-center">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[11px] font-medium tracking-wide uppercase">Discovery Network</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-fuchsia-500/20 border border-fuchsia-400/30 text-fuchsia-300 text-[11px] font-medium tracking-wide uppercase">Smart Recommendations</span>
+                  </div>
+                  <h3 className="text-3xl md:text-5xl font-bold text-white leading-tight tracking-tight max-w-5xl mx-auto">
+                    Explore & Learn From <span className="text-emerald-400">Shared Knowledge</span>
+                  </h3>
+                  <p className="text-gray-300 text-lg leading-relaxed max-w-4xl mx-auto">
+                    Browse a living library of publicly shared study documents—organized by subjects, fields, and emerging topics. Our recommendation engine analyzes your uploaded materials & interests to surface high‑value, context‑relevant resources and accelerate mastery.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 max-w-6xl mx-auto">
+                    {/* Public Library */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-emerald-500/25 border border-emerald-400/30 flex items-center justify-center text-emerald-200">
+                        <Layers className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Public Knowledge Library</p>
+                        <p className="text-sm text-gray-400 leading-snug">Curated pool of open notes, summaries, and concept packs.</p>
+                      </div>
+                    </div>
+                    {/* Subject Categorization */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-fuchsia-500/25 border border-fuchsia-400/30 flex items-center justify-center text-fuchsia-200">
+                        <Tags className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Subject & Domain Filters</p>
+                        <p className="text-sm text-gray-400 leading-snug">Navigate by discipline, difficulty, recency, or format.</p>
+                      </div>
+                    </div>
+                    {/* Interactive Docs */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-indigo-500/25 border border-indigo-400/30 flex items-center justify-center text-indigo-200">
+                        <Users className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Interactive Community Docs</p>
+                        <p className="text-sm text-gray-400 leading-snug">Open in your workspace to chat, annotate, or extend.</p>
+                      </div>
+                    </div>
+                    {/* Smart Recommendations */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-rose-500/25 border border-rose-400/30 flex items-center justify-center text-rose-200">
+                        <Sparkles className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Personalized Suggestions</p>
+                        <p className="text-sm text-gray-400 leading-snug">Model‑driven relevance based on your study graph & goals.</p>
+                      </div>
+                    </div>
+                    {/* Adaptive Matching */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-cyan-500/25 border border-cyan-400/30 flex items-center justify-center text-cyan-200">
+                        <Compass className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Adaptive Relevance Engine</p>
+                        <p className="text-sm text-gray-400 leading-snug">Learns from usage & performance to refine future picks.</p>
+                      </div>
+                    </div>
+                    {/* Reuse & Remix */}
+                    <div className="flex items-start gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-amber-500/25 border border-amber-400/30 flex items-center justify-center text-amber-200">
+                        <Share2 className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-white">Remix & Extend Content</p>
+                        <p className="text-sm text-gray-400 leading-snug">Clone to your space for custom edits & test generation.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 pt-6">
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Subject clustering</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Personalized picks</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Cross‑domain discovery</span>
+                    <span className="px-3 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-300">Ethical sharing</span>
+                  </div>
+                </div>
+                <div className="relative group max-w-6xl mx-auto">
+                  <div className="absolute -inset-4 bg-gradient-to-tr from-emerald-400/35 via-fuchsia-500/30 to-amber-400/25 rounded-3xl blur-2xl opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                  <div className="relative rounded-3xl overflow-hidden border border-gray-800/70 bg-gray-900/70 backdrop-blur-sm shadow-[0_0_45px_-8px_rgba(16,185,129,0.45)] p-4">
+                    <div className="relative w-full">
+                      <Image
+                        src="/ss/explore.jpg"
+                        alt="Explore public documents with categorized subjects and recommendations"
+                        width={2200}
+                        height={1700}
+                        className="w-full h-auto object-contain mx-auto"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Remaining Feature Grid removed as requested */}
           </div>
         </section>
 

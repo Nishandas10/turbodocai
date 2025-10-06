@@ -9,9 +9,9 @@ export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   return (
-    <header className="sticky top-0 z-50 py-6">
+    <header className="fixed top-0 left-0 right-0 z-50 py-4">
       <div className="container mx-auto px-4 flex justify-center">
-        <div className="bg-gray-900/40 backdrop-blur-md border border-gray-700/50 rounded-full px-10 py-3 flex items-center justify-between max-w-4xl w-full shadow-2xl">
+        <div className="bg-gray-900/55 backdrop-blur-xl border border-gray-700/60 rounded-full px-8 py-2.5 flex items-center justify-between max-w-4xl w-full shadow-lg">
           {/* Logo and Brand */}
           <div className="flex items-center space-x-2">
             <PenTool className="h-5 w-5 text-white" />
@@ -70,7 +70,7 @@ export default function Navbar() {
 
       {/* Mobile Menu */}
       {isMenuOpen && (
-        <div className="absolute top-full left-0 right-0 bg-gray-900/95 backdrop-blur-md border-b border-gray-800">
+        <div className="absolute top-full left-0 right-0 bg-gray-950/95 backdrop-blur-xl border-b border-gray-800/70 shadow-xl">
           <div className="container mx-auto px-4 py-4 space-y-4">
             <Link
               href="#features"
