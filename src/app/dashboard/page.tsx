@@ -17,7 +17,6 @@ import {
   ArrowUp,
   Plus,
   Box,
-  ChevronRight,
   MoreHorizontal,
   X,
   Brain,
@@ -867,10 +866,6 @@ export default function Dashboard() {
           <div className="max-w-6xl mx-auto mt-10">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-foreground">Spaces</h2>
-              <button className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/15">
-                <span>Practice with exams</span>
-                <ChevronRight className="h-4 w-4" />
-              </button>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {spaces.map((sp) => (
