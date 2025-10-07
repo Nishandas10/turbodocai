@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowUp, Loader2, ChevronDown, AtSign, Mic, X, Globe, Brain } from "lucide-react";
+import dynamic from 'next/dynamic';
 import useSpeechToText from "@/hooks/useSpeechToText";
 import { useAuth } from "@/contexts/AuthContext";
 import { functions, db } from "@/lib/firebase";
@@ -20,6 +21,7 @@ import {
 	setDoc,
 } from "firebase/firestore";
 import DashboardSidebar from "@/components/DashboardSidebar";
+const MarkdownMessage = dynamic(() => import('@/components/MarkdownMessage'), { ssr: false });
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 type ChatMessage = {
@@ -274,21 +276,25 @@ export default function ChatPage() {
 							Start your conversation.
 						</div>
 					) : (
-						<div className="space-y-6">
-							{messages.map((m) => (
-								<div key={m.id} className="flex">
-									<div
-										className={
-											m.role === "user"
-												? "ml-auto bg-primary text-primary-foreground px-4 py-2 rounded-2xl rounded-tr-sm max-w-[80%]"
-											: "mr-auto bg-muted text-foreground px-4 py-2 rounded-2xl rounded-tl-sm max-w-[80%]"
-										}
-									>
-										<div className="whitespace-pre-wrap">
+						<div className="space-y-8">
+							{messages.map((m, i) => (
+								<div key={m.id} className="flex w-full">
+									{m.role === 'assistant' ? (
+										<div className="w-full">
+											{i > 0 && messages[i-1]?.role === 'assistant' && (
+												<div className="border-t border-border/30 mb-8"></div>
+											)}
+											<div className="w-full leading-relaxed">
+												<MarkdownMessage content={m.content} />
+												{m.streaming ? <span className="animate-pulse ml-1">█</span> : null}
+											</div>
+										</div>
+									) : (
+										<div className="ml-auto bg-primary text-primary-foreground px-4 py-3 rounded-2xl rounded-tr-sm max-w-[75%] whitespace-pre-wrap text-sm shadow-sm">
 											{m.content}
 											{m.streaming ? <span className="animate-pulse">█</span> : null}
 										</div>
-									</div>
+									)}
 								</div>
 							))}
 							<div ref={endRef} />
