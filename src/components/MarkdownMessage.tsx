@@ -18,6 +18,71 @@ function usePrismHighlight(dep: string) {
   React.useEffect(() => { try { Prism.highlightAll(); } catch {} }, [dep]);
 }
 
+// Function to get contextual emoji for headings
+function getEmojiForHeading(content: string, level: number): string {
+  const text = content.toLowerCase();
+  
+  // Common patterns and their emojis
+  const patterns = [
+    // Tech & Development
+    { keywords: ['api', 'endpoint', 'request', 'response'], emoji: '🔌' },
+    { keywords: ['database', 'db', 'sql', 'query'], emoji: '🗄️' },
+    { keywords: ['code', 'function', 'method', 'implementation'], emoji: '💻' },
+    { keywords: ['bug', 'error', 'fix', 'debug'], emoji: '🐛' },
+    { keywords: ['test', 'testing', 'unit test'], emoji: '🧪' },
+    { keywords: ['deploy', 'deployment', 'production'], emoji: '🚀' },
+    { keywords: ['security', 'auth', 'authentication'], emoji: '🔒' },
+    { keywords: ['performance', 'optimization', 'speed'], emoji: '⚡' },
+    { keywords: ['config', 'configuration', 'settings'], emoji: '⚙️' },
+    
+    // Documentation & Learning
+    { keywords: ['example', 'demo', 'sample'], emoji: '📋' },
+    { keywords: ['tutorial', 'guide', 'how to'], emoji: '📚' },
+    { keywords: ['note', 'notes', 'important'], emoji: '📝' },
+    { keywords: ['tip', 'tips', 'advice'], emoji: '💡' },
+    { keywords: ['warning', 'caution', 'alert'], emoji: '⚠️' },
+    { keywords: ['summary', 'conclusion', 'overview'], emoji: '📊' },
+    { keywords: ['features', 'capabilities'], emoji: '✨' },
+    { keywords: ['benefits', 'advantages'], emoji: '✅' },
+    { keywords: ['requirements', 'prerequisites'], emoji: '📋' },
+    
+    // Process & Workflow
+    { keywords: ['step', 'steps', 'process'], emoji: '👣' },
+    { keywords: ['install', 'installation', 'setup'], emoji: '📦' },
+    { keywords: ['getting started', 'introduction'], emoji: '🎯' },
+    { keywords: ['usage', 'how to use'], emoji: '🛠️' },
+    { keywords: ['troubleshooting', 'problems'], emoji: '🔧' },
+    { keywords: ['solution', 'solutions', 'fix'], emoji: '💡' },
+    { keywords: ['result', 'results', 'output'], emoji: '📈' },
+    
+    // Content Types
+    { keywords: ['question', 'questions', 'faq'], emoji: '❓' },
+    { keywords: ['answer', 'answers', 'response'], emoji: '💬' },
+    { keywords: ['list', 'items', 'options'], emoji: '📝' },
+    { keywords: ['comparison', 'vs', 'versus'], emoji: '⚖️' },
+    { keywords: ['pros', 'cons'], emoji: '📊' },
+    
+    // General Actions
+    { keywords: ['create', 'creating', 'build'], emoji: '🏗️' },
+    { keywords: ['update', 'updating', 'modify'], emoji: '🔄' },
+    { keywords: ['delete', 'remove', 'clean'], emoji: '🗑️' },
+    { keywords: ['add', 'adding', 'include'], emoji: '➕' },
+    { keywords: ['manage', 'management', 'organize'], emoji: '📁' },
+    
+    // Default emojis by heading level
+    { keywords: [''], emoji: level === 1 ? '🎯' : level === 2 ? '📌' : level === 3 ? '💡' : '🔸' }
+  ];
+  
+  // Find the first matching pattern
+  for (const pattern of patterns) {
+    if (pattern.keywords[0] === '' || pattern.keywords.some(keyword => text.includes(keyword))) {
+      return pattern.emoji;
+    }
+  }
+  
+  return level === 1 ? '🎯' : level === 2 ? '📌' : level === 3 ? '💡' : '🔸';
+}
+
 export interface MarkdownMessageProps {
   content: string;
 }
@@ -30,10 +95,46 @@ export default function MarkdownMessage({ content }: MarkdownMessageProps) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
         components={{
-          h1: (p) => <h1 className="text-2xl font-semibold tracking-tight mb-4 mt-8 border-b border-border/30 pb-2 text-white" {...p} />,
-          h2: (p) => <h2 className="text-xl font-semibold tracking-tight border-b border-border/50 pb-2 mb-4 mt-8 text-white" {...p} />,
-          h3: (p) => <h3 className="text-lg font-semibold tracking-tight mb-3 mt-6 text-white" {...p} />,
-          h4: (p) => <h4 className="text-base font-semibold tracking-tight mb-2 mt-4 text-white" {...p} />,
+          h1: (p) => {
+            const content = String(p.children);
+            const emoji = getEmojiForHeading(content, 1);
+            return (
+              <h1 className="text-2xl font-semibold tracking-tight mb-4 mt-8 border-b border-border/30 pb-2 text-white" {...p}>
+                {emoji && <span className="mr-2">{emoji}</span>}
+                {p.children}
+              </h1>
+            );
+          },
+          h2: (p) => {
+            const content = String(p.children);
+            const emoji = getEmojiForHeading(content, 2);
+            return (
+              <h2 className="text-xl font-semibold tracking-tight border-b border-border/50 pb-2 mb-4 mt-8 text-white" {...p}>
+                {emoji && <span className="mr-2">{emoji}</span>}
+                {p.children}
+              </h2>
+            );
+          },
+          h3: (p) => {
+            const content = String(p.children);
+            const emoji = getEmojiForHeading(content, 3);
+            return (
+              <h3 className="text-lg font-semibold tracking-tight mb-3 mt-6 text-white" {...p}>
+                {emoji && <span className="mr-2">{emoji}</span>}
+                {p.children}
+              </h3>
+            );
+          },
+          h4: (p) => {
+            const content = String(p.children);
+            const emoji = getEmojiForHeading(content, 4);
+            return (
+              <h4 className="text-base font-semibold tracking-tight mb-2 mt-4 text-white" {...p}>
+                {emoji && <span className="mr-2">{emoji}</span>}
+                {p.children}
+              </h4>
+            );
+          },
           p: (p) => <p className="mb-4 leading-7 text-foreground break-words text-[15px]" style={{ lineHeight: '1.7', letterSpacing: '0.01em' }} {...p} />,
           ul: (p) => <ul className="mb-4 mt-2 space-y-1 pl-6 list-disc marker:text-foreground/60" {...p} />,
           ol: (p) => <ol className="mb-4 mt-2 space-y-1 pl-6 list-decimal marker:text-foreground/60" {...p} />,
