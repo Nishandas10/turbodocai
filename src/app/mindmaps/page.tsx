@@ -1,26 +1,12 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 import { useAuth } from "@/contexts/AuthContext"
 import { createMindMap } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import DashboardSidebar from "@/components/DashboardSidebar"
 import ProtectedRoute from "@/components/ProtectedRoute"
-
-type InputMode = { key: string; label: string; tooltip?: string }
-
-const INPUT_MODES: InputMode[] = [
-	{ key: "prompt", label: "Simple Prompt" },
-	{ key: "doc", label: "PDF / Doc", tooltip: "Upload a document (coming soon)" },
-	{ key: "long", label: "Long Text" },
-	{ key: "website", label: "Website" },
-	{ key: "youtube", label: "YouTube" },
-	{ key: "image", label: "Image" },
-]
-
-const LANGUAGES = ["English", "Español", "Deutsch", "Français", "हिंदी", "中文"]
 
 const EXAMPLE_PROMPTS = [
 	{
@@ -41,20 +27,23 @@ const EXAMPLE_PROMPTS = [
 ]
 
 export default function MindmapsPage() {
-	const [mode, setMode] = useState<string>(INPUT_MODES[0].key)
-	const [language, setLanguage] = useState<string>(LANGUAGES[0])
 	const [prompt, setPrompt] = useState<string>("")
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
-		const { user } = useAuth()
+	const { user } = useAuth()
 	const router = useRouter()
-			const [searchModalOpen, setSearchModalOpen] = useState(false)
-			const [searchQuery, setSearchQuery] = useState("")
-
-// Mind map listener removed; history not displayed in shared sidebar version.
+	const [searchModalOpen, setSearchModalOpen] = useState(false)
+	const [searchQuery, setSearchQuery] = useState("")
+	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
 	function handleExample(p: string) {
 		setPrompt(p)
+		requestAnimationFrame(() => {
+			if (textareaRef.current) {
+				textareaRef.current.focus()
+				textareaRef.current.selectionStart = textareaRef.current.selectionEnd = p.length
+			}
+		})
 	}
 
 	async function handleGenerate() {
@@ -70,10 +59,9 @@ export default function MindmapsPage() {
 			const mindMapId = await createMindMap(user.uid, {
 				title,
 				prompt,
-				language,
-				mode,
+				language: 'English',
+				mode: 'prompt'
 			})
-			// Navigate to the mind map detail page where real-time generation will appear
 			router.push(`/mindmaps/${mindMapId}`)
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "message" in e) {
@@ -89,13 +77,11 @@ export default function MindmapsPage() {
 	return (
 		<ProtectedRoute>
 		<div className="h-screen bg-background flex overflow-hidden">
-			{/* Reused Dashboard Sidebar */}
 			<DashboardSidebar 
 				onSearchClick={() => setSearchModalOpen(true)} 
 				onAddContentClick={() => router.push('/dashboard')} 
 			/>
 
-			{/* Main area */}
 			<div className="flex-1 flex flex-col items-center px-4 pb-24 pt-10 md:pt-14 overflow-y-auto">
 				<div className="w-full max-w-5xl mx-auto">
 					<div className="text-center space-y-5 mb-8">
@@ -106,55 +92,21 @@ export default function MindmapsPage() {
 						</h1>
 						<p className="text-muted-foreground max-w-2xl mx-auto text-sm md:text-base">
 							Generate ideas into clear, engaging mind maps in seconds. Start with a
-							simple prompt or paste long content, documents, videos, or webpages – we
+							simple prompt or paste long content– we
 							structure it for you.
 						</p>
 					</div>
 
-					<div className="flex flex-wrap gap-2 justify-center mb-6">
-						{INPUT_MODES.map((m) => {
-							const active = m.key === mode
-							return (
-								<button
-									key={m.key}
-									onClick={() => setMode(m.key)}
-									className={cn(
-										"rounded-full border px-4 py-1.5 text-sm font-medium transition-colors",
-										active
-											? "bg-gradient-to-r from-fuchsia-500 to-indigo-500 text-white border-transparent shadow"
-											: "bg-background hover:bg-accent text-foreground"
-									)}
-									title={m.tooltip}
-								>
-									{m.label}
-								</button>
-							)
-						})}
-					</div>
-
 					<div className="relative bg-background border rounded-xl shadow-sm overflow-hidden mb-10">
 						<textarea
+							ref={textareaRef}
 							className="w-full resize-none bg-transparent outline-none p-5 pb-14 text-sm md:text-base min-h-[220px] leading-relaxed placeholder:text-muted-foreground/60"
 							placeholder="Describe what you want to generate."
 							value={prompt}
 							onChange={(e) => setPrompt(e.target.value)}
 						/>
 
-						<div className="absolute left-0 right-0 bottom-0 flex items-center justify-between px-4 py-3 bg-gradient-to-t from-background via-background/95 to-background/40 backdrop-blur-sm border-t">
-							<div className="flex items-center gap-2">
-								<select
-									value={language}
-									onChange={(e) => setLanguage(e.target.value)}
-									className="bg-secondary/70 dark:bg-secondary/30 border border-input rounded-md px-2.5 py-1 text-xs md:text-sm outline-none focus:ring-2 focus:ring-ring"
-								>
-									{LANGUAGES.map((l) => (
-										<option key={l}>{l}</option>
-									))}
-								</select>
-								<div className="hidden md:block text-xs text-muted-foreground">
-									Mode: <span className="font-medium capitalize">{mode}</span>
-								</div>
-							</div>
+						<div className="absolute left-0 right-0 bottom-0 flex items-center justify-end px-4 py-3 bg-gradient-to-t from-background via-background/95 to-background/40 backdrop-blur-sm border-t">
 							<Button
 								onClick={handleGenerate}
 								disabled={loading}
@@ -203,11 +155,6 @@ export default function MindmapsPage() {
 								</button>
 							))}
 						</div>
-						<p className="text-xs text-muted-foreground/70 pt-2">
-							More input types & mind map editor coming soon. This page currently
-							demonstrates the UI – connect it to your generation API to enable
-							full functionality.
-						</p>
 					</div>
 				</div>
 			</div>

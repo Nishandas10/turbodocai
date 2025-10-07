@@ -267,16 +267,16 @@ export const MindMapGraph: React.FC<Props> = ({ structure, loading, error }) => 
 		<div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-background/80 backdrop-blur px-3 py-1.5 rounded-full border shadow-sm">
 			<button onClick={()=>setShowStyle(s=>!s)} className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted transition">Style</button>
 			<button onClick={()=>rf?.fitView({padding:0.2})} className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted">Fit</button>
-			<select value={layoutMode} onChange={e=>setLayoutMode(e.target.value as LayoutMode)} className="text-[11px] px-2 py-1 rounded-md border bg-transparent">
-				<option value="logical">Logical</option>
-				<option value="logical-left">Logical (Left)</option>
-				<option value="mindmap">Mind Map</option>
-				<option value="organization">Org</option>
-				<option value="catalog">Catalog</option>
-				<option value="timeline">Timeline</option>
-				<option value="vertical-timeline">Vertical Timeline</option>
-				<option value="fishbone">Fishbone</option>
-			</select>
+			<select value={layoutMode} onChange={e=>setLayoutMode(e.target.value as LayoutMode)} className="text-[11px] px-2 py-1 rounded-md border bg-background/90 hover:bg-background focus:bg-background focus:outline-none focus:ring-2 focus:ring-indigo-500 transition shadow-sm appearance-none pr-6 relative">
+              <option className="bg-background text-foreground" value="logical">Logical</option>
+              <option className="bg-background text-foreground" value="logical-left">Logical (Left)</option>
+              <option className="bg-background text-foreground" value="mindmap">Mind Map</option>
+              <option className="bg-background text-foreground" value="organization">Org</option>
+              <option className="bg-background text-foreground" value="catalog">Catalog</option>
+              <option className="bg-background text-foreground" value="timeline">Timeline</option>
+              <option className="bg-background text-foreground" value="vertical-timeline">Vertical Timeline</option>
+              <option className="bg-background text-foreground" value="fishbone">Fishbone</option>
+            </select>
 		</div>
 		{showStyle && <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-[520px] max-w-[92%] bg-background/95 backdrop-blur-xl rounded-2xl border shadow-xl p-5">
 			<h4 className="text-xs font-semibold mb-3 tracking-wide text-muted-foreground">Style</h4>
