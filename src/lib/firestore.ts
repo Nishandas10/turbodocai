@@ -643,6 +643,21 @@ export const listenToUserChats = (
   );
 };
 
+// Update a chat (e.g., rename or adjust language/context docs)
+export const updateChat = async (
+  chatId: string,
+  updates: Partial<Pick<Chat, "title" | "language" | "contextDocIds">>
+): Promise<void> => {
+  const ref = doc(db, COLLECTIONS.CHATS, chatId);
+  await updateDoc(ref, { ...updates, updatedAt: Timestamp.now() });
+};
+
+// Delete a chat
+export const deleteChat = async (chatId: string): Promise<void> => {
+  const ref = doc(db, COLLECTIONS.CHATS, chatId);
+  await deleteDoc(ref);
+};
+
 // ===== EXPLORE (PUBLIC) OPERATIONS =====
 
 export interface PublicDocumentMeta {
@@ -749,6 +764,12 @@ export const updateMindMap = async (
     updatedAt: Timestamp.now(),
     lastAccessed: Timestamp.now(),
   });
+};
+
+// Hard delete a mind map
+export const deleteMindMap = async (mindMapId: string): Promise<void> => {
+  const ref = doc(db, COLLECTIONS.MINDMAPS, mindMapId);
+  await deleteDoc(ref);
 };
 
 export const getMindMaps = async (

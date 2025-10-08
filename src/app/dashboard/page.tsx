@@ -927,7 +927,12 @@ export default function Dashboard() {
           <div className="max-w-6xl mx-auto mt-10">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-foreground">Recents</h2>
-              <button className="text-sm text-muted-foreground hover:text-foreground">View all</button>
+              <button
+                onClick={() => router.push('/notes')}
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                View all
+              </button>
             </div>
 
             {recentDocs.length === 0 ? (

@@ -1,13 +1,11 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { FileText, Plus, MoreVertical, Mic, Play, Lock, Unlock, Box } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { FileText, MoreVertical, Mic, Play, Lock, Unlock, Box } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import DashboardSidebar from "@/components/DashboardSidebar"
-import { listenToUserDocuments, createDocument, updateDocumentStorageInfo, listenToUserSpaces, updateDocument, deleteDocument, listenToMindMaps, listenToUserChats } from "@/lib/firestore"
-import { uploadDocument } from "@/lib/storage"
+import { listenToUserDocuments, listenToUserSpaces, updateDocument, deleteDocument, listenToMindMaps, listenToUserChats } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType, MindMap, Chat } from "@/lib/types"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import Image from 'next/image'
@@ -15,12 +13,13 @@ import Image from 'next/image'
 export default function NotesPage() {
     const { user } = useAuth()
     const [documents, setDocuments] = useState<UserDoc[]>([])
-    const [creating, setCreating] = useState(false)
     const [spaces, setSpaces] = useState<SpaceType[]>([])
     const [mindmaps, setMindmaps] = useState<MindMap[]>([])
     const [chats, setChats] = useState<Chat[]>([])
 
-    type CombinedItem = { id: string; kind: 'document' | 'mindmap' | 'chat'; createdAtMs: number; ref: UserDoc | MindMap | Chat }
+  type CombinedItem = { id: string; kind: 'document' | 'mindmap' | 'chat'; createdAtMs: number; ref: UserDoc | MindMap | Chat }
+
+  const [filter, setFilter] = useState<'all' | 'document' | 'mindmap' | 'chat'>('all')
 
     const combinedItems = useMemo<CombinedItem[]>(() => {
       // Accept unknown timestamp-like values (Firestore Timestamp, Date, number, string)
@@ -37,6 +36,11 @@ export default function NotesPage() {
       const ch: CombinedItem[] = chats.map(c => ({ id: c.id, kind: 'chat', createdAtMs: toMs(c.createdAt), ref: c }))
       return [...docs, ...mms, ...ch].sort((a,b) => b.createdAtMs - a.createdAtMs)
     }, [documents, mindmaps, chats])
+
+    const filteredItems = useMemo(() => {
+      if (filter === 'all') return combinedItems
+      return combinedItems.filter(i => i.kind === filter)
+    }, [combinedItems, filter])
 
     // listeners
     useEffect(() => {
@@ -63,30 +67,6 @@ export default function NotesPage() {
       return () => { try { unsub() } catch {} }
     }, [user?.uid])
 
-    const createNewNote = async () => {
-      if (!user?.uid || creating) return
-      try {
-        setCreating(true)
-        const documentData = {
-          title: 'Untitled Document',
-          type: 'text' as const,
-          content: { raw: '', processed: '' },
-          metadata: { fileName: 'Untitled Document.txt', fileSize: 0, mimeType: 'text/plain' },
-          tags: ['blank-document'],
-          isPublic: false,
-        }
-        const documentId = await createDocument(user.uid, documentData)
-        const txtFile = new File([''], 'Untitled Document.txt', { type: 'text/plain' })
-        const uploadResult = await uploadDocument(txtFile, user.uid, documentId)
-        if (uploadResult.success) {
-          await updateDocumentStorageInfo(documentId, user.uid, uploadResult.storagePath!, uploadResult.downloadURL!)
-        }
-        window.location.href = `/notes/${documentId}`
-      } catch (e) {
-        console.error('Create note failed', e)
-        alert('Failed to create note')
-      } finally { setCreating(false) }
-    }
 
     const relativeTime = (date: unknown) => {
       try {
@@ -141,26 +121,47 @@ export default function NotesPage() {
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="px-6 pt-6 pb-3 flex items-center justify-between">
               <h1 className="text-2xl font-semibold">Notes</h1>
-              <div className="flex items-center gap-2">
-                <Button onClick={createNewNote} disabled={creating} variant="default">
-                  <Plus className="h-4 w-4 mr-1" /> New Doc
-                </Button>
-              </div>
+              {/* New document creation removed as requested */}
             </div>
             <div className="flex-1 overflow-y-auto px-6 pb-10">
-              <div className="flex items-center justify-between mb-4 mt-2">
-                <h2 className="text-lg font-semibold">All Items</h2>
-                <span className="text-xs text-muted-foreground">{combinedItems.length} total</span>
+              <div className="flex flex-col gap-3 mb-4 mt-2">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold">All Items</h2>
+                  <span className="text-xs text-muted-foreground">{filteredItems.length} shown • {combinedItems.length} total</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(['all','document','mindmap','chat'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={()=> setFilter(f)}
+                      className={`px-3 py-1 text-xs rounded-full border transition-colors ${filter===f ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted border-border'}`}
+                    >
+                      {f === 'document' ? 'Docs' : f === 'mindmap' ? 'Maps' : f === 'chat' ? 'Chats' : 'All'}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {combinedItems.map(item => {
+                {filteredItems.map(item => {
                   if (item.kind === 'document') {
                     const note = item.ref as UserDoc
                     return (
                       <div key={`doc-${note.id}`} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative">
-                        <div className="relative h-32 bg-muted flex items-center justify-center" onClick={() => window.location.href = `/notes/${note.id}`}>        
-                          {renderPreview(note)}
+                        <div className="relative h-32 bg-background flex items-center justify-center overflow-hidden" onClick={() => window.location.href = `/notes/${note.id}`}>        
+                          {/* Show content preview by default, fallback to icon if no content */}
+                          {(note.summary || note.content?.processed || note.content?.raw) ? (
+                            <div className="absolute inset-0 bg-background flex items-center justify-center p-3">
+                              <p className="text-xs text-foreground line-clamp-4 text-center leading-relaxed">
+                                {(note.summary || note.content?.processed || note.content?.raw || '').substring(0, 200)}...
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="absolute inset-0 bg-muted flex items-center justify-center">
+                              {renderPreview(note)}
+                            </div>
+                          )}
                           <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5 max-w-[60%] truncate">{(note.spaceId && spaces.find(s=>s.id===note.spaceId)?.name) || 'No Space'}</span>
+                          <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-blue-600 text-white font-medium">Doc</span>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
@@ -194,7 +195,6 @@ export default function NotesPage() {
                               <DropdownMenuItem className="text-destructive" onSelect={(e)=>{ e.preventDefault(); deleteDocPermanently(note) }}>Delete</DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
-                          <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-blue-600 text-white font-medium">Doc</span>
                         </div>
                         <div className="p-4" onClick={() => window.location.href = `/notes/${note.id}`}>        
                           <p className="font-medium text-card-foreground truncate mb-1" title={note.title}>{note.title || 'Untitled'}</p>
@@ -206,41 +206,109 @@ export default function NotesPage() {
                   if (item.kind === 'mindmap') {
                     const mm = item.ref as MindMap
                     return (
-                      <div key={`mm-${mm.id}`} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-purple-500 transition-colors cursor-pointer relative" onClick={()=> window.location.href=`/mindmaps/${mm.id}` }>
-                        <div className="p-4 h-32 flex flex-col justify-between bg-gradient-to-br from-purple-500/10 to-purple-800/10">
+                      <div key={`mm-${mm.id}`} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-purple-500 transition-colors cursor-pointer relative" >
+                        {/* Preview area with content */}
+                        <div className="relative h-32 bg-gradient-to-br from-purple-500/10 to-purple-800/10 flex items-center justify-center overflow-hidden" onClick={()=> window.location.href=`/mindmaps/${mm.id}` }>
                           <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-purple-600 text-white font-medium">Map</span>
-                          <div>
-                            <p className="font-medium truncate mb-1">{mm.title || 'Untitled Mindmap'}</p>
-                            <p className="text-xs text-muted-foreground mb-2">{relativeTime(mm.createdAt)}</p>
+                          {/* Show mindmap prompt as preview content */}
+                          <div className="p-3 text-center">
+                            <p className="text-xs text-muted-foreground/80 line-clamp-3 break-words">
+                              {mm.prompt || 'Mind map visualization'}
+                            </p>
                           </div>
-                          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                            <span className="px-2 py-0.5 rounded-full bg-background/70 border border-border">{mm.status}</span>
-                            {mm.language && <span className="opacity-70">{mm.language}</span>}
+                        </div>
+                        {/* Title and metadata area */}
+                        <div className="p-4" onClick={()=> window.location.href=`/mindmaps/${mm.id}` }>
+                          <p className="font-medium truncate mb-1">{mm.title || 'Untitled Mindmap'}</p>
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{relativeTime(mm.createdAt)}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-full bg-background/70 border border-border text-[10px]">{mm.status}</span>
+                              {mm.language && <span className="opacity-70 text-[10px]">{mm.language}</span>}
+                            </div>
                           </div>
+                        </div>
+                        <div className="absolute inset-0">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                                onClick={(e) => { e.stopPropagation() }}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" onClick={(e)=> e.stopPropagation()} className="w-40">
+                              <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); const title = prompt('Rename mindmap', mm.title || ''); if(title && title!==mm.title){ /* lazy import updateMindMap */ import('@/lib/firestore').then(m=> m.updateMindMap(mm.userId, mm.id, { title })).catch(console.error) } }}>Rename</DropdownMenuItem>
+                              <DropdownMenuItem className="text-destructive" onSelect={(e)=>{ e.preventDefault(); if(confirm('Delete this mindmap?')){ import('@/lib/firestore').then(m=> m.deleteMindMap(mm.id)).catch(console.error) } }}>Delete</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
                     )
                   }
                   const chat = item.ref as Chat
                   return (
-                    <div key={`chat-${chat.id}`} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-green-500 transition-colors cursor-pointer relative" onClick={()=> window.location.href=`/chat/${chat.id}` }>
-                      <div className="p-4 h-32 flex flex-col justify-between bg-gradient-to-br from-green-500/10 to-emerald-800/10">
+                    <div key={`chat-${chat.id}`} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-green-500 transition-colors cursor-pointer relative">
+                      {/* Preview area with chat context */}
+                      <div className="relative h-32 bg-gradient-to-br from-green-500/10 to-emerald-800/10 flex items-center justify-center overflow-hidden" onClick={()=> window.location.href=`/chat/${chat.id}` }>
                         <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-green-600 text-white font-medium">Chat</span>
-                        <div>
-                          <p className="font-medium truncate mb-1">{chat.title || 'Chat'}</p>
-                          <p className="text-xs text-muted-foreground mb-2">{relativeTime(chat.createdAt)}</p>
+                        {/* Show chat preview with context info */}
+                        <div className="p-3 text-center">
+                          <div className="text-xs text-muted-foreground/80 space-y-1">
+                            {Array.isArray(chat.contextDocIds) && chat.contextDocIds.length > 0 ? (
+                              <>
+                                <div className="flex items-center justify-center gap-1">
+                                  <FileText className="h-3 w-3" />
+                                  <span>{chat.contextDocIds.length} document{chat.contextDocIds.length > 1 ? 's' : ''}</span>
+                                </div>
+                                <p className="text-[10px] opacity-70">Context-aware conversation</p>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-center gap-1">
+                                  <span>💬</span>
+                                  <span>General chat</span>
+                                </div>
+                                <p className="text-[10px] opacity-70">Open conversation</p>
+                              </>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                          {Array.isArray(chat.contextDocIds) && chat.contextDocIds.length > 0 ? (
-                            <span className="px-2 py-0.5 rounded-full bg-background/70 border border-border">{chat.contextDocIds.length} docs</span>
-                          ) : <span className="opacity-70">No context</span>}
-                          {chat.language && <span className="opacity-70">{chat.language}</span>}
+                      </div>
+                      {/* Title and metadata area */}
+                      <div className="p-4" onClick={()=> window.location.href=`/chat/${chat.id}` }>
+                        <p className="font-medium truncate mb-1">{chat.title || 'Chat'}</p>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{relativeTime(chat.createdAt)}</span>
+                          <div className="flex items-center gap-2">
+                            {Array.isArray(chat.contextDocIds) && chat.contextDocIds.length > 0 ? (
+                              <span className="px-2 py-0.5 rounded-full bg-background/70 border border-border text-[10px]">{chat.contextDocIds.length} docs</span>
+                            ) : <span className="opacity-70 text-[10px]">No context</span>}
+                            {chat.language && <span className="opacity-70 text-[10px]">{chat.language}</span>}
+                          </div>
                         </div>
+                      </div>
+                      <div className="absolute inset-0">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                              onClick={(e) => { e.stopPropagation() }}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" onClick={(e)=> e.stopPropagation()} className="w-40">
+                            <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); const title = prompt('Rename chat', chat.title || ''); if(title && title!==chat.title){ import('@/lib/firestore').then(m=> m.updateChat(chat.id, { title })).catch(console.error) } }}>Rename</DropdownMenuItem>
+                            <DropdownMenuItem className="text-destructive" onSelect={(e)=>{ e.preventDefault(); if(confirm('Delete this chat?')){ import('@/lib/firestore').then(m=> m.deleteChat(chat.id)).catch(console.error) } }}>Delete</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
                   )
                 })}
-                {combinedItems.length === 0 && (
+                {filteredItems.length === 0 && (
                   <div className="col-span-full text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">No items yet.</div>
                 )}
               </div>

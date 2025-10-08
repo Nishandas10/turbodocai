@@ -28,8 +28,8 @@ import {
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
-import { listenToUserDocuments, listenToUserSpaces, updateSpace, deleteSpace } from "@/lib/firestore"
-import type { Document as AppDocument, Space as SpaceType } from "@/lib/types"
+import { listenToUserDocuments, listenToUserSpaces, updateSpace, deleteSpace, listenToMindMaps, listenToUserChats } from "@/lib/firestore"
+import type { Document as AppDocument, Space as SpaceType, MindMap, Chat } from "@/lib/types"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -50,6 +50,8 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
   const [collapsed, setCollapsed] = useState(false)
   const { theme, setTheme } = useTheme()
   const [recents, setRecents] = useState<AppDocument[]>([])
+  const [mindmaps, setMindmaps] = useState<MindMap[]>([])
+  const [chats, setChats] = useState<Chat[]>([])
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const router = useRouter()
   const [searchOpen, setSearchOpen] = useState(false)
@@ -65,6 +67,18 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
       setRecents(docs)
     })
     return unsubscribe
+  }, [user?.uid])
+
+  React.useEffect(() => {
+    if (!user?.uid) return
+    const unsub = listenToMindMaps(user.uid, (maps) => setMindmaps(maps))
+    return unsub
+  }, [user?.uid])
+
+  React.useEffect(() => {
+    if (!user?.uid) return
+    const unsub = listenToUserChats(user.uid, (chs) => setChats(chs))
+    return unsub
   }, [user?.uid])
 
   // Realtime spaces list
@@ -89,6 +103,28 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
       default:
         return <FileText className="h-3.5 w-3.5 text-sidebar-accent-foreground" />
     }
+  }
+
+  const combinedRecents = React.useMemo(() => {
+    type RecentItem = { id: string; kind: 'document' | 'mindmap' | 'chat'; createdAt: number; ref: AppDocument | MindMap | Chat }
+    const toMs = (val: unknown): number => {
+      if (!val) return 0
+      if (val instanceof Date) return val.getTime()
+      if (typeof val === 'object' && val && 'toDate' in (val as Record<string, unknown>)) {
+        try { return (val as { toDate: () => Date }).toDate().getTime() } catch { return 0 }
+      }
+      const t = new Date(val as string | number).getTime(); return isNaN(t) ? 0 : t
+    }
+    const docItems: RecentItem[] = recents.map(d => ({ id: d.id, kind: 'document', createdAt: toMs(d.createdAt), ref: d }))
+    const mapItems: RecentItem[] = mindmaps.map(m => ({ id: m.id, kind: 'mindmap', createdAt: toMs(m.createdAt), ref: m }))
+    const chatItems: RecentItem[] = chats.map(c => ({ id: c.id, kind: 'chat', createdAt: toMs(c.createdAt), ref: c }))
+    return [...docItems, ...mapItems, ...chatItems].sort((a,b)=> b.createdAt - a.createdAt).slice(0,5)
+  }, [recents, mindmaps, chats])
+
+  const renderRecentIcon = (item: { kind: 'document' | 'mindmap' | 'chat'; ref: AppDocument | MindMap | Chat }) => {
+    if (item.kind === 'mindmap') return <GitBranch className="h-3.5 w-3.5 text-sidebar-accent-foreground" />
+    if (item.kind === 'chat') return <span className="h-3.5 w-3.5 inline-flex items-center justify-center text-[10px]">💬</span>
+    return renderTypeIcon((item.ref as AppDocument).type)
   }
 
   return (
@@ -162,30 +198,34 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
             <div className="text-xs uppercase tracking-wide text-sidebar-accent-foreground mb-2 select-none">Recents</div>
           )}
           <div className="space-y-1">
-            {recents.length === 0 ? (
+            {combinedRecents.length === 0 ? (
               <div className={`text-xs ${collapsed ? "text-center" : "pl-2"} text-sidebar-accent-foreground/80 py-1`}>
-                No recent documents
+                No recent items
               </div>
             ) : (
               <>
-                {recents.slice(0,5).map((doc) => (
-                  <Link
-                    key={doc.id}
-                    href={`/notes/${doc.id}`}
-                    className={`flex items-center ${collapsed ? "justify-center gap-0" : "gap-2"} px-2 py-2 rounded-md hover:bg-sidebar-accent`}
-                    title={doc.title || "Untitled"}
-                  >
-                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-sm bg-sidebar-primary/10">
-                      {renderTypeIcon(doc.type)}
-                    </span>
-                    {!collapsed && (
-                      <span className="text-sm text-sidebar-foreground truncate">
-                        {doc.title || "Untitled"}
+                {combinedRecents.map((item) => {
+                  const href = item.kind === 'document' ? `/notes/${item.id}` : item.kind === 'mindmap' ? `/mindmaps/${item.id}` : `/chat/${item.id}`
+                  const title = item.kind === 'document' ? (item.ref.title || 'Untitled') : item.kind === 'mindmap' ? (item.ref.title || 'Untitled Map') : (item.ref.title || 'Chat')
+                  return (
+                    <Link
+                      key={`${item.kind}-${item.id}`}
+                      href={href}
+                      className={`flex items-center ${collapsed ? "justify-center gap-0" : "gap-2"} px-2 py-2 rounded-md hover:bg-sidebar-accent`}
+                      title={title}
+                    >
+                      <span className="inline-flex items-center justify-center h-5 w-5 rounded-sm bg-sidebar-primary/10">
+                        {renderRecentIcon(item)}
                       </span>
-                    )}
-                  </Link>
-                ))}
-                {recents.length > 5 && !collapsed && (
+                      {!collapsed && (
+                        <span className="text-sm text-sidebar-foreground truncate">
+                          {title}
+                        </span>
+                      )}
+                    </Link>
+                  )
+                })}
+                { (recents.length + mindmaps.length + chats.length) > 5 && !collapsed && (
                   <Link href="/notes" className="flex items-center gap-2 px-2 py-2 rounded-md text-sidebar-accent-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent text-sm">
                     <span className="inline-flex h-4 w-4 items-center justify-center">›</span>
                     <span>Show More</span>
