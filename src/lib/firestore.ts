@@ -14,18 +14,17 @@ import {
   Timestamp,
   writeBatch,
   onSnapshot,
-  DocumentData,
-  QuerySnapshot,
-  Unsubscribe,
+  type QuerySnapshot,
+  type DocumentData,
+  type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "./firebase";
 import {
   UserProfile,
   Document,
-  ProcessingTask,
-  UserAnalytics,
   CreateDocumentData,
   UpdateDocumentData,
+  ProcessingTask,
+  UserAnalytics,
   MindMap,
   CreateMindMapData,
   UpdateMindMapData,
@@ -33,7 +32,9 @@ import {
   CreateSpaceData,
   SpaceTest,
   CreateSpaceTestData,
+  Chat,
 } from "./types";
+import { db } from "./firebase";
 
 // Collection names
 const COLLECTIONS = {
@@ -42,6 +43,7 @@ const COLLECTIONS = {
   PROCESSING_QUEUE: "processing_queue",
   USER_ANALYTICS: "user_analytics",
   MINDMAPS: "mindmaps",
+  CHATS: "chats",
   SPACES: "spaces",
   TESTS: "tests",
 } as const;
@@ -609,6 +611,36 @@ export const listenToProcessingQueue = (
     })) as ProcessingTask[];
     callback(tasks);
   });
+};
+
+/**
+ * Listen to user chats in real-time (top-level collection /chats filtered by userId)
+ */
+export const listenToUserChats = (
+  userId: string,
+  callback: (chats: Chat[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe => {
+  const chatsRef = collection(db, COLLECTIONS.CHATS);
+  const q = query(
+    chatsRef,
+    where("userId", "==", userId),
+    orderBy("updatedAt", "desc")
+  );
+  return onSnapshot(
+    q,
+    (snapshot: QuerySnapshot<DocumentData>) => {
+      const chats = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Chat[];
+      callback(chats);
+    },
+    (err) => {
+      if (onError) onError(err);
+      else console.error("listenToUserChats error", err);
+    }
+  );
 };
 
 // ===== EXPLORE (PUBLIC) OPERATIONS =====

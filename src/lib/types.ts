@@ -173,6 +173,27 @@ export interface UpdateMindMapData {
   errorMessage?: string;
 }
 
+// Chat Types (top-level collection: /chats/{chatId})
+export interface Chat {
+  id: string;
+  userId: string;
+  title: string;
+  language: string;
+  model?: string;
+  contextDocIds?: string[]; // document ids attached for context
+  createdAt: Timestamp | Date; // functions create with Date(), client may read as Timestamp
+  updatedAt: Timestamp | Date;
+  lastAccessed?: Timestamp | Date;
+}
+
+export interface UpdateChatData {
+  title?: string;
+  language?: string;
+  model?: string;
+  contextDocIds?: string[];
+  lastAccessed?: Timestamp | Date;
+}
+
 // Space/Workspace Types
 export interface Space {
   id: string;
