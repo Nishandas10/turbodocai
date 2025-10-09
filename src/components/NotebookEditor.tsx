@@ -9,6 +9,8 @@ import EditorConfig from './editor/EditorConfig'
 import LexicalToolbar from './editor/LexicalToolbar'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { FORMAT_TEXT_COMMAND, TextFormatType, $getSelection, $isRangeSelection, $createTextNode, $getRoot, $createParagraphNode } from 'lexical'
+import { $createHeadingNode } from '@lexical/rich-text'
+import { $createListNode, $createListItemNode } from '@lexical/list'
 import { TOGGLE_LINK_COMMAND, $createLinkNode } from '@lexical/link'
 import { getDocument as getFirestoreDocument, updateDocument as updateFirestoreDocument } from '@/lib/firestore'
 import { generateDocumentSummaryWithRetry } from '@/lib/ragService'
@@ -330,52 +332,105 @@ function SummaryInjector({ summary }: { summary: string }) {
   const [editor] = useLexicalComposerContext()
   const lastInjected = useRef<string>('')
 
+  // Helper: parse plain summary (possibly markdown-ish) to structured tokens
+  const parseSummary = useCallback((text: string) => {
+    const lines = text.split(/\n+/).map(l => l.trimEnd()).filter(l => l.length)
+    interface Block { type: 'heading' | 'ol' | 'ul' | 'p'; level?: number; items?: string[]; text?: string }
+    const blocks: Block[] = []
+    let currentList: Block | null = null
+    const flush = () => { if (currentList) { blocks.push(currentList); currentList = null } }
+
+    for (const raw of lines) {
+      const line = raw.trim()
+      const h = /^(#{1,6})\s+(.*)$/.exec(line)
+      if (h) { flush(); blocks.push({ type: 'heading', level: h[1].length, text: h[2].trim() }); continue }
+      const ol = /^\d+[\.)]\s+(.*)$/.exec(line)
+      if (ol) { if (!currentList || currentList.type !== 'ol') { flush(); currentList = { type: 'ol', items: [] } } currentList.items!.push(ol[1].trim()); continue }
+      const ul = /^[-*+]\s+(.*)$/.exec(line)
+      if (ul) { if (!currentList || currentList.type !== 'ul') { flush(); currentList = { type: 'ul', items: [] } } currentList.items!.push(ul[1].trim()); continue }
+      flush(); blocks.push({ type: 'p', text: line })
+    }
+    flush(); return blocks
+  }, [])
+
+  // Build text nodes with inline bold support from **markdown** and label: patterns
+  const buildRichTextNodes = (text: string) => {
+    const nodes: any[] = []
+    if (!text) return nodes
+    // Prefer explicit **bold** segments if balanced
+    if (text.includes('**')) {
+      const parts = text.split('**')
+      const balanced = parts.length % 2 === 1
+      for (let i = 0; i < parts.length; i++) {
+        const seg = parts[i]
+        if (!seg) continue
+        const tn = $createTextNode(seg)
+        if (balanced && i % 2 === 1) { try { (tn as any).setFormat?.('bold'); } catch { /* TS typing differences */ } (tn as any).__bold = true }
+        nodes.push(tn)
+      }
+      if (nodes.length) return nodes
+    }
+    // Fallback: Boldify leading label like "Key Points:"
+    const m = /^(?:([A-Z][A-Za-z\s]{1,30}?):)\s+(.*)$/.exec(text)
+    if (m) {
+      const bold = $createTextNode(`${m[1]}: `); try { (bold as any).setFormat?.('bold') } catch {}
+      nodes.push(bold)
+      nodes.push($createTextNode(m[2]))
+      return nodes
+    }
+    nodes.push($createTextNode(text))
+    return nodes
+  }
+
   useEffect(() => {
     if (!summary || summary === lastInjected.current) return
     editor.update(() => {
       const root = $getRoot()
+      // If already has a node annotated with data-summary-root, abort to prevent duplicates
+      const existing = (root.getChildren() as any[]).find(c => { try { return c.getLatest().__summaryInjected } catch { return false } })
+      if (existing) { lastInjected.current = summary; return }
+
       let placeholderParent: any = null
-
       const findPlaceholder = (node: any) => {
-        if (node == null) return
+        if (!node) return
         if (typeof node.getTextContent === 'function') {
-          try {
-            if (node.getTextContent() === 'Show here') {
-              placeholderParent = node.getParent() || node
-              return
-            }
-          } catch {/* ignore */}
+          try { if (node.getTextContent() === 'Show here') { placeholderParent = node.getParent() || node; return } } catch {}
         }
-        if (typeof node.getChildren === 'function') {
-          const children = node.getChildren()
-          for (const child of children) {
-            if (!placeholderParent) findPlaceholder(child)
-          }
-        }
+        if (typeof node.getChildren === 'function') node.getChildren().forEach((ch: any) => { if (!placeholderParent) findPlaceholder(ch) })
       }
-
       root.getChildren().forEach(findPlaceholder)
 
-      // Build paragraph nodes from summary
-      const paragraphs = summary.split(/\n{2,}/).map(block => block.trim()).filter(Boolean)
-      const newNodes = paragraphs.map(text => {
-        const p = $createParagraphNode()
-        p.append($createTextNode(text))
-        return p
+      const blocks = parseSummary(summary)
+      const newNodes: any[] = []
+
+      // local factories
+      const createHeading = $createHeadingNode
+      const createList = $createListNode
+      const createListItem = $createListItemNode
+
+      blocks.forEach(b => {
+        if (b.type === 'heading' && createHeading) {
+          const lvl = Math.min(Math.max(b.level || 1,1),6) as 1|2|3|4|5|6
+          const tag = (`h${lvl}`) as any
+          const node = createHeading(tag)
+          ;(buildRichTextNodes(b.text || '')).forEach(n => node.append(n))
+          newNodes.push(node)
+        } else if ((b.type === 'ol' || b.type === 'ul')) {
+          const listNode = createList(b.type === 'ol' ? 'number' : 'bullet')
+          ;(b.items || []).forEach(it => { const li = createListItem(); (buildRichTextNodes(it)).forEach(n => li.append(n)); listNode.append(li) })
+          newNodes.push(listNode)
+        } else { // paragraph
+          const p = $createParagraphNode(); (buildRichTextNodes(b.text || '')).forEach(n => p.append(n)); newNodes.push(p)
+        }
       })
 
-      if (placeholderParent) {
-        // Replace placeholder parent's position with new nodes
-        const insertAfter = placeholderParent
-        newNodes.reverse().forEach(n => insertAfter.insertAfter(n))
-        placeholderParent.remove()
-      } else {
-        // Append at end
-        newNodes.forEach(n => root.append(n))
-      }
+      if (newNodes.length) { try { (newNodes[0] as any).__summaryInjected = true } catch {} }
+
+      if (placeholderParent) { const anchor = placeholderParent; newNodes.reverse().forEach(n => anchor.insertAfter(n)); placeholderParent.remove() } else { newNodes.forEach(n => root.append(n)) }
+
       lastInjected.current = summary
     })
-  }, [summary, editor])
+  }, [summary, editor, parseSummary])
 
   return null
 }

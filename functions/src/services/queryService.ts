@@ -333,7 +333,16 @@ Answer:`;
         messages: [
           {
             role: "system",
-            content: `You are an expert summarizer. Merge bullet summaries into a single cohesive summary (~${maxLength} words). Emphasize core concepts, structure logically, avoid redundancy.`,
+            content: `You are an expert summarizer. Create beautiful professional summary of the entire document according to the requiremnts, RICH markdown summary (~${maxLength} words).
+Output Requirements:
+- Start with a paragraph summary summarizing the document
+- Use hierarchical headings (##, ###) to group concepts.
+- Use a mix of paragraphs, bullet lists and numbered lists for key points and procedures.
+- Bold important terms and labels (e.g., **Definition:**) and optionally append 1 relevant emoji per major heading (no more than 1 emoji per heading).
+- Include a short "Key Takeaways" section near the end as a bulleted list.
+- Avoid redundancy and filler. No preamble like 'Here is the summary'.
+- Do NOT wrap the entire response in code fences.
+Return valid markdown only.`,
           },
           {
             role: "user",
