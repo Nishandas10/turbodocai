@@ -160,8 +160,16 @@ function EditorAgentBridge() {
   }, [editor])
 
   const typeText = useCallback((text: string, options?: { delayMs?: number }) => {
-    // Ensure caret at end then stream type
-    editor.update(() => { try { $getRoot().selectEnd() } catch { /* ignore */ } })
+    // Create a fresh paragraph at the end and stream into it
+    editor.update(() => {
+      try {
+        const root = $getRoot()
+        const p = $createParagraphNode()
+        p.append($createTextNode(''))
+        root.append(p)
+        p.selectStart()
+      } catch { /* ignore */ }
+    })
     streamTypeWithCurrentSelection(text, options)
   }, [editor, streamTypeWithCurrentSelection])
 
@@ -173,16 +181,13 @@ function EditorAgentBridge() {
       const children = root.getChildren()
       try {
         if (placement === 'beginning') {
-          if (children.length === 0) {
-            const p = $createParagraphNode(); p.append($createTextNode('')); root.append(p); p.selectStart()
-          } else {
-            const first = children[0] as any
-            if (typeof first.selectStart === 'function') first.selectStart()
-            else if (typeof (root as any).selectStart === 'function') (root as any).selectStart()
-            else root.selectStart?.()
-          }
+          const p = $createParagraphNode(); p.append($createTextNode(''))
+          if (children.length > 0) { children[0].insertBefore(p) } else { root.append(p) }
+          p.selectStart()
         } else if (placement === 'end') {
-          root.selectEnd()
+          const p = $createParagraphNode(); p.append($createTextNode(''))
+          root.append(p)
+          p.selectStart()
         } else if (placement === 'after-heading') {
           let lastHeadingIndex = -1
           children.forEach((child, idx) => { try { if ((child as any).getType?.() === 'heading') lastHeadingIndex = idx } catch {} })
@@ -191,7 +196,9 @@ function EditorAgentBridge() {
             children[lastHeadingIndex].insertAfter(p)
             p.selectStart()
           } else {
-            root.selectEnd()
+            const p = $createParagraphNode(); p.append($createTextNode(''))
+            root.append(p)
+            p.selectStart()
           }
         } else if (placement === 'replace-selection') {
           // Keep current selection as is; streaming will replace via insertText

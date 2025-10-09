@@ -20,7 +20,7 @@ interface ChatMsg {
   role: 'user' | 'assistant'
   text: string
   ts: number
-  placement?: 'beginning' | 'end' | 'after-heading' | 'replace-selection'
+  placement?: 'beginning' | 'end' | 'after-heading'
   awaitingPlacement?: boolean
   originalQuery?: string
 }
@@ -38,12 +38,24 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [sending, setSending] = useState(false)
-  const [streamToDoc] = useState(true)
+  // Removed stream-to-doc toggle; chat mode will not write to the editor
   const [pendingContent, setPendingContent] = useState('')
   const [pendingMessageId, setPendingMessageId] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const userEditedRef = useRef<boolean>(false)
   const userEditTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const storageKey = `aiAssistant:messages:${documentId || 'global'}`
+
+  const isChatMsg = (m: unknown): m is ChatMsg => {
+    if (!m || typeof m !== 'object') return false
+    const obj = m as Partial<ChatMsg>
+    return (
+      typeof obj.id === 'string' &&
+      (obj.role === 'user' || obj.role === 'assistant') &&
+      typeof obj.text === 'string' &&
+      typeof obj.ts === 'number'
+    )
+  }
 
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
     lang: 'en-US',
@@ -62,6 +74,33 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
+
+  // Load persisted messages on mount or when documentId changes
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.filter(isChatMsg)
+          if (sanitized.length) setMessages(sanitized)
+        }
+      }
+    } catch {
+      // ignore malformed storage
+    }
+  }, [storageKey])
+
+  // Persist messages whenever they change
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(storageKey, JSON.stringify(messages))
+      }
+    } catch {
+      // storage quota/full or disabled
+    }
+  }, [messages, storageKey])
 
   // Simple streaming helper to animate text in UI and optionally in editor
   const streamOutput = useCallback(async (full: string, update: (partial: string) => void) => {
@@ -121,12 +160,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     ) {
       return { placement: 'after-heading', isContentRequest: true }
     }
-    if (
-      (lower.includes('replace') || lower.includes('overwrite')) &&
-      (lower.includes('selection') || lower.includes('highlighted'))
-    ) {
-      return { placement: 'replace-selection', isContentRequest: true }
-    }
+    // 'replace selection' placement removed by request
     
     // Check for content creation keywords
     const contentKeywords = ['write', 'add', 'insert', 'create', 'generate', 'include']
@@ -166,13 +200,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
           handlers.insertAfterLastHeading(content + '\n\n')
         }
         break
-      case 'replace-selection':
-        if (handlers.typeTextAtPlacement) {
-          handlers.typeTextAtPlacement(content, 'replace-selection', { delayMs: 16 })
-        } else if (handlers.replaceSelection) {
-          handlers.replaceSelection(content)
-        }
-        break
+      // 'replace-selection' removed
       default:
         // Default to end if no specific placement
         handlers.typeText?.(content + '\n\n', { delayMs: 18 })
@@ -191,65 +219,18 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     setMessages(prev => [...prev, userMsg])
 
     if (mode === 'write') {
-      // In write mode, interpret the user's prompt as instructions, generate content using RAG, then insert it.
-      const intent = parseContentIntent(text)
-
-      // If we can't infer a placement, ask for it first (but still generate content once chosen)
-      if (intent.isContentRequest && !intent.placement) {
-        const askMsg: ChatMsg = {
-          id: `${Date.now()}-ask`,
-          role: 'assistant',
-          text: 'Where would you like me to add this content?',
-          ts: Date.now(),
-          awaitingPlacement: true,
-          originalQuery: text,
-        }
-        setMessages(prev => [...prev, askMsg])
-        // Store the original prompt; we'll generate content once placement is picked
-        setPendingContent(text)
-        setPendingMessageId(askMsg.id)
-        return
+      // Always ask for placement first in write mode
+      const askMsg: ChatMsg = {
+        id: `${Date.now()}-ask`,
+        role: 'assistant',
+        text: 'Where would you like me to add this content?',
+        ts: Date.now(),
+        awaitingPlacement: true,
+        originalQuery: text,
       }
-
-      // We have or will assume a placement; generate content using document context.
-      if (!user?.uid) {
-        const warn: ChatMsg = { id: `${Date.now()}-noauth`, role: 'assistant', text: 'Please sign in to write into your document.', ts: Date.now() }
-        setMessages(prev => [...prev, warn])
-        return
-      }
-
-      setSending(true)
-      const asstId = `${Date.now()}-asst`;
-      setMessages(prev => [...prev, { id: asstId, role: 'assistant', text: 'Generating…', ts: Date.now() }])
-      try {
-        // Build a generation prompt that asks for expository content rather than parroting the instruction
-        const docStructure = getCurrentDocumentStructure()
-        const generationPrompt = `Write a clear, concise section based on this instruction: "${text}".\n\nGuidelines:\n- Follow the document's tone and be factual.\n- Use 2-4 short paragraphs unless a list is better.\n- Avoid prefacing like "as requested".\n- If a topic is specified (e.g., a field like metabolomics), give a brief overview, key concepts, and why it matters.\n\nDocument structure context: ${docStructure.headings.map(h => `H${h.level}:${h.text}`).join(', ') || 'none'}`
-
-        const res = await queryDocuments({ question: generationPrompt, userId: user.uid, documentId })
-        const generated = (res.answer || '').trim() || 'Unable to generate content for that request.'
-
-        // Update sidebar message progressively for feedback
-        await streamOutput(generated, (partial) => {
-          setMessages(prev => prev.map(m => m.id === asstId ? { ...m, text: partial } : m))
-        })
-
-        // Insert into document at the requested placement (default to end if missing)
-        const placement = intent.placement || 'end'
-        placeContentAtLocation(generated, placement)
-
-        const ack: ChatMsg = {
-          id: `${Date.now()}-ack`,
-          role: 'assistant',
-          text: `Added generated content to the document (${placement}).`,
-          ts: Date.now(),
-        }
-        setMessages(prev => [...prev, ack])
-  } catch {
-        setMessages(prev => prev.map(m => m.id === asstId ? { ...m, text: 'Error generating content. Try again.' } : m))
-      } finally {
-        setSending(false)
-      }
+      setMessages(prev => [...prev, askMsg])
+      setPendingContent(text) // store original instruction
+      setPendingMessageId(askMsg.id)
       return
     }
 
@@ -298,20 +279,14 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         setMessages(prev => prev.map(m => m.id === asstId ? { ...m, text: partial } : m))
       })
 
-      // Optionally stream to document with intelligent placement
-      if (streamToDoc && intent.isContentRequest && intent.placement) {
-        placeContentAtLocation(answer, intent.placement)
-      } else if (streamToDoc && !intent.isContentRequest) {
-        // For regular Q&A, just add at end
-        getEditorHandlers()?.typeText?.('\n' + answer + '\n\n', { delayMs: 18 })
-      }
+      // Chat mode: never write assistant responses into the editor
       
     } catch {
       setMessages(prev => prev.map(m => m.id === asstId ? { ...m, text: 'Error fetching answer. Try again.' } : m))
     } finally {
       setSending(false)
     }
-  }, [input, sending, mode, user?.uid, streamToDoc, documentId, parseContentIntent, placeContentAtLocation, getCurrentDocumentStructure, streamOutput])
+  }, [input, sending, mode, user?.uid, documentId, parseContentIntent, getCurrentDocumentStructure, streamOutput])
 
   // Handle placement selection
   const handlePlacementSelection = useCallback(async (placement: string) => {
@@ -343,27 +318,39 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
 
   return (
     <div className={`w-full h-full bg-gray-900 flex flex-col relative overflow-hidden ${isCollapsed ? 'min-w-0' : ''}`}>
-      {/* Collapse Button */}
-      {onCollapse && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onCollapse}
-          className="absolute top-4 right-4 z-10 text-gray-400 hover:text-white hover:bg-gray-800 px-3 py-1.5 text-sm"
-        >
-          <ChevronRight className="h-4 w-4 mr-1" />
-          Collapse
-        </Button>
-      )}
-
-      {/* Header / Greeting */}
-      <div className="px-4 pt-6 pb-3 text-center">
-        <h1 className="text-2xl md:text-3xl font-bold text-white">Hey, I&apos;m Blume AI</h1>
-        <p className="text-gray-400 text-sm md:text-base mt-1">Ask questions or tell me what to write — I can type into your doc with a live cursor.</p>
+      {/* Top Branding + Collapse */}
+      <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+              <span className="text-white text-xs font-bold">⚡</span>
+            </div>
+            <span className="text-gray-200 font-medium text-sm">BlumeNote AI</span>
+          </div>
+          {onCollapse && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onCollapse}
+              className="text-gray-300 hover:text-white hover:bg-gray-800 px-3 py-1.5 text-sm"
+            >
+              <ChevronRight className="h-4 w-4 mr-1" />
+              Collapse
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Messages list */}
-      <div ref={listRef} className="flex-1 overflow-y-auto px-4 space-y-3">
+  {/* Messages list */}
+  <div ref={listRef} className={`flex-1 overflow-y-auto px-4 space-y-3 ${messages.length > 0 ? 'pt-3' : ''}`}>
+        {messages.length === 0 && (
+          <div className="h-full flex items-center justify-center px-6 py-8">
+            <div className="text-center">
+              <h1 className="text-2xl md:text-3xl font-bold text-white">Hey, I&apos;m Blume AI</h1>
+              <p className="text-gray-400 text-sm md:text-base mt-1">Ask questions or tell me what to write — I can type into your doc with a live cursor.</p>
+            </div>
+          </div>
+        )}
         {messages.map(m => (
           <div key={m.id} className={`w-full text-left ${m.role === 'user' ? 'text-blue-200' : 'text-gray-100'}`}>
             <div className={`inline-block px-3 py-2 rounded-lg ${m.role === 'user' ? 'bg-blue-700/50' : 'bg-gray-800/70'}`}>
@@ -392,13 +379,6 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
                   >
                     <MapPin className="h-3 w-3 inline mr-1" />
                     After Heading
-                  </button>
-                  <button 
-                    onClick={() => handlePlacementSelection('replace-selection')}
-                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                  >
-                    <MapPin className="h-3 w-3 inline mr-1" />
-                    Replace Selection
                   </button>
                 </div>
               )}
@@ -473,17 +453,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         </button>
       </div>
 
-      {/* Branding */}
-      <div className="p-3 border-t border-gray-700 min-w-0">
-        <div className="flex items-center justify-center">
-          <div className="flex items-center space-x-3 min-w-0">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-sm font-bold">⚡</span>
-            </div>
-            <span className="text-gray-300 font-medium text-sm truncate">BlumeNote AI</span>
-          </div>
-        </div>
-      </div>
+      {/* Footer branding removed */}
     </div>
   )
 }
