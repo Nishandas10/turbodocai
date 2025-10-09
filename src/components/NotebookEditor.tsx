@@ -601,22 +601,6 @@ export default function NotebookEditor() {
     } finally { setSummaryLoading(false) }
   }, [noteId, user?.uid])
 
-  const exportLocalStorageContent = useCallback(() => {
-    const key = `document_${noteId}_lexical`
-    const data = localStorage.getItem(key)
-    if (!data) return
-    const blob = new Blob([data], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `${key}_backup.json`; a.click(); URL.revokeObjectURL(url)
-  }, [noteId])
-
-  const debugLocalStorage = useCallback(() => {
-    const key = `document_${noteId}_lexical`
-    const data = localStorage.getItem(key)
-    console.log('Debug localStorage', { key, exists: !!data, sizeKB: data ? (new Blob([data]).size / 1024).toFixed(2) : 0 })
-  }, [noteId])
-
   useEffect(() => {
     const handleSelectionChange = () => {
       const sel = window.getSelection()
@@ -651,26 +635,55 @@ export default function NotebookEditor() {
 
   return (
     <div className="h-full bg-background flex overflow-hidden flex-col">
-      {/* Header with title & actions */}
-      <div className="border-b border-border p-4 flex flex-col gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-          <button
-            onClick={fetchSummary}
-            disabled={summaryLoading}
-            className="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
-          >
-            {summaryLoading ? 'Generating summary...' : summary ? 'Regenerate Summary' : 'Generate Summary'}
-          </button>
-          {isSaving ? (
-            <span className="text-xs text-muted-foreground">Saving...</span>
-          ) : lastSaved ? (
-            <span className="text-xs text-muted-foreground">Saved {lastSaved.toLocaleTimeString()}</span>
-          ) : null}
-          <button onClick={debugLocalStorage} className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">Debug</button>
-          <button onClick={exportLocalStorageContent} className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">Export</button>
+      {/* Header with inline title, share & actions */}
+      <div className="border-b border-border p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          {/* Left: Inline title edit + auto-save */}
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-foreground">✏️</span>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => handleTitleChange(e.target.value)}
+              className="text-foreground bg-transparent border border-transparent focus:border-border rounded px-2 py-1 text-lg font-medium outline-none min-w-[12rem]"
+              placeholder="Untitled Document"
+            />
+          </div>
+
+          {/* Right: actions aligned to right edge */}
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={fetchSummary}
+              disabled={summaryLoading}
+              className="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
+            >
+              {summaryLoading ? 'Generating summary...' : summary ? 'Regenerate Summary' : 'Generate Summary'}
+            </button>
+            <button
+              onClick={() => {
+                try {
+                  const url = typeof window !== 'undefined' ? window.location.href : ''
+                  const shareData: any = { title: title || 'Document', url }
+                  if (navigator.share) {
+                    navigator.share(shareData).catch(() => {/* ignore */})
+                  } else if (navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(url)
+                    alert('Link copied to clipboard')
+                  }
+                } catch { /* ignore */ }
+              }}
+              className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm"
+            >
+              Share
+            </button>
+            {isSaving ? (
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Saving...</span>
+            ) : lastSaved ? (
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Saved {lastSaved.toLocaleTimeString()}</span>
+            ) : null}
+          </div>
         </div>
-        {summaryError && <p className="text-sm text-red-500">{summaryError}</p>}
+        {summaryError && <p className="mt-2 text-sm text-red-500">{summaryError}</p>}
       </div>
       {/* Editor */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -683,21 +696,11 @@ export default function NotebookEditor() {
                 onContentChange={handleContentChange}
                 initialEditorState={loadedLexicalState}
               >
-                {loadedLexicalState !== null && (
-                  <div className="text-xs text-green-600 mb-2">
-                    ✓ Restored from local cache
-                    <button
-                      onClick={() => console.log('loadedLexicalState:', loadedLexicalState)}
-                      className="ml-2 px-1 py-0.5 bg-green-200 rounded text-xs"
-                    >Log State</button>
-                  </div>
-                )}
+                {/* Removed local cache status banner */}
                 <LinkHandler onLinkInserted={() => setShowToolbar(false)} />
                 <EditorAgentBridge />
                 <SummaryInjector summary={summary} />
                 <LexicalToolbar
-                  title={title}
-                  onTitleChange={handleTitleChange}
                   fontSize={fontSize}
                   onFontSizeChange={setFontSize}
                   fontFamily={fontFamily}

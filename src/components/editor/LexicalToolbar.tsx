@@ -1,7 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client"
 
 import { 
-  HeaderBar,
   FontControls,
   TextFormatting,
   ColorPicker,
@@ -12,32 +12,15 @@ import {
   CaseTools
 } from './toolbar'
 
-interface LexicalToolbarProps {
-  title: string
-  onTitleChange: (title: string) => void
-  fontSize: number
-  onFontSizeChange: (size: number) => void
-  fontFamily: string
-  onFontFamilyChange: (family: string) => void
-}
-
 export default function LexicalToolbar({
-  title,
-  onTitleChange,
   fontSize,
   onFontSizeChange,
   fontFamily,
   onFontFamilyChange
-}: LexicalToolbarProps) {
+}: any) {
   return (
     <>
-      {/* Top Header Bar */}
-      <HeaderBar 
-        title={title} 
-        onTitleChange={onTitleChange} 
-      />
-
-      {/* Main Toolbar */}
+      {/* Main Toolbar (secondary header removed) */}
       <div 
         className="h-14 border-b border-border flex items-center px-6 overflow-x-auto relative"
         style={{
@@ -94,4 +77,4 @@ export default function LexicalToolbar({
       </div>
     </>
   )
-} 
+}
