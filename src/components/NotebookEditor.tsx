@@ -4,7 +4,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { FloatingToolbar } from './editor'
+// FloatingToolbar removed per request
 import EditorConfig from './editor/EditorConfig'
 import LexicalToolbar from './editor/LexicalToolbar'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
@@ -444,8 +444,7 @@ export default function NotebookEditor() {
   const [content, setContent] = useState('')
   const [fontSize, setFontSize] = useState(12)
   const [fontFamily, setFontFamily] = useState('Clarika')
-  const [showToolbar, setShowToolbar] = useState(false)
-  const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 })
+  // Floating selection toolbar disabled
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -601,26 +600,9 @@ export default function NotebookEditor() {
     } finally { setSummaryLoading(false) }
   }, [noteId, user?.uid])
 
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      const sel = window.getSelection()
-      if (sel && sel.toString().trim()) {
-        const range = sel.getRangeAt(0)
-        const rect = range.getBoundingClientRect()
-        setToolbarPosition({ x: rect.left + rect.width / 2, y: rect.bottom + 10 })
-        setShowToolbar(true)
-      } else setShowToolbar(false)
-    }
-    document.addEventListener('selectionchange', handleSelectionChange)
-    document.addEventListener('mouseup', handleSelectionChange)
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange)
-      document.removeEventListener('mouseup', handleSelectionChange)
-    }
-  }, [])
+  // Removed selection listeners that triggered the floating toolbar
 
-  const handleFloatingLink = () => { window.editorHandlers?.handleLink(); setShowToolbar(false) }
-  const handleFloatingFormatting = (f: string) => { window.editorHandlers?.handleFormatting(f) }
+  // Removed floating toolbar handlers
 
   if (isLoading) {
     return (
@@ -697,7 +679,7 @@ export default function NotebookEditor() {
                 initialEditorState={loadedLexicalState}
               >
                 {/* Removed local cache status banner */}
-                <LinkHandler onLinkInserted={() => setShowToolbar(false)} />
+                <LinkHandler onLinkInserted={() => { /* toolbar removed */ }} />
                 <EditorAgentBridge />
                 <SummaryInjector summary={summary} />
                 <LexicalToolbar
@@ -709,14 +691,7 @@ export default function NotebookEditor() {
               </EditorConfig>
             </div>
           </div>
-          <FloatingToolbar
-            show={showToolbar}
-            position={toolbarPosition}
-            onFormatting={handleFloatingFormatting}
-            onLink={handleFloatingLink}
-            onAddComment={() => {}}
-            onAskTurbo={() => {}}
-          />
+          {/* FloatingToolbar removed */}
         </div>
       </div>
     </div>

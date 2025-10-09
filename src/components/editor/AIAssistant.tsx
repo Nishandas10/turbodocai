@@ -6,12 +6,12 @@ import { Button } from '@/components/ui/button'
 import { 
   MessageSquare,
   Edit3,
-  Mic,
-  Paperclip,
   Send,
   ChevronRight,
-  MapPin
+  MapPin,
+  Mic
 } from 'lucide-react'
+import { useSpeechToText } from '@/hooks/useSpeechToText'
 import { useAuth } from '@/contexts/AuthContext'
 import { queryDocuments } from '@/lib/ragService'
 
@@ -38,10 +38,25 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [sending, setSending] = useState(false)
-  const [streamToDoc, setStreamToDoc] = useState(true)
+  const [streamToDoc] = useState(true)
   const [pendingContent, setPendingContent] = useState('')
   const [pendingMessageId, setPendingMessageId] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
+  const userEditedRef = useRef<boolean>(false)
+  const userEditTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
+    lang: 'en-US',
+    fallbackLangs: ['en-US'],
+    continuous: false,
+    interimResults: true,
+    onPartial: () => { /* no-op for now */ },
+    onSegment: (seg) => {
+      if (!userEditedRef.current) {
+        setInput(prev => (prev ? prev + ' ' : '') + seg)
+      }
+    }
+  })
 
   // Auto-scroll
   useEffect(() => {
@@ -401,24 +416,45 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
           <input
             type="text"
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => {
+              setInput(e.target.value)
+              userEditedRef.current = true
+              if (userEditTimerRef.current) clearTimeout(userEditTimerRef.current)
+              userEditTimerRef.current = setTimeout(() => { userEditedRef.current = false }, 1500)
+            }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
             placeholder={mode === 'chat' ? 'Ask a question…' : 'Type what to write into the doc…'}
             className="w-full bg-transparent px-4 py-3 text-white placeholder-gray-400 focus:outline-none text-sm"
             disabled={sending}
           />
           <div className="flex items-center justify-between px-3 py-2">
-            <div className="flex items-center gap-2">
-              <button className="text-gray-300 hover:text-white p-1" title="Voice (coming soon)"><Mic className="h-5 w-5" /></button>
-              <button className="text-gray-300 hover:text-white p-1" title="Attach (coming soon)"><Paperclip className="h-5 w-5" /></button>
-            </div>
-            <div className="flex items-center gap-3">
-              {mode === 'chat' && (
-                <label className="flex items-center gap-2 text-xs text-gray-300">
-                  <input type="checkbox" className="accent-blue-500" checked={streamToDoc} onChange={e => setStreamToDoc(e.target.checked)} />
-                  Stream to doc
-                </label>
+            <div className="flex items-center gap-2 min-w-0">
+              {listening && (
+                <div className="text-xs text-gray-300 truncate max-w-[60%]" aria-live="polite">
+                  {interimTranscript || 'Listening…'}
+                </div>
               )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (!speechSupported || sending) return
+                  if (listening) {
+                    stopSpeech()
+                  } else {
+                    resetSpeech()
+                    userEditedRef.current = false
+                    startSpeech()
+                  }
+                }}
+                disabled={!speechSupported || sending}
+                title={speechSupported ? (listening ? 'Stop voice input' : 'Start voice input') : 'Voice not supported on this browser'}
+                className={`p-1 rounded ${listening ? 'text-red-400' : 'text-gray-300 hover:text-white'}`}
+                aria-pressed={listening}
+                aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+              >
+                <Mic className="h-5 w-5" />
+              </button>
               <button onClick={handleSend} disabled={!input.trim() || sending} className="text-gray-300 hover:text-white p-1">
                 <Send className="h-5 w-5" />
               </button>
@@ -434,9 +470,6 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         </button>
         <button onClick={() => setMode('write')} className={`w-full sm:flex-1 px-3 py-2 rounded-lg transition-colors flex items-center justify-center font-medium ${mode === 'write' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 border border-gray-600'}`}>
           <Edit3 className="h-4 w-4 mr-2" /> Write
-        </button>
-        <button disabled className="w-full sm:flex-1 px-3 py-2 bg-gray-800 text-gray-500 rounded-lg border border-gray-700 cursor-not-allowed flex items-center justify-center font-medium">
-          <MessageSquare className="h-4 w-4 mr-2" /> Comment
         </button>
       </div>
 

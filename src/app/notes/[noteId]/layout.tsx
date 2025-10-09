@@ -211,51 +211,47 @@ export default function NoteLayout({
         {/* AI Assistant - only show on main document page */}
         {isCurrentPath(`/notes/${noteId}`) && (
           <>
-            {/* Resizable Divider */}
+            {/* When expanded, show divider and assistant panel */}
             {!aiCollapsed && (
-              <div 
-                ref={resizeRef}
-                className={`w-1 bg-gray-600 cursor-col-resize hover:bg-gray-500 transition-colors ${
-                  isDragging ? 'bg-purple-500' : ''
-                }`}
-                onMouseDown={handleMouseDown}
-                style={{ cursor: isDragging ? 'col-resize' : 'col-resize' }}
-              >
-                <div className="w-1 h-full flex items-center justify-center">
-                  <div className="w-0.5 h-8 bg-gray-400 rounded-full"></div>
-                </div>
-              </div>
-            )}
-
-            {/* Right Sidebar - AI Assistant */}
-            <div 
-              className={`bg-gray-900 border-l border-gray-700 flex flex-col relative overflow-hidden transition-all duration-300 ease-in-out ${
-                aiCollapsed ? 'w-16' : ''
-              }`}
-              style={{ 
-                width: aiCollapsed ? '64px' : `${aiPanelWidth}px`,
-                transition: 'width 300ms ease-in-out'
-              }}
-            >
-              {aiCollapsed ? (
-                // Collapsed state - just show floating icon
-                <div className="flex flex-col items-center justify-center h-full">
-                  <button
-                    onClick={() => setAiCollapsed(false)}
-                    className="group w-12 h-12 bg-blue-600 hover:bg-blue-700 rounded-full flex items-center justify-center text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110"
-                    title="Expand AI Assistant"
-                  >
-                    <MessageSquare className="h-6 w-6 group-hover:scale-105 transition-transform duration-200" />
-                  </button>
-                  <div className="mt-2 text-xs text-gray-400 text-center">
-                    AI
+              <>
+                {/* Resizable Divider */}
+                <div 
+                  ref={resizeRef}
+                  className={`w-1 bg-gray-600 cursor-col-resize hover:bg-gray-500 transition-colors ${
+                    isDragging ? 'bg-purple-500' : ''
+                  }`}
+                  onMouseDown={handleMouseDown}
+                  style={{ cursor: isDragging ? 'col-resize' : 'col-resize' }}
+                >
+                  <div className="w-1 h-full flex items-center justify-center">
+                    <div className="w-0.5 h-8 bg-gray-400 rounded-full"></div>
                   </div>
                 </div>
-              ) : (
-                // Expanded state - show full AI Assistant
-                <AIAssistant onCollapse={() => setAiCollapsed(true)} />
-              )}
-            </div>
+
+                {/* Right Sidebar - AI Assistant */}
+                <div 
+                  className="bg-gray-900 border-l border-gray-700 flex flex-col relative overflow-hidden transition-all duration-300 ease-in-out"
+                  style={{ 
+                    width: `${aiPanelWidth}px`,
+                    transition: 'width 300ms ease-in-out'
+                  }}
+                >
+                  <AIAssistant onCollapse={() => setAiCollapsed(true)} />
+                </div>
+              </>
+            )}
+
+            {/* When collapsed, remove sidebar entirely and show a floating chat button */}
+            {aiCollapsed && (
+              <button
+                onClick={() => setAiCollapsed(false)}
+                className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-blue-600 hover:bg-blue-700 rounded-full flex items-center justify-center text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110"
+                title="Open AI Assistant"
+                aria-label="Open AI Assistant"
+              >
+                <MessageSquare className="h-6 w-6" />
+              </button>
+            )}
           </>
         )}
       </div>
