@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, FileText, Brain } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Loader2, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { queryDocuments, QueryResult } from "@/lib/ragService";
+import MarkdownMessage from "@/components/MarkdownMessage";
 
 interface ChatMessage {
   id: string;
@@ -26,6 +27,96 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
+
+  // Dynamic follow-up detection (length/semantic-light heuristics) and context-aware expansion
+  const STOPWORDS = new Set([
+    "a","an","the","and","or","but","if","then","so","than","that","this","those","these",
+    "is","am","are","was","were","be","been","being","do","does","did","doing",
+    "to","of","in","on","for","with","as","by","at","from","about","into","over","after","before",
+    "it","its","it's","i","you","he","she","we","they","me","him","her","us","them","my","your","our","their",
+    "can","could","should","would","may","might","will","shall","please","kindly","just",
+    "more","details","detail","detailed","in","detail","elaborate","continue","examples","example","why","how","steps",
+  ]);
+
+  const tokenize = (text: string): string[] =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+
+  const informativeTokenCount = (text: string): number =>
+    tokenize(text).filter((t) => !STOPWORDS.has(t) && t.length > 2).length;
+
+  const isLikelyFollowUp = (text: string): boolean => {
+    const trimmed = text.trim();
+    const tokens = tokenize(trimmed);
+    const info = informativeTokenCount(trimmed);
+    // Heuristics: short text with few informative tokens is a follow-up
+    return trimmed.length < 48 || tokens.length <= 6 || info <= 2;
+  };
+
+  const buildEffectiveQuestion = (current: string): string => {
+    if (!isLikelyFollowUp(current)) return current;
+
+    // Use recent context: find last meaningful user message and last assistant reply
+    const reversed = [...messages].reverse();
+    const lastAssistant = reversed.find((m) => m.type === "assistant");
+    const lastUserMeaningful = reversed.find(
+      (m) => m.type === "user" && !isLikelyFollowUp(m.content)
+    );
+
+    // Also gather a brief context window of recent turns
+    const recentWindow = reversed
+      .slice(0, 6)
+      .map((m) => `${m.type === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .reverse()
+      .join("\n");
+
+    const topic =
+      lastUserMeaningful?.content || lastAssistant?.content?.slice(0, 240) || "previous topic";
+
+    // Build a dynamic prompt that includes the user's follow-up phrase verbatim
+    return [
+      "Follow-up to previous conversation:",
+      `Last topic: "${topic}"`,
+      "\nRecent context:",
+      recentWindow,
+      "\nUser's follow-up request (interpret and fulfill):",
+      `"${current}"`,
+      "\nPlease continue the explanation focusing on the same topic. Expand with depth if the follow-up is vague. If the follow-up implies a format (e.g., examples, steps, comparison), adapt accordingly. Use clear headings, bullets, and include equations/code where helpful. Keep sources out of the message.",
+    ].join("\n");
+  };
+
+  // Helper functions for localStorage persistence  
+  const saveChatMessages = useCallback((msgs: ChatMessage[]) => {
+    try {
+      const key = `chat_${user?.uid}_${documentId || 'global'}`;
+      localStorage.setItem(key, JSON.stringify(msgs.map(msg => ({
+        ...msg,
+        timestamp: msg.timestamp.toISOString()
+      }))));
+    } catch (error) {
+      console.warn('Failed to save chat messages:', error);
+    }
+  }, [user?.uid, documentId]);
+  
+  const loadChatMessages = useCallback((): ChatMessage[] => {
+    try {
+      const key = `chat_${user?.uid}_${documentId || 'global'}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return parsed.map((msg: ChatMessage & { timestamp: string }) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+      }
+    } catch (error) {
+      console.warn('Failed to load chat messages:', error);
+    }
+    return [];
+  }, [user?.uid, documentId]);
 
   // Simple client-side streaming helper
   const streamText = async (
@@ -50,18 +141,32 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Initial greeting message
+  // Save messages to localStorage whenever they change (except initial load)
   useEffect(() => {
-    const greeting: ChatMessage = {
-      id: "greeting",
-      type: "assistant",
-      content: documentId 
-        ? `Hello! I'm here to help you with questions about "${documentTitle}". What would you like to know?`
-        : "Hello! I'm here to help you with questions about your uploaded documents. What would you like to know?",
-      timestamp: new Date(),
-    };
-    setMessages([greeting]);
-  }, [documentId, documentTitle]);
+    if (messages.length > 0 && user?.uid) {
+      saveChatMessages(messages);
+    }
+  }, [messages, saveChatMessages, user?.uid]);
+
+  // Load existing messages or create initial greeting
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    const existingMessages = loadChatMessages();
+    if (existingMessages.length > 0) {
+      setMessages(existingMessages);
+    } else {
+      const greeting: ChatMessage = {
+        id: "greeting",
+        type: "assistant",
+        content: documentId 
+          ? `Hello! I'm here to help you with questions about "${documentTitle}". What would you like to know?`
+          : "Hello! I'm here to help you with questions about your uploaded documents. What would you like to know?",
+        timestamp: new Date(),
+      };
+      setMessages([greeting]);
+    }
+  }, [documentId, documentTitle, user?.uid, loadChatMessages]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !user?.uid || isLoading) return;
@@ -90,8 +195,9 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
         },
       ]);
 
+      const effectiveQuestion = buildEffectiveQuestion(inputValue.trim());
       const result = await queryDocuments({
-        question: inputValue.trim(),
+        question: effectiveQuestion,
         userId: user.uid,
         documentId: documentId,
         topK: 5,
@@ -165,34 +271,21 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
             className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 ${
+              className={`max-w-[80%] rounded-lg ${
                 message.type === "user"
-                  ? "bg-blue-500 text-white"
-                  : "bg-muted text-card-foreground"
+                  ? "bg-blue-500 text-white px-4 py-2"
+                  : "bg-muted/40 px-0 py-0"
               }`}
             >
-              <div className="text-sm">{message.content}</div>
-              
-              {/* Sources for assistant messages */}
-              {message.type === "assistant" && message.sources && message.sources.length > 0 && (
-                <div className="mt-3 pt-2 border-t border-gray-300/20">
-                  <div className="text-xs text-gray-300 mb-2">
-                    Sources (Confidence: {message.confidence?.toFixed(1)}%):
-                  </div>
-                  {message.sources.map((source, index) => (
-                    <div key={index} className="text-xs bg-black/20 rounded p-2 mb-1">
-                      <div className="flex items-center gap-1 mb-1">
-                        <FileText className="h-3 w-3" />
-                        <span className="font-medium">{source.title}</span>
-                        <span className="text-gray-400">({source.score.toFixed(2)})</span>
-                      </div>
-                      <div className="text-gray-300">{source.chunk}</div>
-                    </div>
-                  ))}
+              {message.type === "assistant" ? (
+                <div className="p-3">
+                  <MarkdownMessage content={message.content} />
                 </div>
+              ) : (
+                <div className="text-sm whitespace-pre-wrap px-4 py-2">{message.content}</div>
               )}
-              
-              <div className="text-xs opacity-70 mt-1">
+
+              <div className="text-xs opacity-70 mt-1 px-3 pb-2">
                 {message.timestamp.toLocaleTimeString()}
               </div>
             </div>
