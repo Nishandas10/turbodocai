@@ -457,8 +457,6 @@ export default function NotebookEditor() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [loadedLexicalState, setLoadedLexicalState] = useState<unknown>(null)
   const [summary, setSummary] = useState('')
-  const [summaryLoading, setSummaryLoading] = useState(false)
-  const [summaryError, setSummaryError] = useState<string | null>(null)
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const editorStateRef = useRef<string>('')
@@ -486,13 +484,12 @@ export default function NotebookEditor() {
         setSummary(doc.summary)
       } else if (doc.processingStatus === 'completed' || doc.status === 'ready') {
         // Attempt auto-fetch once after processing if no stored summary
-        setSummaryLoading(true)
         try {
-      const auto = await generateDocumentSummaryWithRetry(noteId, user.uid, 350)
+          const auto = await generateDocumentSummaryWithRetry(noteId, user.uid, 350)
           setSummary(auto)
         } catch (e:any) {
           console.warn('Auto summary failed:', e?.message)
-        } finally { setSummaryLoading(false) }
+        }
       }
       const localStorageKey = `document_${noteId}_lexical`
       const stored = typeof window !== 'undefined' ? localStorage.getItem(localStorageKey) : null
@@ -595,17 +592,7 @@ export default function NotebookEditor() {
 
   useEffect(() => () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }, [])
 
-  const fetchSummary = useCallback(async () => {
-    if (!noteId || !user?.uid) return
-    setSummaryError(null)
-    setSummaryLoading(true)
-    try {
-      const result = await generateDocumentSummaryWithRetry(noteId, user.uid, 350)
-      setSummary(result)
-    } catch (e: any) {
-      setSummaryError(e?.message || 'Failed to load summary')
-    } finally { setSummaryLoading(false) }
-  }, [noteId, user?.uid])
+  // Removed manual regenerate summary action
 
   // Removed selection listeners that triggered the floating toolbar
 
@@ -642,13 +629,6 @@ export default function NotebookEditor() {
           {/* Right: actions aligned to right edge */}
           <div className="flex items-center gap-2 ml-auto">
             <button
-              onClick={fetchSummary}
-              disabled={summaryLoading}
-              className="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
-            >
-              {summaryLoading ? 'Generating summary...' : summary ? 'Regenerate Summary' : 'Generate Summary'}
-            </button>
-            <button
               onClick={() => {
                 try {
                   const url = typeof window !== 'undefined' ? window.location.href : ''
@@ -672,7 +652,7 @@ export default function NotebookEditor() {
             ) : null}
           </div>
         </div>
-        {summaryError && <p className="mt-2 text-sm text-red-500">{summaryError}</p>}
+        {/* Removed manual regenerate summary error UI */}
       </div>
       {/* Editor */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
