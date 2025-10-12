@@ -1,7 +1,7 @@
 "use client"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { ChevronDown, Cloud, FileText, Upload, Loader2, CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
@@ -16,6 +16,9 @@ export default function DocumentUploadModal(props: any) {
   const [isUploading, setIsUploading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingStatus, setProcessingStatus] = useState<string>("")
+  const [processingProgress, setProcessingProgress] = useState<number | null>(null)
+  const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
+  const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { user } = useAuth()
@@ -39,6 +42,12 @@ export default function DocumentUploadModal(props: any) {
     if (file) {
       setSelectedFile(file)
       console.log('File selected:', file.name)
+      // Reset progress/UI state on new file selection
+      setProcessingProgress(null)
+      setOptimisticProgress(0)
+      setOptimisticTimerActive(false)
+      setProcessingStatus("")
+      setGeneratedSummary("")
     }
   }
 
@@ -61,17 +70,24 @@ export default function DocumentUploadModal(props: any) {
         if (selectedFile.type === 'application/pdf') {
           setIsProcessing(true)
           setProcessingStatus("Processing document...")
+          // Start optimistic progress when processing starts
+          setOptimisticProgress(0)
+          setOptimisticTimerActive(true)
           
           try {
             const summary = await waitAndGenerateSummary(
               result.documentId!,
               user.uid,
               (status, progress) => {
-                setProcessingStatus(`Processing: ${status}${progress ? ` (${progress}%)` : ''}`)
+                const pct = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null
+                setProcessingProgress(pct)
+                // Show clean status text without inline percentage; percentage is displayed separately on the right
+                setProcessingStatus(`Processing: ${status}`)
               },
               350
             )
             setGeneratedSummary(summary)
+            setProcessingProgress(100)
             setProcessingStatus("Processed! Redirecting...")
             setTimeout(() => {
               onClose()
@@ -80,11 +96,14 @@ export default function DocumentUploadModal(props: any) {
           } catch (error) {
             console.error('Processing error:', error)
             setProcessingStatus("Processing failed or timed out")
+            // Stop optimistic timer on failure
+            setOptimisticTimerActive(false)
             setTimeout(() => {
               onClose()
             }, 2500)
           } finally {
             setIsProcessing(false)
+            setOptimisticTimerActive(false)
           }
         } else {
           alert(`File uploaded successfully! Document ID: ${result.documentId}`)
@@ -103,6 +122,49 @@ export default function DocumentUploadModal(props: any) {
       }
     }
   }
+
+  // Cleanup when modal closes: reset progress state
+  useEffect(() => {
+    if (!isOpen) {
+      setOptimisticTimerActive(false)
+      setOptimisticProgress(0)
+      setProcessingProgress(null)
+      setProcessingStatus("")
+    }
+  }, [isOpen])
+
+  // Optimistic progress timer: smoothly advance up to 90% while processing
+  useEffect(() => {
+    if (!optimisticTimerActive) return
+    let raf: number | null = null
+    let start: number | null = null
+    const cap = 90 // don't exceed 90% until backend/completion sets to 100
+
+    const step = (ts: number) => {
+      if (start === null) start = ts
+      const elapsed = ts - start
+      // Ease-out curve from 0 to cap over ~25s; remains slow near the end
+      const duration = 25000
+      const t = Math.min(1, elapsed / duration)
+      const eased = 1 - Math.pow(1 - t, 3) // cubic ease-out
+      const next = Math.min(cap, Math.round(eased * cap))
+      setOptimisticProgress((prev) => (next > prev ? next : prev))
+      if (next < cap && optimisticTimerActive) {
+        raf = requestAnimationFrame(step)
+      }
+    }
+
+    raf = requestAnimationFrame(step)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [optimisticTimerActive])
+
+  // Compute display progress: prefer backend progress if available; else optimistic
+  const displayProgress = useMemo(() => {
+    if (typeof processingProgress === 'number') return Math.max(0, Math.min(100, processingProgress))
+    return optimisticProgress
+  }, [processingProgress, optimisticProgress])
 
   if (!isOpen) return null
 
@@ -158,6 +220,7 @@ export default function DocumentUploadModal(props: any) {
               onClick={handleImportPDF}
               variant="outline"
               className="w-full bg-muted border-border text-card-foreground hover:bg-muted/80 py-4 text-lg font-medium"
+              disabled={isUploading || isProcessing}
             >
               <FileText className="h-5 w-5 mr-3" />
               Import File
@@ -211,10 +274,19 @@ export default function DocumentUploadModal(props: any) {
                 
                 {/* Processing status */}
                 {(isProcessing || processingStatus) && (
-                  <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
-                    <p className="text-sm text-blue-700">{processingStatus}</p>
+                  <div className="mt-2 p-3 rounded-md border border-border bg-muted/40">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-card-foreground">{processingStatus}</p>
+                      <span className="text-xs text-muted-foreground tabular-nums">{Math.round(displayProgress)}%</span>
+                    </div>
+                    <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 transition-[width] duration-300"
+                        style={{ width: `${Math.max(0, Math.min(100, displayProgress))}%` }}
+                      />
+                    </div>
                     {generatedSummary && (
-                      <div className="mt-2 max-h-40 overflow-y-auto text-xs text-blue-800 whitespace-pre-wrap">
+                      <div className="mt-2 max-h-40 overflow-y-auto text-xs text-muted-foreground whitespace-pre-wrap">
                         {generatedSummary}
                       </div>
                     )}
