@@ -7,7 +7,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.evaluateLongAnswer = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.recommendPublicDocs = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.processDocument = exports.createChat = void 0;
+exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.evaluateLongAnswer = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.recommendPublicDocs = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.processDocument = exports.resolveUserByEmail = exports.createChat = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -192,6 +192,45 @@ exports.createChat = (0, https_1.onCall)({ enforceAppCheck: false }, async (requ
         return {
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",
+        };
+    }
+});
+/**
+ * Resolve a user by email. Returns minimal info to support sharing invites.
+ * Request: { email: string }
+ * Response: { success: boolean, data?: { userId: string, displayName?: string, photoURL?: string }, error?: string }
+ */
+exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, async (request) => {
+    try {
+        const { email } = request.data || {};
+        if (!request.auth)
+            throw new Error("Authentication required");
+        if (!email || typeof email !== "string")
+            throw new Error("Missing email");
+        const norm = String(email).toLowerCase().trim();
+        const snap = await db
+            .collection("users")
+            .where("email", "==", norm)
+            .limit(1)
+            .get();
+        if (snap.empty)
+            return { success: true, data: null };
+        const d = snap.docs[0];
+        const data = d.data();
+        return {
+            success: true,
+            data: {
+                userId: d.id,
+                displayName: (data === null || data === void 0 ? void 0 : data.displayName) || "",
+                photoURL: (data === null || data === void 0 ? void 0 : data.photoURL) || "",
+            },
+        };
+    }
+    catch (err) {
+        firebase_functions_1.logger.error("resolveUserByEmail error", err);
+        return {
+            success: false,
+            error: err instanceof Error ? err.message : "Unknown error",
         };
     }
 });

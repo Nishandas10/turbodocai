@@ -122,6 +122,8 @@ export const createDocument = async (
     status: "uploading",
     tags: documentData.tags || [],
     isPublic: documentData.isPublic || false,
+    collaborators: documentData.collaborators || { viewers: [], editors: [] },
+    publicCanEdit: documentData.publicCanEdit || false,
     createdAt: now,
     updatedAt: now,
     lastAccessed: now,
@@ -279,6 +281,117 @@ export const updateDocument = async (
   };
 
   await updateDoc(docRef, updateData);
+};
+
+// ===== SHARING HELPERS =====
+
+export type ShareRole = "viewer" | "editor";
+
+export interface ShareInfo {
+  isPublic: boolean;
+  publicCanEdit: boolean;
+  collaborators: { viewers: string[]; editors: string[] };
+  ownerId: string;
+}
+
+export const getShareInfo = async (
+  documentId: string,
+  userId: string
+): Promise<ShareInfo | null> => {
+  const ref = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments",
+    documentId
+  );
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const data = snap.data() as Document;
+  return {
+    isPublic: !!data.isPublic,
+    publicCanEdit: !!data.publicCanEdit,
+    collaborators: {
+      viewers: data.collaborators?.viewers || [],
+      editors: data.collaborators?.editors || [],
+    },
+    ownerId: data.userId,
+  };
+};
+
+export const setPublicAccess = async (
+  documentId: string,
+  userId: string,
+  opts: { isPublic?: boolean; publicCanEdit?: boolean }
+) => {
+  await updateDocument(documentId, userId, {
+    ...(opts.isPublic !== undefined ? { isPublic: opts.isPublic } : {}),
+    ...(opts.publicCanEdit !== undefined
+      ? { publicCanEdit: opts.publicCanEdit }
+      : {}),
+  });
+};
+
+export const addCollaborator = async (
+  documentId: string,
+  ownerId: string,
+  collaboratorUserId: string,
+  role: ShareRole
+) => {
+  const ref = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    ownerId,
+    "userDocuments",
+    documentId
+  );
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data() as Document;
+  const viewers = new Set(data.collaborators?.viewers || []);
+  const editors = new Set(data.collaborators?.editors || []);
+  if (role === "viewer") {
+    editors.delete(collaboratorUserId);
+    viewers.add(collaboratorUserId);
+  } else {
+    viewers.delete(collaboratorUserId);
+    editors.add(collaboratorUserId);
+  }
+  await updateDoc(ref, {
+    collaborators: {
+      viewers: Array.from(viewers),
+      editors: Array.from(editors),
+    },
+    updatedAt: Timestamp.now(),
+  });
+};
+
+export const removeCollaborator = async (
+  documentId: string,
+  ownerId: string,
+  collaboratorUserId: string
+) => {
+  const ref = doc(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    ownerId,
+    "userDocuments",
+    documentId
+  );
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data() as Document;
+  const viewers = new Set(data.collaborators?.viewers || []);
+  const editors = new Set(data.collaborators?.editors || []);
+  viewers.delete(collaboratorUserId);
+  editors.delete(collaboratorUserId);
+  await updateDoc(ref, {
+    collaborators: {
+      viewers: Array.from(viewers),
+      editors: Array.from(editors),
+    },
+    updatedAt: Timestamp.now(),
+  });
 };
 
 /**

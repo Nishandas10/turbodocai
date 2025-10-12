@@ -142,6 +142,7 @@ interface EditorConfigProps {
   fontFamily?: string
   onContentChange?: (content: string, editorState?: unknown) => void
   initialEditorState?: unknown // Add this prop for restoring editor state
+  editable?: boolean
 }
 
 // Content Change Handler Component
@@ -192,7 +193,7 @@ function EditorStateRestorationPlugin({ initialEditorState }: { initialEditorSta
 
 
 
-function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onContentChange, initialEditorState }: EditorConfigProps) {
+function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onContentChange, initialEditorState, editable = true }: EditorConfigProps) {
   const { 
     isMenuOpen, 
     menuPosition, 
@@ -215,6 +216,12 @@ function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onCont
       document.removeEventListener('click', handleClick)
     }
   }, [handleTableClick])
+
+  // Toggle editor editable state
+  const [editorInstance] = useLexicalComposerContext()
+  useEffect(() => {
+    try { editorInstance.setEditable(!!editable) } catch {}
+  }, [editorInstance, editable])
 
   return (
     <div className="relative min-h-[500px] prose prose-sm max-w-none">
@@ -259,7 +266,7 @@ function EditorContent({ children, fontSize = 16, fontFamily = 'inherit', onCont
   )
 }
 
-export default function EditorConfig({ children, fontSize = 16, fontFamily = 'inherit', onContentChange, initialEditorState }: EditorConfigProps) {
+export default function EditorConfig({ children, fontSize = 16, fontFamily = 'inherit', onContentChange, initialEditorState, editable = true }: EditorConfigProps) {
   const initialConfig = {
     namespace: 'NotebookEditor',
     theme,
@@ -271,7 +278,7 @@ export default function EditorConfig({ children, fontSize = 16, fontFamily = 'in
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <EditorContent fontSize={fontSize} fontFamily={fontFamily} onContentChange={onContentChange} initialEditorState={initialEditorState}>
+      <EditorContent fontSize={fontSize} fontFamily={fontFamily} onContentChange={onContentChange} initialEditorState={initialEditorState} editable={editable}>
         {children}
       </EditorContent>
     </LexicalComposer>

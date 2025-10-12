@@ -442,10 +442,19 @@ function SummaryInjector({ summary }: { summary: string }) {
   return null
 }
 
-export default function NotebookEditor() {
+import dynamic from 'next/dynamic'
+const ShareModal = dynamic(() => import('./ShareModal'), { ssr: false })
+
+export type NotebookEditorProps = { ownerId?: string }
+export default function NotebookEditor(props: NotebookEditorProps) {
+  const { ownerId: ownerFromProps } = props || {}
   const params = useParams()
   const { user } = useAuth()
   const noteId = params?.noteId as string
+  const ownerId = ownerFromProps || user?.uid
+
+  const [shareOpen, setShareOpen] = useState(false)
+  const [canEdit, setCanEdit] = useState(true)
 
   const [title, setTitle] = useState('Untitled Document')
   const [content, setContent] = useState('')
@@ -457,6 +466,7 @@ export default function NotebookEditor() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [loadedLexicalState, setLoadedLexicalState] = useState<unknown>(null)
   const [summary, setSummary] = useState('')
+  const [docType, setDocType] = useState<string>('text')
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const editorStateRef = useRef<string>('')
@@ -473,16 +483,26 @@ export default function NotebookEditor() {
   }, [])
 
   const loadDocument = useCallback(async () => {
-    if (!noteId || !user?.uid) return
+    if (!noteId || !ownerId) return
     try {
       setIsLoading(true)
-      const doc = await getFirestoreDocument(noteId, user.uid)
+  const doc = await getFirestoreDocument(noteId, ownerId)
       if (!doc) return
+  setDocType((doc as any)?.type || 'text')
+      // decide editability
+      const uid = user?.uid
+      let editable = false
+      if (uid) {
+        if (doc.userId === uid) editable = true
+        else if (doc.collaborators?.editors?.includes(uid)) editable = true
+        else if (doc.publicCanEdit) editable = true
+      }
+      setCanEdit(!!editable)
       setTitle(doc.title || 'Untitled Document')
       // Load existing summary if present
     if (doc.summary) {
         setSummary(doc.summary)
-      } else if (doc.processingStatus === 'completed' || doc.status === 'ready') {
+      } else if ((doc.processingStatus === 'completed' || doc.status === 'ready') && user?.uid) {
         // Attempt auto-fetch once after processing if no stored summary
         try {
           const auto = await generateDocumentSummaryWithRetry(noteId, user.uid, 350)
@@ -511,9 +531,15 @@ export default function NotebookEditor() {
     } finally {
       setIsLoading(false)
     }
-  }, [noteId, user?.uid, extractPlainTextFromLexical])
+  }, [noteId, ownerId, user?.uid, extractPlainTextFromLexical])
 
   const loadFromRemote = async (doc: any) => {
+    // Prefer Firestore raw content (works for collaborator edits without Storage permissions)
+    if (doc?.content?.raw && typeof doc.content.raw === 'string' && doc.content.raw.length > 0) {
+      setContent(doc.content.raw)
+      editorStateRef.current = doc.content.raw
+      return
+    }
     if (doc?.metadata?.downloadURL) {
       try {
         const res = await fetch(doc.metadata.downloadURL)
@@ -541,7 +567,8 @@ export default function NotebookEditor() {
   }, [noteId])
 
   const saveDocument = useCallback(async (currentTitle: string, currentContent: string, lexicalState?: unknown) => {
-    if (!noteId || !user?.uid || isSaving) return
+    if (!noteId || !ownerId || isSaving) return
+    if (!canEdit) return
     setIsSaving(true)
     try {
       const localStorageKey = `document_${noteId}_lexical`
@@ -556,21 +583,31 @@ export default function NotebookEditor() {
           }
         }
       }
-      const { uploadDocument } = await import('@/lib/storage')
-      const file = new File([currentContent], `${currentTitle}.txt`, { type: 'text/plain' })
-      const uploadResult = await uploadDocument(file, user.uid, noteId)
-      if (!uploadResult.success) throw new Error(uploadResult.error || 'Upload failed')
-      await updateFirestoreDocument(noteId, user.uid, {
-        title: currentTitle,
-        content: { raw: '', processed: '' },
-        metadata: {
-          fileName: `${currentTitle}.txt`,
-          fileSize: new Blob([currentContent]).size,
-          mimeType: 'text/plain',
-          storagePath: uploadResult.storagePath,
-          downloadURL: uploadResult.downloadURL,
-        },
-      })
+      const isOwner = user?.uid && user.uid === ownerId
+      if (isOwner && docType === 'text') {
+        // Owner path for text docs: upload to Storage and update metadata
+        const { uploadDocument } = await import('@/lib/storage')
+        const file = new File([currentContent], `${currentTitle}.txt`, { type: 'text/plain' })
+        const uploadResult = await uploadDocument(file, ownerId, noteId)
+        if (!uploadResult.success) throw new Error(uploadResult.error || 'Upload failed')
+        await updateFirestoreDocument(noteId, ownerId, {
+          title: currentTitle,
+          content: { raw: '', processed: '' },
+          metadata: {
+            fileName: `${currentTitle}.txt`,
+            fileSize: new Blob([currentContent]).size,
+            mimeType: 'text/plain',
+            storagePath: uploadResult.storagePath,
+            downloadURL: uploadResult.downloadURL,
+          },
+        })
+      } else {
+        // Collaborator edits OR owner editing non-text doc (e.g., PDF): store raw content only, do not touch Storage metadata
+        await updateFirestoreDocument(noteId, ownerId, {
+          title: currentTitle,
+          content: { raw: currentContent, processed: '' },
+        })
+      }
       setLastSaved(new Date())
       editorStateRef.current = currentContent
     } catch (e) {
@@ -578,14 +615,15 @@ export default function NotebookEditor() {
     } finally {
       setIsSaving(false)
     }
-  }, [noteId, user?.uid, isSaving, clearOldDocumentsFromLocalStorage])
+  }, [noteId, ownerId, isSaving, clearOldDocumentsFromLocalStorage, canEdit, user?.uid, docType])
 
   const debouncedSave = useCallback((t: string, c: string, lexicalState?: unknown) => {
+    if (!canEdit) return
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(() => {
       if (c !== editorStateRef.current) saveDocument(t, c, lexicalState)
     }, 1000)
-  }, [saveDocument])
+  }, [saveDocument, canEdit])
 
   const handleTitleChange = useCallback((t: string) => { setTitle(t); debouncedSave(t, content) }, [debouncedSave, content])
   const handleContentChange = useCallback((c: string, lexicalState?: unknown) => { setContent(c); debouncedSave(title, c, lexicalState) }, [debouncedSave, title])
@@ -623,28 +661,16 @@ export default function NotebookEditor() {
               onChange={(e) => handleTitleChange(e.target.value)}
               className="text-foreground bg-transparent border border-transparent focus:border-border rounded px-2 py-1 text-lg font-medium outline-none min-w-[12rem]"
               placeholder="Untitled Document"
+              disabled={!canEdit}
             />
           </div>
 
           {/* Right: actions aligned to right edge */}
           <div className="flex items-center gap-2 ml-auto">
-            <button
-              onClick={() => {
-                try {
-                  const url = typeof window !== 'undefined' ? window.location.href : ''
-                  const shareData: any = { title: title || 'Document', url }
-                  if (navigator.share) {
-                    navigator.share(shareData).catch(() => {/* ignore */})
-                  } else if (navigator.clipboard?.writeText) {
-                    navigator.clipboard.writeText(url)
-                    alert('Link copied to clipboard')
-                  }
-                } catch { /* ignore */ }
-              }}
-              className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm"
-            >
-              Share
-            </button>
+            <button onClick={() => setShareOpen(true)} className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Share</button>
+            {!canEdit && (
+              <span className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-800">View only</span>
+            )}
             {isSaving ? (
               <span className="text-xs text-muted-foreground whitespace-nowrap">Saving...</span>
             ) : lastSaved ? (
@@ -664,6 +690,7 @@ export default function NotebookEditor() {
                 fontFamily={fontFamily}
                 onContentChange={handleContentChange}
                 initialEditorState={loadedLexicalState}
+                editable={canEdit}
               >
                 {/* Removed local cache status banner */}
                 <LinkHandler onLinkInserted={() => { /* toolbar removed */ }} />
@@ -681,6 +708,7 @@ export default function NotebookEditor() {
           {/* FloatingToolbar removed */}
         </div>
       </div>
+      <ShareModal isOpen={shareOpen} onClose={() => setShareOpen(false)} documentId={noteId} ownerId={ownerId} />
     </div>
   )
 }

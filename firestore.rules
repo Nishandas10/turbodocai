@@ -9,10 +9,21 @@ service cloud.firestore {
     
     // Documents collection - nested structure: documents/{userId}/userDocuments/{documentId}
     match /documents/{userId}/userDocuments/{documentId} {
-      // Public read if isPublic == true, otherwise owner only
-      allow read: if resource.data.isPublic == true || (request.auth != null && request.auth.uid == userId);
-      // Writes restricted to the owner only
-      allow create, update, delete: if request.auth != null && request.auth.uid == userId;
+      // Helpers
+      function isOwner() { return request.auth != null && request.auth.uid == userId; }
+      function isViewer() { return request.auth != null && (
+        isOwner() || (resource.data.collaborators.viewers != null && resource.data.collaborators.viewers.hasAny([request.auth.uid])) ||
+        (resource.data.collaborators.editors != null && resource.data.collaborators.editors.hasAny([request.auth.uid]))
+      ); }
+      function isEditor() { return request.auth != null && (
+        isOwner() || (resource.data.collaborators.editors != null && resource.data.collaborators.editors.hasAny([request.auth.uid]))
+      ); }
+
+      // Public read if isPublic == true, otherwise owner or collaborators
+      allow read: if resource.data.isPublic == true || isViewer();
+      // Writes allowed for owner, editors, or if publicCanEdit is true for any authenticated user
+      allow create: if isOwner();
+      allow update, delete: if isEditor() || (request.auth != null && resource.data.publicCanEdit == true);
     }
     
     // Processing queue - users can only access their own tasks
@@ -42,6 +53,7 @@ service cloud.firestore {
 
     // New: allDocuments collection (primary global list)
     match /allDocuments/{docId} {
+      // Expose public listing; write control stays with owner
       allow read: if resource.data.isPublic == true;
       allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
       allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid

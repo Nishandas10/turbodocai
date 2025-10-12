@@ -1,111 +1,72 @@
 "use client"
 
 import { useEffect, useState } from 'react'
-import { useSearchParams, useParams } from 'next/navigation'
+import { useSearchParams, useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import NotebookEditor from '@/components/NotebookEditor'
 import { db } from '@/lib/firebase'
-import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 
 export default function NotePage() {
   const search = useSearchParams()
   const params = useParams()
   const { user } = useAuth()
+  const router = useRouter()
   const noteId = params?.noteId as string
   const ownerId = search.get('owner') || undefined
   const [ready, setReady] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // no separate error state; use blocked modes
+  const [blocked, setBlocked] = useState<null | 'no-access' | 'not-found'>(null)
+  const [effOwner, setEffOwner] = useState<string | undefined>(ownerId)
+
+  useEffect(() => {
+    // Persist owner param per note so navigation back can restore it
+    try {
+      if (noteId && ownerId) {
+        localStorage.setItem(`doc_owner_${noteId}`, ownerId)
+        setEffOwner(ownerId)
+      } else if (noteId && !ownerId) {
+        const stored = localStorage.getItem(`doc_owner_${noteId}`) || undefined
+        if (stored) {
+          setEffOwner(stored)
+          // Append owner back to URL to maintain consistent share link
+          try { router.replace(`/notes/${noteId}?owner=${stored}`) } catch { /* ignore */ }
+        }
+      }
+    } catch {/* ignore */}
+  }, [noteId, ownerId, router])
 
   useEffect(() => {
     const run = async () => {
-      // If unauth, NotebookEditor will handle gating via layout; nothing to import here
-      if (!user?.uid || !noteId) { setReady(true); return }
-      // If no owner specified or it's already current user, nothing to import
-      if (!ownerId || ownerId === user.uid) { setReady(true); return }
-
-      try {
-        // If doc already exists in current user's collection, skip import
-        const myDocRef = doc(db, 'documents', user.uid, 'userDocuments', noteId)
-        const mySnap = await getDoc(myDocRef)
-        if (mySnap.exists()) { setReady(true); return }
-
-        // Fetch mirror from public collection
-        const mirrorId = `${ownerId}_${noteId}`
-        const mirrorRef = doc(db, 'allDocuments', mirrorId)
-        const mirrorSnap = await getDoc(mirrorRef)
-        if (!mirrorSnap.exists()) {
-          setError('Public document not found')
-          setReady(true)
-          return
-        }
-        // Mirror doc shape (subset)
-        type MirrorMeta = {
-          fileName?: string;
-          mimeType?: string;
-          storagePath?: string;
-          downloadURL?: string;
-        };
-        type MirrorDoc = {
-          title?: string;
-          type?: string;
-          tags?: unknown[];
-          metadata?: MirrorMeta;
-          masterUrl?: string;
-          storagePath?: string;
-          summary?: string;
-          content?: { raw?: string; processed?: string };
-        };
-        const src = mirrorSnap.data() as MirrorDoc
-
-        const title = src.title ?? 'Imported Document'
-        const dtype = src.type ?? 'pdf'
-        const meta = src.metadata ?? {}
-        const fileName = meta.fileName ?? title ?? 'document'
-        const mimeType = meta.mimeType
-        const storagePath = meta.storagePath ?? src.storagePath
-        const downloadURL = meta.downloadURL ?? src.masterUrl
-        const tags = Array.isArray(src.tags)
-          ? (src.tags.filter((t): t is string => typeof t === 'string'))
-          : []
-
-        // Prepare a lightweight copy into current user's workspace
-        const now = Timestamp.now()
-        const newDoc = {
-          userId: user.uid,
-          title,
-          type: dtype,
-          content: {
-            raw: (src.content?.raw && typeof src.content.raw === 'string') ? src.content.raw : '',
-            processed: (src.content?.processed && typeof src.content.processed === 'string') ? src.content.processed : ''
-          },
-          metadata: {
-            fileName,
-            mimeType,
-            storagePath,
-            downloadURL,
-            sourceOwnerId: ownerId,
-            sourceDocumentId: noteId,
-          },
-          tags,
-          isPublic: false,
-          status: 'uploading',
-          processingStatus: 'pending',
-          // If original had a summary, carry it over so UI has an immediate fallback
-          ...(src.summary ? { summary: src.summary } : {}),
-          createdAt: now,
-          updatedAt: now,
-          lastAccessed: now,
-        }
-
-        await setDoc(myDocRef, newDoc, { merge: false })
-        // Cloud Function processDocument will pick this up (on create or storagePath change)
-      } catch (e: unknown) {
-        console.error('Import public document failed', e)
-        const msg = e instanceof Error ? e.message : 'Failed to import public document'
-        setError(msg)
-      } finally {
+      // Ready immediately; NotebookEditor will handle permission and read-only behavior.
+      if (!noteId) { setReady(true); return }
+      // Resolve a target owner: query param -> stored -> current user
+      const storedOwner = (() => { try { return localStorage.getItem(`doc_owner_${noteId}`) || undefined } catch { return undefined } })()
+      const targetOwner = ownerId || storedOwner || user?.uid
+      if (!targetOwner) {
+        // Cannot resolve a target owner; if unauth, ask to sign in
+        setBlocked('no-access')
         setReady(true)
+        return
       }
+      if (targetOwner) {
+        try {
+          const ref = doc(db, 'documents', targetOwner, 'userDocuments', noteId)
+          const snap = await getDoc(ref)
+          if (!snap.exists()) {
+            setBlocked('not-found')
+          }
+        } catch (e) {
+          const err = e as { code?: string; message?: string }
+          const code = err?.code || err?.message || ''
+          if (String(code).includes('permission') || String(code).includes('denied')) {
+            setBlocked('no-access')
+          } else {
+            console.warn('Shared doc lookup failed', e)
+          }
+        }
+      }
+      setReady(true)
     }
     run()
   }, [user?.uid, noteId, ownerId])
@@ -121,15 +82,28 @@ export default function NotePage() {
     )
   }
 
-  if (error) {
+  if (blocked) {
+    const signedIn = !!user?.uid
     return (
-      <div className="h-full bg-background flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-sm text-red-500">{error}</p>
+      <div className="h-full bg-background relative">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-2xl font-semibold mb-2">Access denied</h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              {blocked === 'not-found' ? 'This document does not exist or is no longer shared.' : 'You do not have access to this document.'}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              {signedIn ? (
+                <button onClick={() => router.push('/dashboard')} className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white">Return to dashboard</button>
+              ) : (
+                <button onClick={() => router.push('/signup')} className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white">Go to signup</button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
-  return <NotebookEditor />
+  return <NotebookEditor ownerId={effOwner || ownerId || undefined} />
 }

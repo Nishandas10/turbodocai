@@ -61,6 +61,12 @@ export interface Document {
   updatedAt: Timestamp;
   lastAccessed: Timestamp;
   isPublic: boolean;
+  // Sharing & collaboration
+  collaborators?: {
+    viewers?: string[]; // userIds with read-only access
+    editors?: string[]; // userIds with edit access
+  };
+  publicCanEdit?: boolean; // if true, any authenticated user can edit when they have the link
   // RAG Processing fields
   processingStatus?: "pending" | "processing" | "completed" | "failed";
   processingStartedAt?: Timestamp;
@@ -124,6 +130,8 @@ export interface CreateDocumentData {
   metadata: DocumentMetadata;
   tags?: string[];
   isPublic?: boolean;
+  collaborators?: Document["collaborators"];
+  publicCanEdit?: boolean;
   // Optional association to a space/workspace
   spaceId?: string;
 }
@@ -134,6 +142,8 @@ export interface UpdateDocumentData {
   metadata?: Partial<DocumentMetadata>;
   tags?: string[];
   isPublic?: boolean;
+  collaborators?: Document["collaborators"];
+  publicCanEdit?: boolean;
   status?: Document["status"];
   summary?: string;
   summaryUpdatedAt?: Timestamp;
