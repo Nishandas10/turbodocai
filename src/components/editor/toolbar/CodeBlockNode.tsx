@@ -338,6 +338,17 @@ export class CodeBlockNode extends DecoratorNode<React.ReactElement> {
     }
   }
 
+  // Provide HTML export for Lexical serializer
+  exportDOM(): { element: HTMLElement } {
+    const pre = document.createElement('pre')
+    const code = document.createElement('code')
+    code.textContent = this.__code
+    if (this.__language) code.setAttribute('data-language', this.__language)
+    pre.appendChild(code)
+    if (this.__showLineNumbers) pre.setAttribute('data-line-numbers', 'true')
+    return { element: pre }
+  }
+
   isInline(): false {
     return false
   }

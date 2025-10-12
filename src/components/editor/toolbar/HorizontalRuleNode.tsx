@@ -41,6 +41,12 @@ export class HorizontalRuleNode extends ElementNode {
     }
   }
 
+  // Ensure HTML export includes an <hr/>
+  exportDOM(): { element: HTMLElement } {
+    const hr = document.createElement('hr')
+    return { element: hr }
+  }
+
   insertNewAfter(): null {
     return null
   }

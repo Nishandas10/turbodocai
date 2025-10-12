@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import { DecoratorNode, NodeKey, LexicalNode, SerializedLexicalNode, Spread, $getNodeByKey } from 'lexical'
 import { ReactNode, useState, useRef, useCallback, useEffect } from 'react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
@@ -486,6 +487,16 @@ export class ImageNode extends DecoratorNode<ReactNode> {
       type: 'custom-image',
       version: 1,
     }
+  }
+
+  // Ensure HTML export includes <img> with attributes
+  exportDOM(): { element: HTMLElement } {
+    const img = document.createElement('img')
+    img.src = this.__src
+    img.alt = this.__altText || ''
+    if (this.__maxWidth) img.style.maxWidth = `${this.__maxWidth}px`
+    img.style.height = 'auto'
+    return { element: img }
   }
 
   decorate(): ReactNode {

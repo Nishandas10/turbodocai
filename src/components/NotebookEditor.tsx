@@ -2,6 +2,7 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { $generateHtmlFromNodes } from '@lexical/html'
 import { useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 // FloatingToolbar removed per request
@@ -39,6 +40,8 @@ declare global {
       insertAtBeginning?: (text: string) => void
       insertAtEnd?: (text: string) => void
       insertAfterLastHeading?: (text: string) => void
+      // Build a lightweight HTML export of the current editor content
+      getExportHTML?: () => string
     }
   }
 }
@@ -81,8 +84,8 @@ function LinkHandler({ onLinkInserted }: { onLinkInserted: () => void }) {
   }, [editor])
 
   useEffect(() => {
-  const prev = (window.editorHandlers || {}) as any
-  window.editorHandlers = { ...prev, handleLink, handleFormatting }
+    const prev = (window.editorHandlers || {}) as any
+    window.editorHandlers = { ...prev, handleLink, handleFormatting }
   }, [handleLink, handleFormatting])
 
   return null
@@ -301,6 +304,42 @@ function EditorAgentBridge() {
     })
   }, [editor])
 
+  // Export current editor content to rich HTML using Lexical's serializer
+  const getExportHTML = useCallback(() => {
+    let html = ''
+    editor.getEditorState().read(() => {
+      const body = $generateHtmlFromNodes(editor, null)
+      const style = `
+        <style>
+          @page { margin: 18mm; }
+          body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #111; background: #fff; line-height: 1.6; }
+          a { color: #1d4ed8; text-decoration: underline; }
+          img { max-width: 100%; height: auto; }
+          pre { background: #0f0f0f; color: #e5e7eb; padding: 12px; border-radius: 8px; overflow: auto; }
+          code { font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; }
+          table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+          th, td { border: 1px solid #e5e7eb; padding: 6px 8px; }
+          hr { border: 0; border-top: 1px solid #e5e7eb; margin: 16px 0; }
+          mark { background: #fef08a; }
+          .underline { text-decoration: underline; }
+          .line-through { text-decoration: line-through; }
+          /* Ensure highlights and background colors render in print/PDF */
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          span[style*="background-color"], mark {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            padding: 0 .08em; border-radius: .15em;
+          }
+          @media print {
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          }
+        </style>
+      `
+      html = `<!doctype html><html><head><meta charset="utf-8"/>${style}</head><body>${body}</body></html>`
+    })
+    return html
+  }, [editor])
+
   useEffect(() => {
     const prev = (window.editorHandlers || {}) as any
     window.editorHandlers = {
@@ -315,6 +354,7 @@ function EditorAgentBridge() {
       insertAtBeginning,
       insertAtEnd,
       insertAfterLastHeading,
+      getExportHTML,
     }
     return () => {
       // do not remove other handlers
@@ -327,9 +367,10 @@ function EditorAgentBridge() {
         delete window.editorHandlers.insertAtBeginning
         delete window.editorHandlers.insertAtEnd
         delete window.editorHandlers.insertAfterLastHeading
+        delete window.editorHandlers.getExportHTML
       }
     }
-  }, [insertText, replaceSelection, typeText, typeTextAtPlacement, getDocumentStructure, insertAtBeginning, insertAtEnd, insertAfterLastHeading])
+  }, [insertText, replaceSelection, typeText, typeTextAtPlacement, getDocumentStructure, insertAtBeginning, insertAtEnd, insertAfterLastHeading, getExportHTML])
 
   return null
 }
@@ -667,6 +708,30 @@ export default function NotebookEditor(props: NotebookEditorProps) {
 
           {/* Right: actions aligned to right edge */}
           <div className="flex items-center gap-2 ml-auto">
+            {/* Export button with options */}
+            <ExportButton
+              onExportDoc={() => {
+                const html = (typeof window !== 'undefined' && window.editorHandlers?.getExportHTML?.()) ||
+                  `<html><body><pre>${(content || '').replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch] as string))}</pre></body></html>`
+                const blob = new Blob(['\ufeff', html], { type: 'application/msword' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `${(title || 'Document').replace(/\s+/g,'_')}.doc`
+                document.body.appendChild(a); a.click(); a.remove()
+                URL.revokeObjectURL(url)
+              }}
+              onExportPdf={() => {
+                const html = (typeof window !== 'undefined' && window.editorHandlers?.getExportHTML?.()) ||
+                  `<html><body><pre>${(content || '').replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch] as string))}</pre></body></html>`
+                const win = window.open('', '_blank')
+                if (win) {
+                  win.document.open()
+                  win.document.write(html + '<script>window.onload=()=>{window.focus();window.print();}</script>')
+                  win.document.close()
+                }
+              }}
+            />
             <button onClick={() => setShareOpen(true)} className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Share</button>
             {!canEdit && (
               <span className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-800">View only</span>
@@ -709,6 +774,28 @@ export default function NotebookEditor(props: NotebookEditorProps) {
         </div>
       </div>
       <ShareModal isOpen={shareOpen} onClose={() => setShareOpen(false)} documentId={noteId} ownerId={ownerId} />
+    </div>
+  )
+}
+
+// Small stateless export dropdown/button
+function ExportButton({ onExportDoc, onExportPdf }: { onExportDoc: () => void; onExportPdf: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="px-3 py-1.5 rounded border border-border text-sm bg-card hover:bg-muted"
+        title="Export"
+      >
+        Export
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-40 rounded-md border border-border bg-card shadow-lg z-50">
+          <button className="w-full text-left px-3 py-2 text-sm hover:bg-muted" onClick={() => { setOpen(false); onExportDoc() }}>Download .doc</button>
+          <button className="w-full text-left px-3 py-2 text-sm hover:bg-muted" onClick={() => { setOpen(false); onExportPdf() }}>Download PDF</button>
+        </div>
+      )}
     </div>
   )
 }
