@@ -19,9 +19,10 @@ interface ChatMessage {
 interface DocumentChatProps {
   documentId?: string;
   documentTitle?: string;
+  ownerId?: string; // owner of the document (for shared docs)
 }
 
-export default function DocumentChat({ documentId, documentTitle }: DocumentChatProps) {
+export default function DocumentChat({ documentId, documentTitle, ownerId }: DocumentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -91,7 +92,7 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
   // Helper functions for localStorage persistence  
   const saveChatMessages = useCallback((msgs: ChatMessage[]) => {
     try {
-      const key = `chat_${user?.uid}_${documentId || 'global'}`;
+      const key = `chat_${user?.uid}_${ownerId || user?.uid}_${documentId || 'global'}`;
       localStorage.setItem(key, JSON.stringify(msgs.map(msg => ({
         ...msg,
         timestamp: msg.timestamp.toISOString()
@@ -99,11 +100,11 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
     } catch (error) {
       console.warn('Failed to save chat messages:', error);
     }
-  }, [user?.uid, documentId]);
+  }, [user?.uid, ownerId, documentId]);
   
   const loadChatMessages = useCallback((): ChatMessage[] => {
     try {
-      const key = `chat_${user?.uid}_${documentId || 'global'}`;
+      const key = `chat_${user?.uid}_${ownerId || user?.uid}_${documentId || 'global'}`;
       const stored = localStorage.getItem(key);
       if (stored) {
         const parsed = JSON.parse(stored);
@@ -116,7 +117,7 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
       console.warn('Failed to load chat messages:', error);
     }
     return [];
-  }, [user?.uid, documentId]);
+  }, [user?.uid, ownerId, documentId]);
 
   // Simple client-side streaming helper
   const streamText = async (
@@ -198,7 +199,8 @@ export default function DocumentChat({ documentId, documentTitle }: DocumentChat
       const effectiveQuestion = buildEffectiveQuestion(inputValue.trim());
       const result = await queryDocuments({
         question: effectiveQuestion,
-        userId: user.uid,
+        // IMPORTANT: pass the document owner's userId so the backend queries the correct vector index
+        userId: ownerId || user.uid,
         documentId: documentId,
         topK: 5,
       });

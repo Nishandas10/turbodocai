@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { 
   MessageSquare,
@@ -14,6 +14,7 @@ import {
 import { useSpeechToText } from '@/hooks/useSpeechToText'
 import { useAuth } from '@/contexts/AuthContext'
 import { queryDocuments } from '@/lib/ragService'
+import MarkdownMessage from '@/components/MarkdownMessage'
 
 interface ChatMsg {
   id: string
@@ -34,6 +35,9 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   const { user } = useAuth()
   const params = useParams()
   const documentId = params?.noteId as string
+  const search = useSearchParams()
+  const ownerParam = search.get('owner') || undefined
+  const [effOwner, setEffOwner] = useState<string | undefined>(ownerParam)
   const [mode, setMode] = useState<'chat' | 'write' | 'comment'>('chat')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
@@ -44,7 +48,20 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   const listRef = useRef<HTMLDivElement>(null)
   const userEditedRef = useRef<boolean>(false)
   const userEditTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const storageKey = `aiAssistant:messages:${documentId || 'global'}`
+  const storageKey = `aiAssistant:messages:${documentId || 'global'}:${effOwner || user?.uid || 'anon'}`
+
+  // Keep shared owner consistent with notes page behavior
+  useEffect(() => {
+    try {
+      if (documentId && ownerParam) {
+        localStorage.setItem(`doc_owner_${documentId}`, ownerParam)
+        setEffOwner(ownerParam)
+      } else if (documentId && !ownerParam) {
+        const stored = localStorage.getItem(`doc_owner_${documentId}`) || undefined
+        if (stored) setEffOwner(stored)
+      }
+    } catch { /* ignore */ }
+  }, [documentId, ownerParam])
 
   const isChatMsg = (m: unknown): m is ChatMsg => {
     if (!m || typeof m !== 'object') return false
@@ -250,15 +267,21 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       // Get current document structure for context
       const docStructure = getCurrentDocumentStructure()
       
-      // Enhanced query with document context
-      const contextualQuery = text + (docStructure.headings.length > 0 
-        ? `\n\nCurrent document structure: ${docStructure.headings.map(h => `H${h.level}: ${h.text}`).join(', ')}`
-        : '')
+      // Enhanced query with document context and explicit Markdown formatting directive
+      const formattingDirective = `\n\nFormat your answer in rich Markdown with:\n- Clear headings (##, ###) and short sections\n- Bulleted/numbered lists when helpful\n- Occasional emojis for scannability\n- Tables or code blocks if relevant\nAvoid citing sources inline; keep the tone concise.`
+      const contextualQuery =
+        text +
+        (docStructure.headings.length > 0
+          ? `\n\nCurrent document structure: ${docStructure.headings
+              .map(h => `H${h.level}: ${h.text}`)
+              .join(', ')}`
+          : '') +
+        formattingDirective
       
       // Query with document ID for better context from Pinecone
       const res = await queryDocuments({ 
         question: contextualQuery, 
-        userId: user.uid,
+        userId: effOwner || user.uid,
         documentId: documentId // Include current document for context
       })
       const answer = res.answer || 'I could not find an answer.'
@@ -286,7 +309,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     } finally {
       setSending(false)
     }
-  }, [input, sending, mode, user?.uid, documentId, parseContentIntent, getCurrentDocumentStructure, streamOutput])
+  }, [input, sending, mode, user?.uid, documentId, parseContentIntent, getCurrentDocumentStructure, streamOutput, effOwner])
 
   // Handle placement selection
   const handlePlacementSelection = useCallback(async (placement: string) => {
@@ -303,8 +326,8 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     setMessages(prev => prev.map(m => m.id === pendingMessageId ? { ...m, text: 'Generating…', awaitingPlacement: false } : m))
     try {
       const docStructure = getCurrentDocumentStructure()
-      const generationPrompt = `Write a clear, concise section based on this instruction: "${pendingContent}".\n\nGuidelines:\n- Follow the document's tone and be factual.\n- Use 2-4 short paragraphs unless a list is better.\n- Avoid prefacing like "as requested".\n- If a topic is specified (e.g., a field like metabolomics), give a brief overview, key concepts, and why it matters.\n\nDocument structure context: ${docStructure.headings.map(h => `H${h.level}:${h.text}`).join(', ') || 'none'}`
-      const res = await queryDocuments({ question: generationPrompt, userId: user.uid, documentId })
+  const generationPrompt = `Write a clear, concise section based on this instruction: "${pendingContent}".\n\nGuidelines:\n- Follow the document's tone and be factual.\n- Prefer Markdown with headings (##, ###), bullets, and numbered steps.\n- Use short paragraphs and whitespace for readability.\n- Avoid prefacing like "as requested".\n- If a topic is specified (e.g., a field like metabolomics), give a brief overview, key concepts, and why it matters.\n\nDocument structure context: ${docStructure.headings.map(h => `H${h.level}:${h.text}`).join(', ') || 'none'}`
+  const res = await queryDocuments({ question: generationPrompt, userId: effOwner || user.uid, documentId })
       const generated = (res.answer || '').trim() || 'Unable to generate content for that request.'
       placeContentAtLocation(generated, placement)
       setMessages(prev => prev.map(m => m.id === pendingMessageId ? { ...m, text: `Added generated content to the document (${placement}).` } : m))
@@ -314,7 +337,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       setPendingContent('')
       setPendingMessageId('')
     }
-  }, [pendingContent, pendingMessageId, user?.uid, getCurrentDocumentStructure, documentId, placeContentAtLocation])
+  }, [pendingContent, pendingMessageId, user?.uid, getCurrentDocumentStructure, documentId, placeContentAtLocation, effOwner])
 
   return (
     <div className={`w-full h-full bg-gray-900 flex flex-col relative overflow-hidden ${isCollapsed ? 'min-w-0' : ''}`}>
@@ -353,27 +376,33 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         )}
         {messages.map(m => (
           <div key={m.id} className={`w-full text-left ${m.role === 'user' ? 'text-blue-200' : 'text-gray-100'}`}>
-            <div className={`inline-block px-3 py-2 rounded-lg ${m.role === 'user' ? 'bg-blue-700/50' : 'bg-gray-800/70'}`}>
-              {m.text}
-              
+            <div className={`inline-block rounded-lg ${m.role === 'user' ? 'bg-blue-700/50 px-3 py-2' : 'bg-gray-800/70 px-0 py-0'}`}>
+              {m.role === 'assistant' ? (
+                <div className="p-3">
+                  <MarkdownMessage content={m.text} />
+                </div>
+              ) : (
+                <div className="px-3 py-2 whitespace-pre-wrap">{m.text}</div>
+              )}
+
               {/* Placement options for content requests */}
               {m.awaitingPlacement && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button 
+                <div className="mt-2 mb-2 px-3 flex flex-wrap gap-2">
+                  <button
                     onClick={() => handlePlacementSelection('beginning')}
                     className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
                   >
                     <MapPin className="h-3 w-3 inline mr-1" />
                     Beginning
                   </button>
-                  <button 
+                  <button
                     onClick={() => handlePlacementSelection('end')}
                     className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
                   >
                     <MapPin className="h-3 w-3 inline mr-1" />
                     End
                   </button>
-                  <button 
+                  <button
                     onClick={() => handlePlacementSelection('after-heading')}
                     className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
                   >

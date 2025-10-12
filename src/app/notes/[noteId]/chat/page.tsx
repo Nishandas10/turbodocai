@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { getDocument } from "@/lib/firestore";
 import type { Document as Doc } from "@/lib/types";
@@ -13,6 +13,9 @@ export default function ChatPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const params = useParams();
   const noteId = params.noteId as string;
+  const search = useSearchParams();
+  const ownerParam = search.get('owner') || undefined;
+  const [effOwner, setEffOwner] = useState<string | undefined>(ownerParam);
   const { user } = useAuth();
   const [doc, setDoc] = useState<Doc | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -24,16 +27,30 @@ export default function ChatPage() {
   const draggingRef = useRef<boolean>(false);
 
   useEffect(() => {
+    // Keep shared owner consistent with notes page behavior
+    try {
+      if (noteId && ownerParam) {
+        localStorage.setItem(`doc_owner_${noteId}`, ownerParam);
+        setEffOwner(ownerParam);
+      } else if (noteId && !ownerParam) {
+        const stored = localStorage.getItem(`doc_owner_${noteId}`) || undefined;
+        if (stored) setEffOwner(stored);
+      }
+    } catch { /* ignore */ }
+  }, [noteId, ownerParam]);
+
+  useEffect(() => {
     let mounted = true;
     const run = async () => {
-      if (!user?.uid || !noteId) {
+      const ownerForFetch = effOwner || user?.uid;
+      if (!ownerForFetch || !noteId) {
         setLoading(false);
         return;
       }
       setLoading(true);
       setError(null);
       try {
-        const d = await getDocument(noteId, user.uid);
+        const d = await getDocument(noteId, ownerForFetch);
         if (mounted) setDoc(d);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Failed to load document";
@@ -46,7 +63,7 @@ export default function ChatPage() {
     return () => {
       mounted = false;
     };
-  }, [noteId, user?.uid]);
+  }, [noteId, user?.uid, effOwner]);
 
   const pdfUrl = useMemo(() => {
     if (!doc) return null;
@@ -256,7 +273,7 @@ export default function ChatPage() {
         className="flex-1 min-w-0 h-full"
         style={{ width: `${Math.round((1 - split) * 100)}%` }}
       >
-        <DocumentChat documentId={noteId} documentTitle={doc?.title || "Your Document"} />
+        <DocumentChat documentId={noteId} documentTitle={doc?.title || "Your Document"} ownerId={effOwner || user?.uid} />
       </div>
     </div>
   );
