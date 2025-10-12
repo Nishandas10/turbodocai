@@ -340,22 +340,22 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   }, [pendingContent, pendingMessageId, user?.uid, getCurrentDocumentStructure, documentId, placeContentAtLocation, effOwner])
 
   return (
-    <div className={`w-full h-full bg-gray-900 flex flex-col relative overflow-hidden ${isCollapsed ? 'min-w-0' : ''}`}>
+    <div className={`w-full h-full bg-card text-card-foreground flex flex-col relative overflow-hidden ${isCollapsed ? 'min-w-0' : ''}`}>
       {/* Top Branding + Collapse */}
-      <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm">
+      <div className="px-3 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
               <span className="text-white text-xs font-bold">⚡</span>
             </div>
-            <span className="text-gray-200 font-medium text-sm">BlumeNote AI</span>
+            <span className="text-card-foreground font-medium text-sm">BlumeNote AI</span>
           </div>
           {onCollapse && (
             <Button
               variant="ghost"
               size="sm"
               onClick={onCollapse}
-              className="text-gray-300 hover:text-white hover:bg-gray-800 px-3 py-1.5 text-sm"
+              className="text-muted-foreground hover:text-foreground hover:bg-muted px-3 py-1.5 text-sm"
             >
               <ChevronRight className="h-4 w-4 mr-1" />
               Collapse
@@ -369,14 +369,14 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         {messages.length === 0 && (
           <div className="h-full flex items-center justify-center px-6 py-8">
             <div className="text-center">
-              <h1 className="text-2xl md:text-3xl font-bold text-white">Hey, I&apos;m Blume AI</h1>
-              <p className="text-gray-400 text-sm md:text-base mt-1">Ask questions or tell me what to write — I can type into your doc with a live cursor.</p>
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground">Hey, I&apos;m Blume AI</h1>
+              <p className="text-muted-foreground text-sm md:text-base mt-1">Ask questions or tell me what to write — I can type into your doc with a live cursor.</p>
             </div>
           </div>
         )}
         {messages.map(m => (
-          <div key={m.id} className={`w-full text-left ${m.role === 'user' ? 'text-blue-200' : 'text-gray-100'}`}>
-            <div className={`inline-block rounded-lg ${m.role === 'user' ? 'bg-blue-700/50 px-3 py-2' : 'bg-gray-800/70 px-0 py-0'}`}>
+          <div key={m.id} className={`w-full text-left`}>
+            <div className={`inline-block rounded-lg ${m.role === 'user' ? 'bg-blue-500 text-white px-3 py-2' : 'bg-muted/40 px-0 py-0'}`}>
               {m.role === 'assistant' ? (
                 <div className="p-3">
                   <MarkdownMessage content={m.text} />
@@ -415,13 +415,13 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
           </div>
         ))}
         {sending && (
-          <div className="text-gray-300 text-sm">Thinking…</div>
+          <div className="text-muted-foreground text-sm">Thinking…</div>
         )}
       </div>
 
       {/* Input Field */}
       <div className="w-full px-3 pb-3">
-        <div className="relative bg-gray-700 border border-gray-600 rounded-lg overflow-hidden">
+        <div className="relative bg-background border border-border rounded-lg overflow-hidden">
           <input
             type="text"
             value={input}
@@ -433,13 +433,13 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
             }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
             placeholder={mode === 'chat' ? 'Ask a question…' : 'Type what to write into the doc…'}
-            className="w-full bg-transparent px-4 py-3 text-white placeholder-gray-400 focus:outline-none text-sm"
+            className="w-full bg-transparent px-4 py-3 text-foreground placeholder-muted-foreground focus:outline-none text-sm"
             disabled={sending}
           />
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-2 min-w-0">
               {listening && (
-                <div className="text-xs text-gray-300 truncate max-w-[60%]" aria-live="polite">
+                <div className="text-xs text-muted-foreground truncate max-w-[60%]" aria-live="polite">
                   {interimTranscript || 'Listening…'}
                 </div>
               )}
@@ -458,13 +458,13 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
                 }}
                 disabled={!speechSupported || sending}
                 title={speechSupported ? (listening ? 'Stop voice input' : 'Start voice input') : 'Voice not supported on this browser'}
-                className={`p-1 rounded ${listening ? 'text-red-400' : 'text-gray-300 hover:text-white'}`}
+                className={`p-1 rounded ${listening ? 'text-red-500' : 'text-muted-foreground hover:text-foreground'}`}
                 aria-pressed={listening}
                 aria-label={listening ? 'Stop voice input' : 'Start voice input'}
               >
                 <Mic className="h-5 w-5" />
               </button>
-              <button onClick={handleSend} disabled={!input.trim() || sending} className="text-gray-300 hover:text-white p-1">
+              <button onClick={handleSend} disabled={!input.trim() || sending} className="text-muted-foreground hover:text-foreground p-1">
                 <Send className="h-5 w-5" />
               </button>
             </div>
@@ -474,10 +474,10 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 w-full px-3 pb-4">
-        <button onClick={() => setMode('chat')} className={`w-full sm:flex-1 px-3 py-2 rounded-lg transition-colors flex items-center justify-center font-medium ${mode === 'chat' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 border border-gray-600'}`}>
+        <button onClick={() => setMode('chat')} className={`w-full sm:flex-1 px-3 py-2 rounded-lg transition-colors flex items-center justify-center font-medium ${mode === 'chat' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground border border-border'}`}>
           <MessageSquare className="h-4 w-4 mr-2" /> Chat
         </button>
-        <button onClick={() => setMode('write')} className={`w-full sm:flex-1 px-3 py-2 rounded-lg transition-colors flex items-center justify-center font-medium ${mode === 'write' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 border border-gray-600'}`}>
+        <button onClick={() => setMode('write')} className={`w-full sm:flex-1 px-3 py-2 rounded-lg transition-colors flex items-center justify-center font-medium ${mode === 'write' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground border border-border'}`}>
           <Edit3 className="h-4 w-4 mr-2" /> Write
         </button>
       </div>

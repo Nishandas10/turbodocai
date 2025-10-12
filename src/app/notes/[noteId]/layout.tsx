@@ -1,11 +1,21 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { ChevronLeft, FileText, MessageSquare, Star, Headphones, BookOpen, Target } from 'lucide-react'
+import { ChevronLeft, FileText, MessageSquare, Star, Headphones, BookOpen, Target, ChevronDown, LogOut, Moon, LayoutDashboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { AIAssistant } from '@/components/editor'
 import { useAuth } from '@/contexts/AuthContext'
+import { useTheme } from '@/contexts/ThemeContext'
+import Link from 'next/link'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuCheckboxItem,
+} from '@/components/ui/dropdown-menu'
 import ProtectedRoute from '@/components/ProtectedRoute'
 
 export default function NoteLayout({
@@ -21,7 +31,8 @@ export default function NoteLayout({
   const params = useParams()
   const pathname = usePathname()
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
+  const { theme, setTheme } = useTheme()
 
   // Handle resize functionality
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -183,19 +194,56 @@ export default function NoteLayout({
           
           {/* User Profile at bottom */}
           <div className="p-4 border-t border-sidebar-border">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-sidebar-accent rounded-full flex items-center justify-center">
-                <span className="text-sidebar-accent-foreground text-xs">
-                  {user?.email?.charAt(0).toUpperCase() || 'U'}
-                </span>
-              </div>
-              {!sidebarCollapsed && (
-                <div className="flex-1 min-w-0">
-                  <p className="text-sidebar-foreground text-sm font-medium">{user?.email || 'User'}</p>
-                  <p className="text-sidebar-accent-foreground text-xs">Free Plan</p>
-                </div>
-              )}
-            </div>
+            {user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className={`w-full ${sidebarCollapsed ? 'justify-center' : 'justify-between'} flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-sidebar-accent`}>
+                    <span className="flex items-center gap-3 min-w-0">
+                      <span className="w-8 h-8 bg-sidebar-accent rounded-full flex items-center justify-center text-sidebar-accent-foreground text-xs">
+                        {user?.email?.charAt(0).toUpperCase() || 'U'}
+                      </span>
+                      {!sidebarCollapsed && (
+                        <span className="min-w-0 text-left">
+                          <span className="block text-sm text-sidebar-foreground truncate">{user?.email || 'User'}</span>
+                          <span className="block text-xs text-sidebar-accent-foreground">Free Plan</span>
+                        </span>
+                      )}
+                    </span>
+                    {!sidebarCollapsed && <ChevronDown className="h-4 w-4 text-sidebar-accent-foreground" />}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="end" className="w-56">
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard" className="w-full">
+                      <LayoutDashboard className="h-4 w-4" />
+                      <span>Go to Dashboard</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={theme === 'dark'}
+                    onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+                  >
+                    <Moon className="h-4 w-4" />
+                    <span>Dark mode</span>
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      void signOut()
+                    }}
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>Log out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Link href="/signup" className={`w-full ${sidebarCollapsed ? 'justify-center' : 'justify-center gap-2'} flex items-center rounded-md px-2 py-1.5 border border-sidebar-border hover:bg-sidebar-accent text-sidebar-foreground`}>
+                <span className="text-sm">Sign in</span>
+              </Link>
+            )}
           </div>
         </div>
 
@@ -229,7 +277,7 @@ export default function NoteLayout({
 
                 {/* Right Sidebar - AI Assistant */}
                 <div 
-                  className="bg-gray-900 border-l border-gray-700 flex flex-col relative overflow-hidden transition-all duration-300 ease-in-out"
+                  className="bg-card text-card-foreground border-l border-border flex flex-col relative overflow-hidden transition-all duration-300 ease-in-out"
                   style={{ 
                     width: `${aiPanelWidth}px`,
                     transition: 'width 300ms ease-in-out'
