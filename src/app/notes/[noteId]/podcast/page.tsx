@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Headphones, Loader2, Download } from 'lucide-react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { generatePodcast as generatePodcastApi } from '@/lib/ragService'
 
@@ -10,6 +10,9 @@ export default function PodcastPage() {
   const params = useParams()
   const { user } = useAuth()
   const noteId = params?.noteId as string
+  const search = useSearchParams()
+  const ownerFromUrl = search?.get('owner') || undefined
+  const [effOwner, setEffOwner] = useState<string | undefined>(ownerFromUrl)
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -22,24 +25,42 @@ export default function PodcastPage() {
   const [isMuted, setIsMuted] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
 
+  // Resolve and persist effective owner for shared links
   useEffect(() => {
-    if (!noteId || !user?.uid) return
+    try {
+      if (noteId && ownerFromUrl) {
+        localStorage.setItem(`doc_owner_${noteId}`, ownerFromUrl)
+        setEffOwner(ownerFromUrl)
+      } else if (noteId && !ownerFromUrl) {
+        const stored = localStorage.getItem(`doc_owner_${noteId}`) || undefined
+        if (stored) setEffOwner(stored)
+        else setEffOwner(user?.uid)
+      }
+    } catch {
+      setEffOwner(ownerFromUrl || user?.uid)
+    }
+  }, [noteId, ownerFromUrl, user?.uid])
+
+  useEffect(() => {
+    const targetUser = effOwner || user?.uid
+    if (!noteId || !targetUser) return
     const run = async () => {
       try {
         setLoading(true)
         setError(null)
-        const res = await generatePodcastApi({ documentId: noteId, userId: user.uid })
+        const res = await generatePodcastApi({ documentId: noteId, userId: targetUser })
         setAudioUrl(res.audioUrl)
         setSummary(res.summary)
       } catch (e) {
         console.error('Podcast generation failed', e)
+        // For shared docs, permission errors or missing cache shouldn't hard-fail UI
         setError('Failed to generate podcast audio')
       } finally {
         setLoading(false)
       }
     }
     run()
-  }, [noteId, user?.uid])
+  }, [noteId, effOwner, user?.uid])
 
   const handlePlayPause = () => {
     if (audioRef.current) {

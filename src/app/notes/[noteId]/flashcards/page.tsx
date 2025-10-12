@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { RotateCcw, ChevronLeft, ChevronRight, BookOpen, Loader2, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { generateFlashcards, Flashcard, checkProcessingStatus } from '@/lib/ragService';
 import { db } from '@/lib/firebase';
@@ -18,6 +18,8 @@ import { useAuth } from '@/hooks/useAuth';
 //  - Defaults to generating 20 flashcards
 export default function FlashcardsPage() {
   const params = useParams();
+  const search = useSearchParams();
+  const router = useRouter();
   const noteId = params?.noteId as string | undefined;
   const { user } = useAuth();
   const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
@@ -28,6 +30,9 @@ export default function FlashcardsPage() {
   const [processingStatus, setProcessingStatus] = useState<string>('pending');
   const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  // Effective owner resolution for shared docs (anyone with link)
+  const ownerId = search?.get('owner') || undefined;
+  const [effOwner, setEffOwner] = useState<string | undefined>(ownerId);
   // generationAttemptedRef: final generation after processing complete
   const generationAttemptedRef = useRef(false);
   // earlyGeneratedRef: we generated once while still processing
@@ -35,9 +40,28 @@ export default function FlashcardsPage() {
   const lastGenerationTsRef = useRef<number>(0);
   const DEFAULT_FLASHCARD_COUNT = 20;
 
+  // Persist and recover owner query param like the main note page
+  useEffect(() => {
+    try {
+      if (noteId && ownerId) {
+        localStorage.setItem(`doc_owner_${noteId}`, ownerId);
+        setEffOwner(ownerId);
+      } else if (noteId && !ownerId) {
+        const stored = localStorage.getItem(`doc_owner_${noteId}`) || undefined;
+        if (stored) {
+          setEffOwner(stored);
+          // Keep URL consistent for downstream pages
+          try { router.replace(`/notes/${noteId}/flashcards?owner=${stored}`); } catch { /* noop */ }
+        }
+      }
+    } catch { /* ignore localStorage errors */ }
+  }, [noteId, ownerId, router]);
+
   interface FetchOpts { force?: boolean; final?: boolean }
   const fetchFlashcards = useCallback(async (opts: FetchOpts = {}) => {
-    if (!noteId || !user?.uid) return;
+    if (!noteId) return;
+    const targetOwner = effOwner || user?.uid;
+    if (!targetOwner) return;
     
     // Strict generation control
     if (!opts.force) {
@@ -63,34 +87,46 @@ export default function FlashcardsPage() {
     setLoading(true);
     setError(null);
     try {
-      // Ensure document processed
-      console.log('Checking processing status for noteId:', noteId);
-      const statusInfo = await checkProcessingStatus(noteId, user.uid);
-      console.log('Processing status:', statusInfo);
-      setProcessingStatus(statusInfo.status);
-      setProcessingProgress(statusInfo.progress);
-      const readyEnough =
-        statusInfo.status === 'completed' ||
-        statusInfo.status === 'ready' ||
-        statusInfo.status === 'processing' ||
-        statusInfo.status === 'failed'; // If processing failed, still attempt flashcards via server fallback
+      // Ensure document processed (using effective owner). If status lookup fails (permission), proceed anyway.
+      let readyEnough = true;
+      try {
+        console.log('Checking processing status for noteId:', noteId, 'owner:', targetOwner);
+        const statusInfo = await checkProcessingStatus(noteId, targetOwner);
+        console.log('Processing status:', statusInfo);
+        setProcessingStatus(statusInfo.status);
+        setProcessingProgress(statusInfo.progress);
+        readyEnough = (
+          statusInfo.status === 'completed' ||
+          statusInfo.status === 'ready' ||
+          statusInfo.status === 'processing' ||
+          statusInfo.status === 'failed' // If processing failed, still attempt flashcards via server fallback
+        );
+      } catch (statusErr) {
+        // Likely permission/not-found for non-owner; don't surface "failed" UI—just proceed with generation.
+        console.warn('Status check failed (continuing to generate):', statusErr);
+        setProcessingStatus('ready');
+        readyEnough = true;
+      }
       if (!readyEnough) {
         setLoading(false);
         return;
       }
-      console.log('Generating flashcards for noteId:', noteId);
-      const cards = await generateFlashcards({ documentId: noteId, userId: user.uid, count: DEFAULT_FLASHCARD_COUNT });
+      console.log('Generating flashcards for noteId:', noteId, 'owner:', targetOwner);
+      const cards = await generateFlashcards({ documentId: noteId, userId: targetOwner, count: DEFAULT_FLASHCARD_COUNT });
       console.log('Generated flashcards:', cards);
       setFlashcards(cards.map((c) => ({ ...c })));
       setCurrentCardIndex(0);
       setShowAnswer(false);
       // Mark generation state
-      if (statusInfo.status === 'processing' && !opts.final) {
-        earlyGeneratedRef.current = true;
-      }
-      if (statusInfo.status === 'completed' || statusInfo.status === 'ready' || opts.final) {
-        generationAttemptedRef.current = true;
-      }
+      try {
+        const statusInfo = await checkProcessingStatus(noteId, targetOwner);
+        if (statusInfo.status === 'processing' && !opts.final) {
+          earlyGeneratedRef.current = true;
+        }
+        if (statusInfo.status === 'completed' || statusInfo.status === 'ready' || opts.final) {
+          generationAttemptedRef.current = true;
+        }
+      } catch { /* ignore post-gen status check errors */ }
       lastGenerationTsRef.current = Date.now();
   // reset any future scoring metrics here
     } catch (e) {
@@ -100,7 +136,7 @@ export default function FlashcardsPage() {
     } finally {
       setLoading(false);
     }
-  }, [noteId, user?.uid, processingStatus, loading, flashcards.length]);
+  }, [noteId, user?.uid, effOwner, processingStatus, loading, flashcards.length]);
 
   // Single initial fetch ref
   const initialFetchRef = useRef(false);
@@ -119,36 +155,49 @@ export default function FlashcardsPage() {
 
   // Real-time listener for processing status -> auto generate once completed
   useEffect(() => {
-    if (!noteId || !user?.uid) return;
-    const documentRef = doc(db, 'documents', user.uid, 'userDocuments', noteId);
-    const unsub = onSnapshot(documentRef, (snap) => {
-      if (!snap.exists()) return;
-      interface LiveDocData { processingStatus?: string; status?: string; processingProgress?: number }
-      const data = snap.data() as LiveDocData;
-      const status = data.processingStatus || data.status || 'pending';
-      const progress = data.processingProgress;
-      
-      // Only update UI if status actually changed
-      if (status !== processingStatus) {
-        setProcessingStatus(status);
-        setProcessingProgress(progress);
+    if (!noteId) return;
+    const targetOwner = effOwner || user?.uid;
+    if (!targetOwner) return;
+    const documentRef = doc(db, 'documents', targetOwner, 'userDocuments', noteId);
+    const unsub = onSnapshot(
+      documentRef,
+      (snap) => {
+        if (!snap.exists()) return;
+        interface LiveDocData { processingStatus?: string; status?: string; processingProgress?: number }
+        const data = snap.data() as LiveDocData;
+        const status = data.processingStatus || data.status || 'pending';
+        const progress = data.processingProgress;
         
-        // Only auto-generate if:
-        // 1. Status just became completed/ready
-        // 2. We haven't done final generation yet
-        // 3. We're not currently loading
-  if ((status === 'completed' || status === 'ready' || status === 'failed') && 
-            !generationAttemptedRef.current && 
-            !loading) {
+        // Only update UI if status actually changed
+        if (status !== processingStatus) {
+          setProcessingStatus(status);
+          setProcessingProgress(progress);
+          
+          // Only auto-generate if:
+          // 1. Status just became completed/ready/failed
+          // 2. We haven't done final generation yet
+          // 3. We're not currently loading
+          if ((status === 'completed' || status === 'ready' || status === 'failed') && 
+              !generationAttemptedRef.current && 
+              !loading) {
+            fetchFlashcards({ final: true });
+          }
+        } else if (progress !== processingProgress) {
+          // Just update progress if only that changed
+          setProcessingProgress(progress);
+        }
+      },
+      (err) => {
+        console.warn('Live status listener error (treat as ready):', err);
+        setProcessingStatus('ready');
+        // Try a final generation once if we haven't yet
+        if (!generationAttemptedRef.current && !loading) {
           fetchFlashcards({ final: true });
         }
-      } else if (progress !== processingProgress) {
-        // Just update progress if only that changed
-        setProcessingProgress(progress);
       }
-    });
+    );
     return () => unsub();
-  }, [noteId, user?.uid, fetchFlashcards, processingStatus, processingProgress, loading]);
+  }, [noteId, user?.uid, effOwner, fetchFlashcards, processingStatus, processingProgress, loading]);
 
   // Polling fallback every 8s if still processing (in case listener misses update)
   useEffect(() => {
@@ -164,7 +213,9 @@ export default function FlashcardsPage() {
       return;
     }
 
-    if (!noteId || !user?.uid) return;
+    if (!noteId) return;
+    const targetOwner = effOwner || user?.uid;
+    if (!targetOwner) return;
     if (!pollingRef.current) {
       pollingRef.current = setInterval(() => {
         // Only poll if:
@@ -182,7 +233,7 @@ export default function FlashcardsPage() {
         pollingRef.current = null;
       }
     };
-  }, [processingStatus, noteId, user?.uid, fetchFlashcards, flashcards.length, loading]);
+  }, [processingStatus, noteId, user?.uid, effOwner, fetchFlashcards, flashcards.length, loading]);
 
   const handleNext = () => {
     if (currentCardIndex < flashcards.length - 1) {

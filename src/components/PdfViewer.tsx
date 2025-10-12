@@ -83,6 +83,13 @@ export default function PDFViewer({ fileUrl, className }: PDFViewerProps) {
 
   const renderWidth = Math.max(320, Math.min(2000, (width - 24) * zoom));
 
+  // Reset view state when a new PDF URL is provided
+  useEffect(() => {
+    setNumPages(0);
+    setZoom(1);
+    setError(null);
+  }, [fileUrl]);
+
   return (
     <div ref={containerRef} className={className ?? "h-full w-full bg-background"}>
       <div className="h-full w-full flex flex-col">

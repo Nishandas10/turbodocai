@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { getDocument } from "@/lib/firestore";
+// import { getDocument } from "@/lib/firestore";
 import type { Document as Doc } from "@/lib/types";
 import DocumentChat from "@/components/DocumentChat";
 import PDFViewer from "@/components/PdfViewer";
-import { getFileDownloadURL, getUserDocumentsPath } from "@/lib/storage";
+// import { getFileDownloadURL, getUserDocumentsPath } from "@/lib/storage";
+import { db } from "@/lib/firebase";
+import { doc as fsDoc, onSnapshot, Timestamp } from "firebase/firestore";
 
 export default function ChatPage() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,161 +42,96 @@ export default function ChatPage() {
   }, [noteId, ownerParam]);
 
   useEffect(() => {
-    let mounted = true;
-    const run = async () => {
-      const ownerForFetch = effOwner || user?.uid;
-      if (!ownerForFetch || !noteId) {
+    const ownerForFetch = effOwner || user?.uid;
+    if (!ownerForFetch || !noteId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const ref = fsDoc(db, 'documents', ownerForFetch, 'userDocuments', noteId);
+    const unsub = onSnapshot(ref, (snap) => {
+      if (!snap.exists()) {
+        setDoc(null);
         setLoading(false);
         return;
       }
-      setLoading(true);
-      setError(null);
-      try {
-        const d = await getDocument(noteId, ownerForFetch);
-        if (mounted) setDoc(d);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Failed to load document";
-        if (mounted) setError(msg);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-    run();
-    return () => {
-      mounted = false;
-    };
+      const data = { id: snap.id, ...snap.data() } as Doc;
+      setDoc(data);
+      setLoading(false);
+    }, (err) => {
+      setError(err?.message || 'Failed to load document');
+      setLoading(false);
+    });
+    return () => unsub();
   }, [noteId, user?.uid, effOwner]);
 
   const pdfUrl = useMemo(() => {
     if (!doc) return null;
     const mime = doc.metadata?.mimeType || "";
     const isPdf = (doc.type === "pdf") || mime.includes("pdf") || (doc.metadata?.fileName?.toLowerCase().endsWith(".pdf") ?? false);
-    return isPdf ? (doc.metadata?.downloadURL || null) : null;
+    const baseUrl = isPdf ? (doc.metadata?.downloadURL || null) : null;
+    if (!baseUrl) return null;
+    // Add cache-busting so newly uploaded PDFs don't show stale cached content
+    const toMs = (val: Timestamp | Date | string | number | undefined): number => {
+      try {
+        if (!val) return Date.now();
+        if (val instanceof Date) return val.getTime();
+        if (typeof val === 'string' || typeof val === 'number') {
+          const t = new Date(val).getTime();
+          return isNaN(t) ? Date.now() : t;
+        }
+        if (typeof val === 'object' && val && 'toDate' in (val as Timestamp)) {
+          try { return (val as Timestamp).toDate().getTime(); } catch { return Date.now(); }
+        }
+        const t = new Date(String(val)).getTime();
+        return isNaN(t) ? Date.now() : t;
+      } catch { return Date.now(); }
+    };
+    const version = toMs(doc.updatedAt || doc.lastAccessed || doc.createdAt || Date.now());
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${sep}v=${version}`;
   }, [doc]);
 
-  // Verify the URL is actually a PDF before rendering the viewer to avoid InvalidPDFException
+  // Fetch the PDF as a Blob to guarantee fresh content and create an object URL for the viewer
   useEffect(() => {
     let cancelled = false;
-    
-    // Helper to get/set cached PDF URL with 1-hour TTL
-    const getCachedPdfUrl = (url: string): string | null => {
-      try {
-        const key = `pdf_verified_${btoa(url).slice(0, 20)}`;
-        const cached = localStorage.getItem(key);
-        if (cached) {
-          const { verifiedUrl, timestamp } = JSON.parse(cached);
-          const hourAgo = Date.now() - (60 * 60 * 1000);
-          if (timestamp > hourAgo) return verifiedUrl;
-        }
-      } catch {}
-      return null;
-    };
-    
-    const setCachedPdfUrl = (originalUrl: string, verifiedUrl: string | null) => {
-      try {
-        const key = `pdf_verified_${btoa(originalUrl).slice(0, 20)}`;
-        localStorage.setItem(key, JSON.stringify({
-          verifiedUrl,
-          timestamp: Date.now()
-        }));
-      } catch {}
-    };
-    
-    async function verify(url: string) {
-      // Check cache first
-      const cached = getCachedPdfUrl(url);
-      if (cached !== null) {
-        if (!cancelled) setVerifiedPdfUrl(cached);
+    let objUrl: string | null = null;
+    (async () => {
+      if (!pdfUrl) {
+        setVerifiedPdfUrl(null);
+        setVerifyingPdf(false);
         return;
       }
-      
       setVerifyingPdf(true);
       setVerifiedPdfUrl(null);
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6000);
-
-        // Try HEAD for content-type first
-        let isPdf = false;
+        // Force revalidation to bypass caches
+        const res = await fetch(pdfUrl, { cache: 'reload' });
+        if (!res.ok) throw new Error('Failed to fetch PDF');
+        const blob = await res.blob();
+        // Magic byte check
         try {
-          const headRes = await fetch(url, { method: "HEAD", mode: "cors", signal: controller.signal });
-          const ct = headRes.headers.get("content-type") || headRes.headers.get("Content-Type") || "";
-          if (headRes.ok && ct.toLowerCase().includes("pdf")) {
-            isPdf = true;
-          }
+          const head = await blob.slice(0, 5).text();
+          if (head !== '%PDF-') throw new Error('Not a PDF');
         } catch {
-          // Ignore, fall back to magic byte check
+          // Some environments may block text() but react-pdf will still attempt; proceed anyway
         }
-
-        if (!isPdf) {
-          // Fetch first few bytes and check for %PDF-
-          try {
-            const rangeRes = await fetch(url, {
-              method: "GET",
-              headers: { Range: "bytes=0-7" },
-              mode: "cors",
-              signal: controller.signal,
-            });
-            if (rangeRes.ok) {
-              const buf = await rangeRes.arrayBuffer();
-              const bytes = new Uint8Array(buf).slice(0, 5);
-              const magic = Array.from(bytes).map((b) => String.fromCharCode(b)).join("");
-              if (magic === "%PDF-") isPdf = true;
-            }
-          } catch {
-            // If this also fails, we'll treat as not verified
-          }
-        }
-
-        clearTimeout(timeout);
-        const finalUrl = isPdf ? url : null;
-        if (!cancelled) {
-          setVerifiedPdfUrl(finalUrl);
-          setCachedPdfUrl(url, finalUrl);
-        }
-
-        // Fallback: For documents of type 'pdf', try reconstructing the original storage path
-        if (!isPdf && doc?.type === "pdf" && user?.uid && !cancelled) {
-          try {
-            const path = `${getUserDocumentsPath(user.uid)}/${noteId}.pdf`;
-            const altUrl = await getFileDownloadURL(path);
-            if (altUrl) {
-              // Quick verify via magic bytes without HEAD (some providers block HEAD)
-              try {
-                const res = await fetch(altUrl, { headers: { Range: "bytes=0-7" } });
-                if (res.ok) {
-                  const buf = await res.arrayBuffer();
-                  const bytes = new Uint8Array(buf).slice(0, 5);
-                  const magic = Array.from(bytes).map((b) => String.fromCharCode(b)).join("");
-                  if (magic === "%PDF-") {
-                    if (!cancelled) {
-                      setVerifiedPdfUrl(altUrl);
-                      setCachedPdfUrl(url, altUrl);
-                    }
-                  }
-                }
-              } catch {
-                // ignore
-              }
-            }
-          } catch {
-            // ignore fallback failure
-          }
-        }
+        objUrl = URL.createObjectURL(blob);
+        if (!cancelled) setVerifiedPdfUrl(objUrl);
+      } catch {
+        if (!cancelled) setVerifiedPdfUrl(null);
       } finally {
         if (!cancelled) setVerifyingPdf(false);
       }
-    }
-
-    if (pdfUrl) verify(pdfUrl);
-    else {
-      setVerifiedPdfUrl(null);
-      setVerifyingPdf(false);
-    }
+    })();
     return () => {
       cancelled = true;
+      if (objUrl) {
+        try { URL.revokeObjectURL(objUrl); } catch {}
+      }
     };
-  }, [pdfUrl, doc?.type, noteId, user?.uid]);
+  }, [pdfUrl]);
 
   // Resizer handlers (md+ only)
   const onMouseDownDivider = useCallback((e: React.MouseEvent<HTMLDivElement>) => {

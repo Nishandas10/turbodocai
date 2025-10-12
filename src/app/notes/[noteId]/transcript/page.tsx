@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { FileText, Copy, Download, Search, Loader2 } from 'lucide-react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { getDocumentText } from '@/lib/ragService'
 
@@ -10,29 +10,50 @@ export default function TranscriptPage() {
   const params = useParams()
   const { user } = useAuth()
   const noteId = params?.noteId as string
+  const search = useSearchParams()
+  const ownerFromUrl = search?.get('owner') || undefined
+  const [effOwner, setEffOwner] = useState<string | undefined>(ownerFromUrl)
 
   const [rawText, setRawText] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
 
+  // Resolve and persist effective owner for shared links
   useEffect(() => {
-    if (!noteId || !user?.uid) return
+    try {
+      if (noteId && ownerFromUrl) {
+        localStorage.setItem(`doc_owner_${noteId}`, ownerFromUrl)
+        setEffOwner(ownerFromUrl)
+      } else if (noteId && !ownerFromUrl) {
+        const stored = localStorage.getItem(`doc_owner_${noteId}`) || undefined
+        if (stored) setEffOwner(stored)
+        else setEffOwner(user?.uid)
+      }
+    } catch {
+      setEffOwner(ownerFromUrl || user?.uid)
+    }
+  }, [noteId, ownerFromUrl, user?.uid])
+
+  useEffect(() => {
+    const targetUser = effOwner || user?.uid
+    if (!noteId || !targetUser) return
     const run = async () => {
       try {
         setLoading(true)
         setError(null)
-        const res = await getDocumentText({ documentId: noteId, userId: user.uid })
+        const res = await getDocumentText({ documentId: noteId, userId: targetUser })
         setRawText(res.text || '')
       } catch (e) {
         console.error('Transcript load failed', e)
+        // For shared docs, if we cannot read raw text due to permissions, keep UI graceful
         setError('Failed to load transcript text')
       } finally {
         setLoading(false)
       }
     }
     run()
-  }, [noteId, user?.uid])
+  }, [noteId, effOwner, user?.uid])
 
   const filtered = useMemo(() => {
     if (!searchTerm) return rawText
