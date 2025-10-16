@@ -64,6 +64,48 @@ export class QueryService {
     try {
       logger.info(`Processing RAG query for user ${userId}: ${question}`);
 
+      // If a specific document is targeted and it has OpenAI Vector Store metadata, use OpenAI file_search
+      if (documentId) {
+        try {
+          const db = getFirestore();
+          const snap = await db
+            .collection("documents")
+            .doc(userId)
+            .collection("userDocuments")
+            .doc(documentId)
+            .get();
+          const data = (snap.data() as any) || {};
+          const vsId = data?.metadata?.openaiVector?.vectorStoreId;
+          if (vsId) {
+            logger.info("Routing query to OpenAI Vector Store file_search", {
+              documentId,
+              vsId,
+            });
+            const answer = await this.answerWithOpenAIVectorStore(
+              question,
+              vsId
+            );
+            const title = data?.title || "Document";
+            const fileName = data?.metadata?.fileName as string | undefined;
+            return {
+              answer,
+              sources: [
+                {
+                  documentId,
+                  title,
+                  fileName,
+                  chunk: "Retrieved via OpenAI Vector Store file search",
+                  score: 1.0,
+                },
+              ],
+              confidence: 80,
+            };
+          }
+        } catch (e) {
+          logger.warn("OpenAI Vector Store routing failed, falling back", e);
+        }
+      }
+
       // Step 1: Generate embedding for the question
       const queryEmbedding = await this.embeddingService.embedQuery(question);
 
@@ -185,6 +227,47 @@ export class QueryService {
   }
 
   /**
+   * Answer a question using OpenAI Responses API with file_search tool over a vector store id.
+   */
+  private async answerWithOpenAIVectorStore(
+    question: string,
+    vectorStoreId: string
+  ): Promise<string> {
+    try {
+      const resp: any = await (this.openai as any).responses.create({
+        model: "gpt-4.1-mini",
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  "Use the file search tool on the attached vector store to answer strictly from the document. If insufficient, say so clearly.\n\nQuestion: " +
+                  String(question),
+              },
+            ],
+          },
+        ],
+        tools: [{ type: "file_search" }],
+        tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
+        temperature: 0.1,
+        max_output_tokens: 900,
+      });
+      const fullText =
+        resp?.output_text ||
+        resp?.output?.[0]?.content?.[0]?.text ||
+        resp?.data?.[0]?.content?.[0]?.text ||
+        resp?.choices?.[0]?.message?.content ||
+        "I couldn't generate an answer.";
+      return String(fullText);
+    } catch (err) {
+      logger.error("answerWithOpenAIVectorStore failed", err as any);
+      throw err;
+    }
+  }
+
+  /**
    * Generate answer using OpenAI
    */
   private async generateAnswer(
@@ -238,6 +321,43 @@ Answer:`;
   }
 
   /**
+   * Summarize a document using OpenAI Responses API with file_search over a vector store.
+   * This asks the model to produce a structured markdown summary grounded only on the attached store.
+   */
+  private async summarizeWithOpenAIVectorStore(
+    vectorStoreId: string,
+    maxLength: number,
+    title: string
+  ): Promise<string> {
+    try {
+      const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the attached document titled "${title}" using only retrieved content.\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.`;
+      const resp: any = await (this.openai as any).responses.create({
+        model: "gpt-4.1-mini",
+        input: [
+          {
+            role: "user",
+            content: [{ type: "input_text", text: prompt }],
+          },
+        ],
+        tools: [{ type: "file_search" }],
+        tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
+        temperature: 0.2,
+        max_output_tokens: Math.ceil(maxLength * 2),
+      });
+      const fullText =
+        resp?.output_text ||
+        resp?.output?.[0]?.content?.[0]?.text ||
+        resp?.data?.[0]?.content?.[0]?.text ||
+        resp?.choices?.[0]?.message?.content ||
+        "";
+      return String(fullText || "").trim();
+    } catch (err) {
+      logger.error("summarizeWithOpenAIVectorStore failed", err as any);
+      throw err;
+    }
+  }
+
+  /**
    * Generate a summary of a document
    */
   async generateDocumentSummary(
@@ -246,6 +366,68 @@ Answer:`;
     maxLength: number = 500
   ): Promise<string> {
     try {
+      // If the document was indexed into OpenAI Vector Store (DOCX path), use file_search-based summarization
+      try {
+        const db = getFirestore();
+        const snap = await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .get();
+        if (snap.exists) {
+          const data = (snap.data() as any) || {};
+          const vsId: string | undefined =
+            data?.metadata?.openaiVector?.vectorStoreId;
+          if (vsId) {
+            logger.info("Summarizing via OpenAI Vector Store", {
+              documentId,
+              vsId,
+            });
+            try {
+              const summary = await this.summarizeWithOpenAIVectorStore(
+                vsId,
+                maxLength,
+                String(data?.title || "Document")
+              );
+              if (summary && summary.trim().length) return summary;
+            } catch (e) {
+              logger.warn(
+                "Vector store summarization failed, attempting Firestore raw content fallback",
+                e as any
+              );
+              // Fallback to Firestore raw content if available
+              const rawText: string = String(
+                data?.content?.raw || data?.content?.processed || ""
+              ).slice(0, 24000);
+              if (rawText && rawText.length > 100) {
+                const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
+                const resp = await this.openai.chat.completions.create({
+                  model: "gpt-4o-mini",
+                  messages: [
+                    {
+                      role: "system",
+                      content:
+                        "You are an expert summarizer. Produce clear, well-structured markdown. No code fences.",
+                    },
+                    { role: "user", content: prompt },
+                  ],
+                  max_tokens: Math.ceil(maxLength * 1.6),
+                  temperature: 0.25,
+                });
+                const txt = resp.choices?.[0]?.message?.content || "";
+                if (txt) return txt;
+              }
+            }
+          }
+        }
+      } catch (vsCheckErr) {
+        logger.warn(
+          "Vector store check failed; proceeding with Pinecone path",
+          vsCheckErr as any
+        );
+      }
+
       // First attempt to infer chunkCount from a representative vector (by querying 1 similar vector)
       // Fallback: assume up to 1000 chunks cap
       let chunkCount = 0;

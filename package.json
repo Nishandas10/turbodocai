@@ -11,6 +11,7 @@
   "dependencies": {
     "@editorjs/editorjs": "^2.30.8",
     "@editorjs/header": "^2.8.8",
+    "mammoth": "^1.6.0",
     "@editorjs/list": "^2.0.8",
     "@editorjs/marker": "^1.4.0",
     "@editorjs/paragraph": "^2.11.7",

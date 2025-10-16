@@ -66,8 +66,10 @@ export default function DocumentUploadModal(props: any) {
         setUploadSuccess(true)
         setIsUploading(false)
         
-        // Start processing status monitoring for PDFs
-        if (selectedFile.type === 'application/pdf') {
+  // Start processing status monitoring for PDFs and DOC/DOCX
+  const isPdf = selectedFile.type === 'application/pdf' || /\.pdf$/i.test(selectedFile.name);
+  const isDocx = /\.(docx|doc)$/i.test(selectedFile.name);
+  if (isPdf || isDocx) {
           setIsProcessing(true)
           setProcessingStatus("Processing document...")
           // Start optimistic progress when processing starts

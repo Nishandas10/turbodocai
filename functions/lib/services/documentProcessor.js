@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DocumentProcessor = void 0;
 const pdf_parse_1 = __importDefault(require("pdf-parse"));
+const mammoth_1 = __importDefault(require("mammoth"));
 const firebase_functions_1 = require("firebase-functions");
 class DocumentProcessor {
     /**
@@ -22,6 +23,32 @@ class DocumentProcessor {
             firebase_functions_1.logger.error("Error extracting text from PDF:", error);
             throw new Error("Failed to extract text from PDF");
         }
+    }
+    /**
+     * Extract text from DOCX buffer using mammoth
+     */
+    async extractTextFromDOCX(buffer) {
+        var _a;
+        try {
+            const result = await mammoth_1.default.extractRawText({ buffer });
+            const text = result.value || "";
+            firebase_functions_1.logger.info(`Extracted text from DOCX: ${text.length} characters, messages: ${((_a = result === null || result === void 0 ? void 0 : result.messages) === null || _a === void 0 ? void 0 : _a.length) || 0}`);
+            return this.cleanExtractedText(text);
+        }
+        catch (error) {
+            firebase_functions_1.logger.error("Error extracting text from DOCX:", error);
+            throw new Error("Failed to extract text from DOCX");
+        }
+    }
+    /**
+     * Dispatch extraction by mime/extension hint
+     */
+    async extractText(buffer, type) {
+        if (type === "pdf")
+            return this.extractTextFromPDF(buffer);
+        if (type === "docx")
+            return this.extractTextFromDOCX(buffer);
+        throw new Error(`Unsupported document type for extraction: ${type}`);
     }
     /**
      * Clean extracted text by removing excessive whitespace and formatting

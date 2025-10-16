@@ -236,15 +236,12 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
 });
 /**
  * Cloud Function triggered when a document is created or updated in Firestore
- * Processes PDF files through the RAG pipeline:
- * 1. Download file from Storage
- * 2. Extract text using pdf-parse
- * 3. Chunk the text
- * 4. Generate embeddings
- * 5. Store in Pinecone
+ * Processes documents through the RAG pipeline:
+ * - For PDF: Extract with pdf-parse, chunk, embed with text-embedding-3-small (1024 dims) and store in Pinecone (existing flow)
+ * - For DOC/DOCX: Extract with Mammoth, upload full text to OpenAI Vector Store (OpenAI handles chunk+embedding using text-embedding-3-large); do not store in Pinecone.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -276,13 +273,9 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
         }
         // Initialize services
         const { documentProcessor, embeddingService, pineconeService } = createServices();
-        // Only process if it's a PDF and has a storage path
-        if (documentData.type !== "pdf") {
-            firebase_functions_1.logger.info(`Skipping processing - not a PDF document, type: ${documentData.type}`);
-            return;
-        }
+        // Only proceed when we have a storage path
         if (!((_h = documentData.metadata) === null || _h === void 0 ? void 0 : _h.storagePath)) {
-            firebase_functions_1.logger.info(`PDF document ${documentId} doesn't have storagePath yet, will process when storage info is updated`);
+            firebase_functions_1.logger.info(`Document ${documentId} doesn't have storagePath yet, will process when storage info is updated`);
             return;
         }
         // Skip if already processed
@@ -321,9 +314,20 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
         // Step 1: Download file from Firebase Storage
         firebase_functions_1.logger.info("Downloading file from storage...");
         const fileBuffer = await downloadFileFromStorage(documentData.metadata.storagePath);
-        // Step 2: Extract text from PDF
-        firebase_functions_1.logger.info("Extracting text from PDF...");
-        const extractedText = await documentProcessor.extractTextFromPDF(fileBuffer);
+        const docType = (documentData.type || "").toLowerCase();
+        let extractedText = "";
+        if (docType === "pdf") {
+            firebase_functions_1.logger.info("Extracting text from PDF...");
+            extractedText = await documentProcessor.extractTextFromPDF(fileBuffer);
+        }
+        else if (docType === "docx") {
+            firebase_functions_1.logger.info("Extracting text from DOCX via Mammoth...");
+            extractedText = await documentProcessor.extractTextFromDOCX(fileBuffer);
+        }
+        else {
+            firebase_functions_1.logger.info(`Unsupported document type for processing: ${docType}`);
+            return;
+        }
         if (!extractedText || extractedText.length < 10) {
             throw new Error("No meaningful text extracted from PDF");
         }
@@ -336,97 +340,148 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             truncated = true;
             firebase_functions_1.logger.warn(`Document text truncated to ${MAX_CHARS} characters to conserve memory`);
         }
-        // Streaming chunk generation to avoid holding all chunks
-        function* generateChunks(text, chunkSize = 300, overlap = 20) {
-            const words = text.split(/\s+/);
-            let start = 0;
-            while (start < words.length) {
-                const end = Math.min(start + chunkSize, words.length);
-                const chunk = words.slice(start, end).join(" ").trim();
-                if (chunk)
-                    yield chunk;
-                start = end - overlap;
-                if (start < 0)
-                    start = 0;
-                if (start >= end)
-                    start = end; // safety
+        // If PDF: continue existing Pinecone streaming pipeline
+        if (docType === "pdf") {
+            // Streaming chunk generation to avoid holding all chunks
+            function* generateChunks(text, chunkSize = 300, overlap = 20) {
+                const words = text.split(/\s+/);
+                let start = 0;
+                while (start < words.length) {
+                    const end = Math.min(start + chunkSize, words.length);
+                    const chunk = words.slice(start, end).join(" ").trim();
+                    if (chunk)
+                        yield chunk;
+                    // If we've reached the end, stop to avoid repeating the last window forever
+                    if (end >= words.length)
+                        break;
+                    const nextStart = end - overlap;
+                    // Safety: ensure forward progress
+                    start = Math.max(nextStart, start + 1);
+                }
             }
-        }
-        firebase_functions_1.logger.info("Beginning streaming chunk processing...");
-        let chunkCount = 0;
-        const memLog = () => {
-            const mu = process.memoryUsage();
-            firebase_functions_1.logger.info("Memory usage", {
-                rss: mu.rss,
-                heapUsed: mu.heapUsed,
-                heapTotal: mu.heapTotal,
-                external: mu.external,
-            });
-        };
-        let processedChars = 0;
-        const totalChars = workingText.length;
-        for (const chunk of generateChunks(workingText, 300, 20)) {
-            const i = chunkCount;
-            chunkCount++;
-            if (chunkCount === 1)
-                firebase_functions_1.logger.info("First chunk length", { len: chunk.length });
-            if (chunkCount % 25 === 0)
-                firebase_functions_1.logger.info(`Processed ${chunkCount} chunks so far`);
-            try {
-                const embedding = await embeddingService.embedChunks([chunk]);
-                await pineconeService.storeEmbeddings([chunk], embedding, documentId, userId, {
-                    title: documentData.title,
-                    fileName: (_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName,
-                }, i);
-            }
-            catch (chunkError) {
-                firebase_functions_1.logger.error(`Error processing chunk ${chunkCount}`, chunkError);
-            }
-            processedChars += chunk.length;
-            // Periodic progress update (every 25 chunks) capped below 100 until completion
-            if (chunkCount % 25 === 0) {
-                const progressPct = Math.min(99, Math.round((processedChars / totalChars) * 100));
+            firebase_functions_1.logger.info("Beginning streaming chunk processing...");
+            let chunkCount = 0;
+            const memLog = () => {
+                const mu = process.memoryUsage();
+                firebase_functions_1.logger.info("Memory usage", {
+                    rss: mu.rss,
+                    heapUsed: mu.heapUsed,
+                    heapTotal: mu.heapTotal,
+                    external: mu.external,
+                });
+            };
+            let processedChars = 0;
+            const totalChars = workingText.length;
+            for (const chunk of generateChunks(workingText, 300, 20)) {
+                const i = chunkCount;
+                chunkCount++;
+                if (chunkCount === 1)
+                    firebase_functions_1.logger.info("First chunk length", { len: chunk.length });
+                if (chunkCount % 25 === 0)
+                    firebase_functions_1.logger.info(`Processed ${chunkCount} chunks so far`);
                 try {
-                    await db
-                        .collection("documents")
-                        .doc(userId)
-                        .collection("userDocuments")
-                        .doc(documentId)
-                        .set({
-                        processingProgress: progressPct,
-                        processingStatus: "processing",
-                        chunkCount,
-                    }, { merge: true });
+                    const embedding = await embeddingService.embedChunks([chunk]);
+                    await pineconeService.storeEmbeddings([chunk], embedding, documentId, userId, {
+                        title: documentData.title,
+                        fileName: (_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName,
+                    }, i);
                 }
-                catch (progressErr) {
-                    firebase_functions_1.logger.warn("Progress update failed", progressErr);
+                catch (chunkError) {
+                    firebase_functions_1.logger.error(`Error processing chunk ${chunkCount}`, chunkError);
                 }
+                processedChars += chunk.length;
+                // Periodic progress update (every 25 chunks) capped below 100 until completion
+                if (chunkCount % 25 === 0) {
+                    const progressPct = Math.min(99, Math.round((processedChars / totalChars) * 100));
+                    try {
+                        await db
+                            .collection("documents")
+                            .doc(userId)
+                            .collection("userDocuments")
+                            .doc(documentId)
+                            .set({
+                            processingProgress: progressPct,
+                            processingStatus: "processing",
+                            chunkCount,
+                        }, { merge: true });
+                    }
+                    catch (progressErr) {
+                        firebase_functions_1.logger.warn("Progress update failed", progressErr);
+                    }
+                }
+                if (global.gc)
+                    global.gc();
+                if (chunkCount % 10 === 0)
+                    memLog();
+                // Tiny delay to yield event loop & allow GC
+                await new Promise((r) => setTimeout(r, 40));
             }
-            if (global.gc)
-                global.gc();
-            if (chunkCount % 10 === 0)
-                memLog();
-            // Tiny delay to yield event loop & allow GC
-            await new Promise((r) => setTimeout(r, 40));
+            // Update document with processed content and status
+            await db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(documentId)
+                .update({
+                "content.raw": workingText.slice(0, 1000000),
+                "content.processed": `Indexed ${chunkCount} chunks${truncated ? " (truncated)" : ""}`,
+                processingStatus: "completed",
+                processingCompletedAt: new Date(),
+                chunkCount,
+                characterCount: workingText.length,
+                truncated,
+                processingProgress: 100,
+                processingLock: null,
+            });
+            firebase_functions_1.logger.info(`Successfully processed document ${documentId} with ${chunkCount} chunks`);
+            return; // PDF path done
         }
-        // Update document with processed content and status
-        await db
-            .collection("documents")
-            .doc(userId)
-            .collection("userDocuments")
-            .doc(documentId)
-            .update({
-            "content.raw": workingText.slice(0, 1000000),
-            "content.processed": `Indexed ${chunkCount} chunks${truncated ? " (truncated)" : ""}`,
-            processingStatus: "completed",
-            processingCompletedAt: new Date(),
-            chunkCount,
-            characterCount: workingText.length,
-            truncated,
-            processingProgress: 100,
-            processingLock: null,
-        });
-        firebase_functions_1.logger.info(`Successfully processed document ${documentId} with ${chunkCount} chunks`);
+        // DOCX path: upload text to OpenAI Vector Store (no Pinecone)
+        {
+            const workingText = extractedText;
+            const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
+            const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
+            // Update progress early
+            await db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(documentId)
+                .set({
+                processingStatus: "processing",
+                processingProgress: 20,
+            }, { merge: true });
+            const vsUpload = await openaiVS.uploadTextAsDocument(workingText, {
+                userId,
+                documentId,
+                title: documentData.title,
+                fileName: (_k = documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName,
+            });
+            // Update Firestore with processed content and status
+            await db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(documentId)
+                .update({
+                "content.raw": workingText.slice(0, 1000000),
+                "content.processed": `Indexed to OpenAI Vector Store`,
+                "metadata.openaiVector": {
+                    vectorStoreId: vsId,
+                    fileId: vsUpload.fileId,
+                    vectorStoreFileId: vsUpload.vectorStoreFileId,
+                },
+                processingStatus: "completed",
+                processingCompletedAt: new Date(),
+                // Remove chunkCount field if present; cannot set undefined in Firestore update
+                chunkCount: firestore_2.FieldValue.delete(),
+                characterCount: workingText.length,
+                truncated: false,
+                processingProgress: 100,
+                processingLock: null,
+            });
+            firebase_functions_1.logger.info(`Successfully processed DOCX document ${documentId} into OpenAI Vector Store`);
+        }
     }
     catch (error) {
         firebase_functions_1.logger.error(`Error processing document ${documentId}:`, error);

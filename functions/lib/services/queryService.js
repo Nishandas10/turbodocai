@@ -22,9 +22,48 @@ class QueryService {
      * Query the RAG system with a question
      */
     async queryRAG(question, userId, documentId, topK = 5) {
-        var _a, _b, _c, _d;
+        var _a, _b, _c, _d, _e, _f, _g;
         try {
             firebase_functions_1.logger.info(`Processing RAG query for user ${userId}: ${question}`);
+            // If a specific document is targeted and it has OpenAI Vector Store metadata, use OpenAI file_search
+            if (documentId) {
+                try {
+                    const db = (0, firestore_1.getFirestore)();
+                    const snap = await db
+                        .collection("documents")
+                        .doc(userId)
+                        .collection("userDocuments")
+                        .doc(documentId)
+                        .get();
+                    const data = snap.data() || {};
+                    const vsId = (_b = (_a = data === null || data === void 0 ? void 0 : data.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.vectorStoreId;
+                    if (vsId) {
+                        firebase_functions_1.logger.info("Routing query to OpenAI Vector Store file_search", {
+                            documentId,
+                            vsId,
+                        });
+                        const answer = await this.answerWithOpenAIVectorStore(question, vsId);
+                        const title = (data === null || data === void 0 ? void 0 : data.title) || "Document";
+                        const fileName = (_c = data === null || data === void 0 ? void 0 : data.metadata) === null || _c === void 0 ? void 0 : _c.fileName;
+                        return {
+                            answer,
+                            sources: [
+                                {
+                                    documentId,
+                                    title,
+                                    fileName,
+                                    chunk: "Retrieved via OpenAI Vector Store file search",
+                                    score: 1.0,
+                                },
+                            ],
+                            confidence: 80,
+                        };
+                    }
+                }
+                catch (e) {
+                    firebase_functions_1.logger.warn("OpenAI Vector Store routing failed, falling back", e);
+                }
+            }
             // Step 1: Generate embedding for the question
             const queryEmbedding = await this.embeddingService.embedQuery(question);
             // Step 2: Search Pinecone for similar chunks
@@ -43,11 +82,11 @@ class QueryService {
                         if (snap.exists) {
                             const data = snap.data();
                             let context = (data.summary ||
-                                ((_a = data.content) === null || _a === void 0 ? void 0 : _a.raw) ||
-                                ((_b = data.content) === null || _b === void 0 ? void 0 : _b.processed) ||
+                                ((_d = data.content) === null || _d === void 0 ? void 0 : _d.raw) ||
+                                ((_e = data.content) === null || _e === void 0 ? void 0 : _e.processed) ||
                                 "").slice(0, 24000);
                             if (!context || context.length < 80) {
-                                const url = (_c = data.metadata) === null || _c === void 0 ? void 0 : _c.downloadURL;
+                                const url = (_f = data.metadata) === null || _f === void 0 ? void 0 : _f.downloadURL;
                                 if (url) {
                                     try {
                                         const res = await fetch(url);
@@ -64,7 +103,7 @@ class QueryService {
                             if (context && context.length >= 80) {
                                 const answer = await this.generateAnswer(question, context);
                                 const sourceTitle = data.title || "Document";
-                                const fileName = (_d = data.metadata) === null || _d === void 0 ? void 0 : _d.fileName;
+                                const fileName = (_g = data.metadata) === null || _g === void 0 ? void 0 : _g.fileName;
                                 return {
                                     answer,
                                     sources: [
@@ -121,6 +160,43 @@ class QueryService {
         }
     }
     /**
+     * Answer a question using OpenAI Responses API with file_search tool over a vector store id.
+     */
+    async answerWithOpenAIVectorStore(question, vectorStoreId) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        try {
+            const resp = await this.openai.responses.create({
+                model: "gpt-4.1-mini",
+                input: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "input_text",
+                                text: "Use the file search tool on the attached vector store to answer strictly from the document. If insufficient, say so clearly.\n\nQuestion: " +
+                                    String(question),
+                            },
+                        ],
+                    },
+                ],
+                tools: [{ type: "file_search" }],
+                tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
+                temperature: 0.1,
+                max_output_tokens: 900,
+            });
+            const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                ((_d = (_c = (_b = (_a = resp === null || resp === void 0 ? void 0 : resp.output) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.text) ||
+                ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.data) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
+                ((_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.message) === null || _l === void 0 ? void 0 : _l.content) ||
+                "I couldn't generate an answer.";
+            return String(fullText);
+        }
+        catch (err) {
+            firebase_functions_1.logger.error("answerWithOpenAIVectorStore failed", err);
+            throw err;
+        }
+    }
+    /**
      * Generate answer using OpenAI
      */
     async generateAnswer(question, context) {
@@ -167,11 +243,97 @@ Question: ${question}
 Answer:`;
     }
     /**
+     * Summarize a document using OpenAI Responses API with file_search over a vector store.
+     * This asks the model to produce a structured markdown summary grounded only on the attached store.
+     */
+    async summarizeWithOpenAIVectorStore(vectorStoreId, maxLength, title) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        try {
+            const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the attached document titled "${title}" using only retrieved content.\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.`;
+            const resp = await this.openai.responses.create({
+                model: "gpt-4.1-mini",
+                input: [
+                    {
+                        role: "user",
+                        content: [
+                            { type: "input_text", text: prompt },
+                        ],
+                    },
+                ],
+                tools: [{ type: "file_search" }],
+                tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
+                temperature: 0.2,
+                max_output_tokens: Math.ceil(maxLength * 2),
+            });
+            const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                ((_d = (_c = (_b = (_a = resp === null || resp === void 0 ? void 0 : resp.output) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.text) ||
+                ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.data) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
+                ((_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.message) === null || _l === void 0 ? void 0 : _l.content) ||
+                "";
+            return String(fullText || "").trim();
+        }
+        catch (err) {
+            firebase_functions_1.logger.error("summarizeWithOpenAIVectorStore failed", err);
+            throw err;
+        }
+    }
+    /**
      * Generate a summary of a document
      */
     async generateDocumentSummary(documentId, userId, maxLength = 500) {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
         try {
+            // If the document was indexed into OpenAI Vector Store (DOCX path), use file_search-based summarization
+            try {
+                const db = (0, firestore_1.getFirestore)();
+                const snap = await db
+                    .collection("documents")
+                    .doc(userId)
+                    .collection("userDocuments")
+                    .doc(documentId)
+                    .get();
+                if (snap.exists) {
+                    const data = snap.data() || {};
+                    const vsId = (_b = (_a = data === null || data === void 0 ? void 0 : data.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.vectorStoreId;
+                    if (vsId) {
+                        firebase_functions_1.logger.info("Summarizing via OpenAI Vector Store", {
+                            documentId,
+                            vsId,
+                        });
+                        try {
+                            const summary = await this.summarizeWithOpenAIVectorStore(vsId, maxLength, String((data === null || data === void 0 ? void 0 : data.title) || "Document"));
+                            if (summary && summary.trim().length)
+                                return summary;
+                        }
+                        catch (e) {
+                            firebase_functions_1.logger.warn("Vector store summarization failed, attempting Firestore raw content fallback", e);
+                            // Fallback to Firestore raw content if available
+                            const rawText = String(((_c = data === null || data === void 0 ? void 0 : data.content) === null || _c === void 0 ? void 0 : _c.raw) || ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.processed) || "").slice(0, 24000);
+                            if (rawText && rawText.length > 100) {
+                                const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
+                                const resp = await this.openai.chat.completions.create({
+                                    model: "gpt-4o-mini",
+                                    messages: [
+                                        {
+                                            role: "system",
+                                            content: "You are an expert summarizer. Produce clear, well-structured markdown. No code fences.",
+                                        },
+                                        { role: "user", content: prompt },
+                                    ],
+                                    max_tokens: Math.ceil(maxLength * 1.6),
+                                    temperature: 0.25,
+                                });
+                                const txt = ((_g = (_f = (_e = resp.choices) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.message) === null || _g === void 0 ? void 0 : _g.content) || "";
+                                if (txt)
+                                    return txt;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (vsCheckErr) {
+                firebase_functions_1.logger.warn("Vector store check failed; proceeding with Pinecone path", vsCheckErr);
+            }
             // First attempt to infer chunkCount from a representative vector (by querying 1 similar vector)
             // Fallback: assume up to 1000 chunks cap
             let chunkCount = 0;
@@ -228,7 +390,7 @@ Answer:`;
                     max_tokens: 300,
                     temperature: 0.2,
                 });
-                const partial = (_c = (_b = (_a = resp.choices[0]) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c.trim();
+                const partial = (_k = (_j = (_h = resp.choices[0]) === null || _h === void 0 ? void 0 : _h.message) === null || _j === void 0 ? void 0 : _j.content) === null || _k === void 0 ? void 0 : _k.trim();
                 if (partial)
                     intermediateSummaries.push(partial);
                 if (intermediateSummaries.length >= 12)
@@ -262,7 +424,7 @@ Return valid markdown only.`,
                 max_tokens: Math.ceil(maxLength * 1.6),
                 temperature: 0.25,
             });
-            return (((_e = (_d = finalResp.choices[0]) === null || _d === void 0 ? void 0 : _d.message) === null || _e === void 0 ? void 0 : _e.content) || "Could not generate summary.");
+            return (((_m = (_l = finalResp.choices[0]) === null || _l === void 0 ? void 0 : _l.message) === null || _m === void 0 ? void 0 : _m.content) || "Could not generate summary.");
         }
         catch (error) {
             firebase_functions_1.logger.error("Error generating document summary:", error);

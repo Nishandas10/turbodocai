@@ -4,7 +4,7 @@ exports.EmbeddingService = void 0;
 const openai_1 = require("openai");
 const firebase_functions_1 = require("firebase-functions");
 class EmbeddingService {
-    constructor() {
+    constructor(opts) {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
             throw new Error("OPENAI_API_KEY environment variable is not set");
@@ -12,11 +12,13 @@ class EmbeddingService {
         this.openai = new openai_1.OpenAI({
             apiKey: apiKey,
         });
+        this.defaultModel = (opts === null || opts === void 0 ? void 0 : opts.model) || "text-embedding-3-small";
+        this.defaultDimensions = (opts === null || opts === void 0 ? void 0 : opts.dimensions) || 1024;
     }
     /**
      * Generate embeddings for multiple text chunks with memory optimization
      */
-    async embedChunks(chunks) {
+    async embedChunks(chunks, opts) {
         try {
             const embeddings = [];
             // Process chunks in smaller batches to avoid memory issues
@@ -24,7 +26,7 @@ class EmbeddingService {
             for (let i = 0; i < chunks.length; i += batchSize) {
                 const batch = chunks.slice(i, i + batchSize);
                 firebase_functions_1.logger.info(`Processing embedding batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(chunks.length / batchSize)} (${batch.length} chunks)`);
-                const batchEmbeddings = await this.embedBatch(batch);
+                const batchEmbeddings = await this.embedBatch(batch, opts);
                 embeddings.push(...batchEmbeddings);
                 // Force garbage collection opportunity
                 if (global.gc) {
@@ -46,14 +48,12 @@ class EmbeddingService {
     /**
      * Generate embeddings for a batch of text chunks
      */
-    async embedBatch(chunks) {
+    async embedBatch(chunks, opts) {
+        var _a;
         try {
-            const response = await this.openai.embeddings.create({
-                model: "text-embedding-3-small", // Use consistent model
-                input: chunks,
-                encoding_format: "float",
-                dimensions: 1024, // Match Pinecone index dimensions
-            });
+            const model = (opts === null || opts === void 0 ? void 0 : opts.model) || this.defaultModel;
+            const dimensions = (_a = opts === null || opts === void 0 ? void 0 : opts.dimensions) !== null && _a !== void 0 ? _a : this.defaultDimensions;
+            const response = await this.openai.embeddings.create(Object.assign({ model, input: chunks, encoding_format: "float" }, (typeof dimensions === "number" ? { dimensions } : {})));
             return response.data.map((item) => item.embedding);
         }
         catch (error) {
@@ -64,14 +64,12 @@ class EmbeddingService {
     /**
      * Generate embedding for a single query
      */
-    async embedQuery(query) {
+    async embedQuery(query, opts) {
+        var _a;
         try {
-            const response = await this.openai.embeddings.create({
-                model: "text-embedding-3-small",
-                input: query,
-                encoding_format: "float",
-                dimensions: 1024, // Match Pinecone index dimensions
-            });
+            const model = (opts === null || opts === void 0 ? void 0 : opts.model) || this.defaultModel;
+            const dimensions = (_a = opts === null || opts === void 0 ? void 0 : opts.dimensions) !== null && _a !== void 0 ? _a : this.defaultDimensions;
+            const response = await this.openai.embeddings.create(Object.assign({ model, input: query, encoding_format: "float" }, (typeof dimensions === "number" ? { dimensions } : {})));
             return response.data[0].embedding;
         }
         catch (error) {
@@ -83,8 +81,7 @@ class EmbeddingService {
      * Get embedding model dimensions
      */
     getEmbeddingDimensions() {
-        // text-embedding-3-small configured for 1024 dimensions to match Pinecone index
-        return 1024;
+        return this.defaultDimensions;
     }
     /**
      * Utility function to add delay

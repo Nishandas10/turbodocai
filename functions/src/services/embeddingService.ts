@@ -3,8 +3,10 @@ import { logger } from "firebase-functions";
 
 export class EmbeddingService {
   private openai: OpenAI;
+  private defaultModel: string;
+  private defaultDimensions?: number;
 
-  constructor() {
+  constructor(opts?: { model?: string; dimensions?: number }) {
     const apiKey = process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
@@ -14,12 +16,17 @@ export class EmbeddingService {
     this.openai = new OpenAI({
       apiKey: apiKey,
     });
+    this.defaultModel = opts?.model || "text-embedding-3-small";
+    this.defaultDimensions = opts?.dimensions || 1024;
   }
 
   /**
    * Generate embeddings for multiple text chunks with memory optimization
    */
-  async embedChunks(chunks: string[]): Promise<number[][]> {
+  async embedChunks(
+    chunks: string[],
+    opts?: { model?: string; dimensions?: number }
+  ): Promise<number[][]> {
     try {
       const embeddings: number[][] = [];
 
@@ -35,7 +42,7 @@ export class EmbeddingService {
           }/${Math.ceil(chunks.length / batchSize)} (${batch.length} chunks)`
         );
 
-        const batchEmbeddings = await this.embedBatch(batch);
+        const batchEmbeddings = await this.embedBatch(batch, opts);
         embeddings.push(...batchEmbeddings);
 
         // Force garbage collection opportunity
@@ -60,14 +67,18 @@ export class EmbeddingService {
   /**
    * Generate embeddings for a batch of text chunks
    */
-  private async embedBatch(chunks: string[]): Promise<number[][]> {
+  private async embedBatch(
+    chunks: string[],
+    opts?: { model?: string; dimensions?: number }
+  ): Promise<number[][]> {
     try {
+      const model = opts?.model || this.defaultModel;
+      const dimensions = opts?.dimensions ?? this.defaultDimensions;
       const response = await this.openai.embeddings.create({
-        model: "text-embedding-3-small", // Use consistent model
-
+        model,
         input: chunks,
         encoding_format: "float",
-        dimensions: 1024, // Match Pinecone index dimensions
+        ...(typeof dimensions === "number" ? { dimensions } : {}),
       });
 
       return response.data.map((item) => item.embedding);
@@ -80,13 +91,18 @@ export class EmbeddingService {
   /**
    * Generate embedding for a single query
    */
-  async embedQuery(query: string): Promise<number[]> {
+  async embedQuery(
+    query: string,
+    opts?: { model?: string; dimensions?: number }
+  ): Promise<number[]> {
     try {
+      const model = opts?.model || this.defaultModel;
+      const dimensions = opts?.dimensions ?? this.defaultDimensions;
       const response = await this.openai.embeddings.create({
-        model: "text-embedding-3-small",
+        model,
         input: query,
         encoding_format: "float",
-        dimensions: 1024, // Match Pinecone index dimensions
+        ...(typeof dimensions === "number" ? { dimensions } : {}),
       });
 
       return response.data[0].embedding;
@@ -99,9 +115,8 @@ export class EmbeddingService {
   /**
    * Get embedding model dimensions
    */
-  getEmbeddingDimensions(): number {
-    // text-embedding-3-small configured for 1024 dimensions to match Pinecone index
-    return 1024;
+  getEmbeddingDimensions(): number | undefined {
+    return this.defaultDimensions;
   }
 
   /**

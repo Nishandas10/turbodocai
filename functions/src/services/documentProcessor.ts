@@ -1,4 +1,5 @@
 import pdf from "pdf-parse";
+import mammoth from "mammoth";
 import { logger } from "firebase-functions";
 
 export class DocumentProcessor {
@@ -21,6 +22,34 @@ export class DocumentProcessor {
       logger.error("Error extracting text from PDF:", error);
       throw new Error("Failed to extract text from PDF");
     }
+  }
+
+  /**
+   * Extract text from DOCX buffer using mammoth
+   */
+  async extractTextFromDOCX(buffer: Buffer): Promise<string> {
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      const text = result.value || "";
+      logger.info(
+        `Extracted text from DOCX: ${text.length} characters, messages: ${
+          (result as any)?.messages?.length || 0
+        }`
+      );
+      return this.cleanExtractedText(text);
+    } catch (error) {
+      logger.error("Error extracting text from DOCX:", error);
+      throw new Error("Failed to extract text from DOCX");
+    }
+  }
+
+  /**
+   * Dispatch extraction by mime/extension hint
+   */
+  async extractText(buffer: Buffer, type: "pdf" | "docx"): Promise<string> {
+    if (type === "pdf") return this.extractTextFromPDF(buffer);
+    if (type === "docx") return this.extractTextFromDOCX(buffer);
+    throw new Error(`Unsupported document type for extraction: ${type}`);
   }
 
   /**
