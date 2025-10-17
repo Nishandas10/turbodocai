@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import type { Document as Doc } from "@/lib/types";
 import DocumentChat from "@/components/DocumentChat";
 import PDFViewer from "@/components/PdfViewer";
+import DocxViewer from "@/components/DocxViewer";
 // import { getFileDownloadURL, getUserDocumentsPath } from "@/lib/storage";
 import { db } from "@/lib/firebase";
 import { doc as fsDoc, onSnapshot, Timestamp } from "firebase/firestore";
@@ -66,12 +67,14 @@ export default function ChatPage() {
     return () => unsub();
   }, [noteId, user?.uid, effOwner]);
 
-  const pdfUrl = useMemo(() => {
+  const fileInfo = useMemo(() => {
     if (!doc) return null;
     const mime = doc.metadata?.mimeType || "";
-    const isPdf = (doc.type === "pdf") || mime.includes("pdf") || (doc.metadata?.fileName?.toLowerCase().endsWith(".pdf") ?? false);
-    const baseUrl = isPdf ? (doc.metadata?.downloadURL || null) : null;
-    if (!baseUrl) return null;
+    const lowerName = (doc.metadata?.fileName || "").toLowerCase();
+  const isPdf = doc.type === "pdf" || mime.includes("pdf") || lowerName.endsWith(".pdf");
+  const isDocx = doc.type === "docx" || mime.includes("word") || lowerName.endsWith(".docx");
+    const baseUrl = doc.metadata?.downloadURL || null;
+    if (!baseUrl) return null; // nothing to preview
     // Add cache-busting so newly uploaded PDFs don't show stale cached content
     const toMs = (val: Timestamp | Date | string | number | undefined): number => {
       try {
@@ -90,7 +93,8 @@ export default function ChatPage() {
     };
     const version = toMs(doc.updatedAt || doc.lastAccessed || doc.createdAt || Date.now());
     const sep = baseUrl.includes('?') ? '&' : '?';
-    return `${baseUrl}${sep}v=${version}`;
+    const url = `${baseUrl}${sep}v=${version}`;
+    return { url, isPdf, isDocx };
   }, [doc]);
 
   // Fetch the PDF as a Blob to guarantee fresh content and create an object URL for the viewer
@@ -98,7 +102,7 @@ export default function ChatPage() {
     let cancelled = false;
     let objUrl: string | null = null;
     (async () => {
-      if (!pdfUrl) {
+      if (!fileInfo || !fileInfo.isPdf) {
         setVerifiedPdfUrl(null);
         setVerifyingPdf(false);
         return;
@@ -107,7 +111,7 @@ export default function ChatPage() {
       setVerifiedPdfUrl(null);
       try {
         // Force revalidation to bypass caches
-        const res = await fetch(pdfUrl, { cache: 'reload' });
+        const res = await fetch(fileInfo.url, { cache: 'reload' });
         if (!res.ok) throw new Error('Failed to fetch PDF');
         const blob = await res.blob();
         // Magic byte check
@@ -131,7 +135,7 @@ export default function ChatPage() {
         try { URL.revokeObjectURL(objUrl); } catch {}
       }
     };
-  }, [pdfUrl]);
+  }, [fileInfo]);
 
   // Resizer handlers (md+ only)
   const onMouseDownDivider = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -171,7 +175,10 @@ export default function ChatPage() {
           </div>
         ) : error ? (
           <div className="p-4 text-sm text-red-500">{error}</div>
-        ) : pdfUrl ? (
+        ) : fileInfo ? (
+          fileInfo.isDocx ? (
+            <DocxViewer fileUrl={fileInfo.url} className="h-full w-full" />
+          ) : fileInfo.isPdf ? (
           verifyingPdf ? (
             <div className="h-full w-full flex items-center justify-center text-muted-foreground">Checking file…</div>
           ) : verifiedPdfUrl ? (
@@ -185,12 +192,21 @@ export default function ChatPage() {
               </div>
             </div>
           )
+          ) : (
+            <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
+              <div>
+                <div className="font-medium mb-1">Preview not available</div>
+                <div className="text-sm">{doc?.metadata?.fileName || "Unknown file"}</div>
+                <div className="text-xs opacity-70 mt-2">This file type isn't supported for inline preview.</div>
+              </div>
+            </div>
+          )
         ) : (
           <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
             <div>
               <div className="font-medium mb-1">Preview not available</div>
               <div className="text-sm">{doc?.metadata?.fileName || "Unknown file"}</div>
-              <div className="text-xs opacity-70 mt-2">Only PDF files can be previewed here.</div>
+              <div className="text-xs opacity-70 mt-2">Upload a PDF or DOCX for preview.</div>
             </div>
           </div>
         )}
