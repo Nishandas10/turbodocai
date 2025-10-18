@@ -75,7 +75,18 @@ export class QueryService {
             .doc(documentId)
             .get();
           const data = (snap.data() as any) || {};
-          const vsId = data?.metadata?.openaiVector?.vectorStoreId;
+          let vsId: string | undefined =
+            data?.metadata?.openaiVector?.vectorStoreId;
+          const isDocxPptx =
+            String(data?.type || "").toLowerCase() === "docx" ||
+            String(data?.type || "").toLowerCase() === "pptx" ||
+            String(data?.metadata?.mimeType || "").includes("word") ||
+            String(data?.metadata?.mimeType || "").includes("presentation");
+          if (!vsId && isDocxPptx && data?.metadata?.openaiVector) {
+            vsId =
+              process.env.OPENAI_VECTOR_STORE_ID ||
+              "vs_68f1528dad6c8191bfb8a090e1557a86";
+          }
           if (vsId) {
             logger.info("Routing query to OpenAI Vector Store file_search", {
               documentId,
@@ -118,7 +129,7 @@ export class QueryService {
       );
 
       if (similarChunks.length === 0) {
-        // Fallback: if a documentId is provided, try Firestore content/summary or downloadURL text
+        // Prefer vector store fallback when available for this document
         if (documentId) {
           try {
             const db = getFirestore();
@@ -131,10 +142,64 @@ export class QueryService {
             if (snap.exists) {
               const data = snap.data() as {
                 title?: string;
-                metadata?: { fileName?: string; downloadURL?: string };
+                metadata?: {
+                  fileName?: string;
+                  downloadURL?: string;
+                  openaiVector?: { vectorStoreId?: string };
+                };
                 content?: { raw?: string; processed?: string };
                 summary?: string;
               };
+              let vsId: string | undefined =
+                data?.metadata?.openaiVector?.vectorStoreId;
+              const isDocxPptx =
+                String((data as any)?.type || "").toLowerCase() === "docx" ||
+                String((data as any)?.type || "").toLowerCase() === "pptx" ||
+                String((data as any)?.metadata?.mimeType || "").includes(
+                  "word"
+                ) ||
+                String((data as any)?.metadata?.mimeType || "").includes(
+                  "presentation"
+                );
+              if (
+                !vsId &&
+                isDocxPptx &&
+                (data as any)?.metadata?.openaiVector
+              ) {
+                vsId =
+                  process.env.OPENAI_VECTOR_STORE_ID ||
+                  "vs_68f1528dad6c8191bfb8a090e1557a86";
+              }
+              if (vsId) {
+                logger.info(
+                  "No Pinecone chunks; answering via OpenAI Vector Store",
+                  { documentId, vsId }
+                );
+                try {
+                  const answer = await this.answerWithOpenAIVectorStore(
+                    question,
+                    vsId
+                  );
+                  return {
+                    answer,
+                    sources: [
+                      {
+                        documentId,
+                        title: data.title || "Document",
+                        fileName: data?.metadata?.fileName,
+                        chunk: "Retrieved via OpenAI Vector Store file search",
+                        score: 1.0,
+                      },
+                    ],
+                    confidence: 80,
+                  };
+                } catch (e) {
+                  logger.warn(
+                    "Vector store fallback failed, attempting content/summary",
+                    e as any
+                  );
+                }
+              }
               let context = (
                 data.summary ||
                 data.content?.raw ||
@@ -227,40 +292,81 @@ export class QueryService {
   }
 
   /**
-   * Answer a question using OpenAI Responses API with file_search tool over a vector store id.
+   * Answer a question using OpenAI Assistants API with file_search tool over a vector store id.
    */
   private async answerWithOpenAIVectorStore(
     question: string,
     vectorStoreId: string
   ): Promise<string> {
     try {
-      const resp: any = await (this.openai as any).responses.create({
-        model: "gpt-4.1-mini",
-        input: [
+      // Create a temporary assistant with file_search enabled on the vector store
+      const assistant = await this.openai.beta.assistants.create({
+        model: "gpt-4o-mini",
+        instructions:
+          "You are a helpful assistant that answers questions based strictly on the provided documents. Use the file_search tool to find relevant information and ground your answers only on retrieved content. If you cannot find the information in the documents, say so clearly.",
+        tools: [{ type: "file_search" }],
+        tool_resources: {
+          file_search: {
+            vector_store_ids: [vectorStoreId],
+          },
+        },
+      });
+
+      // Create a thread and add the user's question
+      const thread = await this.openai.beta.threads.create({
+        messages: [
           {
             role: "user",
-            content: [
-              {
-                type: "input_text",
-                text:
-                  "Use the file search tool on the attached vector store to answer strictly from the document. If insufficient, say so clearly.\n\nQuestion: " +
-                  String(question),
-              },
-            ],
+            content: question,
           },
         ],
-        tools: [{ type: "file_search" }],
-        tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
-        temperature: 0.1,
-        max_output_tokens: 900,
       });
-      const fullText =
-        resp?.output_text ||
-        resp?.output?.[0]?.content?.[0]?.text ||
-        resp?.data?.[0]?.content?.[0]?.text ||
-        resp?.choices?.[0]?.message?.content ||
-        "I couldn't generate an answer.";
-      return String(fullText);
+
+      // Run the assistant
+      const run = await this.openai.beta.threads.runs.create(thread.id, {
+        assistant_id: assistant.id,
+      });
+
+      // Wait for completion and get the response
+      let runStatus = await this.openai.beta.threads.runs.retrieve(
+        thread.id,
+        run.id
+      );
+      while (
+        runStatus.status === "queued" ||
+        runStatus.status === "in_progress"
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        runStatus = await this.openai.beta.threads.runs.retrieve(
+          thread.id,
+          run.id
+        );
+      }
+
+      if (runStatus.status === "completed") {
+        const messages = await this.openai.beta.threads.messages.list(
+          thread.id
+        );
+        const assistantMessage = messages.data.find(
+          (msg) => msg.role === "assistant"
+        );
+        const textContent = assistantMessage?.content.find(
+          (content) => content.type === "text"
+        );
+        const answer =
+          textContent?.text?.value || "I couldn't generate an answer.";
+
+        // Clean up temporary assistant
+        await this.openai.beta.assistants.del(assistant.id);
+
+        return answer;
+      } else {
+        // Clean up temporary assistant on failure
+        await this.openai.beta.assistants.del(assistant.id);
+        throw new Error(
+          `Assistant run failed with status: ${runStatus.status}`
+        );
+      }
     } catch (err) {
       logger.error("answerWithOpenAIVectorStore failed", err as any);
       throw err;
@@ -321,7 +427,7 @@ Answer:`;
   }
 
   /**
-   * Summarize a document using OpenAI Responses API with file_search over a vector store.
+   * Summarize a document using OpenAI Assistants API with file_search over a vector store.
    * This asks the model to produce a structured markdown summary grounded only on the attached store.
    */
   private async summarizeWithOpenAIVectorStore(
@@ -331,26 +437,74 @@ Answer:`;
   ): Promise<string> {
     try {
       const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the attached document titled "${title}" using only retrieved content.\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.`;
-      const resp: any = await (this.openai as any).responses.create({
-        model: "gpt-4.1-mini",
-        input: [
+
+      // Create a temporary assistant with file_search enabled on the vector store
+      const assistant = await this.openai.beta.assistants.create({
+        model: "gpt-4o-mini",
+        instructions:
+          "You are a helpful assistant that creates document summaries based strictly on the provided documents. Use the file_search tool to find relevant information and create comprehensive summaries.",
+        tools: [{ type: "file_search" }],
+        tool_resources: {
+          file_search: {
+            vector_store_ids: [vectorStoreId],
+          },
+        },
+      });
+
+      // Create a thread and add the summarization request
+      const thread = await this.openai.beta.threads.create({
+        messages: [
           {
             role: "user",
-            content: [{ type: "input_text", text: prompt }],
+            content: prompt,
           },
         ],
-        tools: [{ type: "file_search" }],
-        tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
-        temperature: 0.2,
-        max_output_tokens: Math.ceil(maxLength * 2),
       });
-      const fullText =
-        resp?.output_text ||
-        resp?.output?.[0]?.content?.[0]?.text ||
-        resp?.data?.[0]?.content?.[0]?.text ||
-        resp?.choices?.[0]?.message?.content ||
-        "";
-      return String(fullText || "").trim();
+
+      // Run the assistant
+      const run = await this.openai.beta.threads.runs.create(thread.id, {
+        assistant_id: assistant.id,
+      });
+
+      // Wait for completion and get the response
+      let runStatus = await this.openai.beta.threads.runs.retrieve(
+        thread.id,
+        run.id
+      );
+      while (
+        runStatus.status === "queued" ||
+        runStatus.status === "in_progress"
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        runStatus = await this.openai.beta.threads.runs.retrieve(
+          thread.id,
+          run.id
+        );
+      }
+
+      if (runStatus.status === "completed") {
+        const messages = await this.openai.beta.threads.messages.list(
+          thread.id
+        );
+        const assistantMessage = messages.data.find(
+          (msg) => msg.role === "assistant"
+        );
+        const textContent = assistantMessage?.content.find(
+          (content) => content.type === "text"
+        );
+        const summary = textContent?.text?.value || "";
+
+        // Clean up temporary assistant
+        await this.openai.beta.assistants.del(assistant.id);
+
+        return summary.trim();
+      } else {
+        // Clean up temporary assistant on failure
+        await this.openai.beta.assistants.del(assistant.id);
+        throw new Error(
+          `Assistant run failed with status: ${runStatus.status}`
+        );
+      }
     } catch (err) {
       logger.error("summarizeWithOpenAIVectorStore failed", err as any);
       throw err;

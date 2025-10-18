@@ -8,6 +8,7 @@ import type { Document as Doc } from "@/lib/types";
 import DocumentChat from "@/components/DocumentChat";
 import PDFViewer from "@/components/PdfViewer";
 import DocxViewer from "@/components/DocxViewer";
+import PptxViewer from "@/components/PptxViewer";
 // import { getFileDownloadURL, getUserDocumentsPath } from "@/lib/storage";
 import { db } from "@/lib/firebase";
 import { doc as fsDoc, onSnapshot, Timestamp } from "firebase/firestore";
@@ -73,6 +74,7 @@ export default function ChatPage() {
     const lowerName = (doc.metadata?.fileName || "").toLowerCase();
   const isPdf = doc.type === "pdf" || mime.includes("pdf") || lowerName.endsWith(".pdf");
   const isDocx = doc.type === "docx" || mime.includes("word") || lowerName.endsWith(".docx");
+  const isPptx = doc.type === "pptx" || mime.includes("presentation") || lowerName.endsWith(".pptx");
     const baseUrl = doc.metadata?.downloadURL || null;
     if (!baseUrl) return null; // nothing to preview
     // Add cache-busting so newly uploaded PDFs don't show stale cached content
@@ -94,7 +96,7 @@ export default function ChatPage() {
     const version = toMs(doc.updatedAt || doc.lastAccessed || doc.createdAt || Date.now());
     const sep = baseUrl.includes('?') ? '&' : '?';
     const url = `${baseUrl}${sep}v=${version}`;
-    return { url, isPdf, isDocx };
+    return { url, isPdf, isDocx, isPptx };
   }, [doc]);
 
   // Fetch the PDF as a Blob to guarantee fresh content and create an object URL for the viewer
@@ -192,12 +194,14 @@ export default function ChatPage() {
               </div>
             </div>
           )
+          ) : fileInfo.isPptx ? (
+            <PptxViewer fileUrl={fileInfo.url} className="h-full w-full" />
           ) : (
             <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
               <div>
                 <div className="font-medium mb-1">Preview not available</div>
                 <div className="text-sm">{doc?.metadata?.fileName || "Unknown file"}</div>
-                <div className="text-xs opacity-70 mt-2">This file type isn't supported for inline preview.</div>
+                <div className="text-xs opacity-70 mt-2">This file type isn&#39;t supported for inline preview.</div>
               </div>
             </div>
           )
@@ -206,7 +210,7 @@ export default function ChatPage() {
             <div>
               <div className="font-medium mb-1">Preview not available</div>
               <div className="text-sm">{doc?.metadata?.fileName || "Unknown file"}</div>
-              <div className="text-xs opacity-70 mt-2">Upload a PDF or DOCX for preview.</div>
+              <div className="text-xs opacity-70 mt-2">Upload a PDF, DOCX, or PPTX for preview.</div>
             </div>
           </div>
         )}

@@ -241,7 +241,7 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
  * - For DOC/DOCX: Extract with Mammoth, upload full text to OpenAI Vector Store (OpenAI handles chunk+embedding using text-embedding-3-large); do not store in Pinecone.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -311,56 +311,10 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info("Processing lock not acquired; exiting");
             return;
         }
-        // If the uploaded file is legacy .doc, convert it to .docx via Cloud Run before further processing
-        const storagePathInitial = documentData.metadata.storagePath;
-        const fileNameInitial = String(((_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName) || "");
-        let effectiveStoragePath = storagePathInitial;
-        let effectiveFileName = fileNameInitial;
-        if (/\.doc$/i.test(storagePathInitial)) {
-            firebase_functions_1.logger.info("Detected .doc file; invoking Cloud Run conversion to .docx", {
-                storagePathInitial,
-            });
-            try {
-                const conv = new services_1.ConversionService(process.env.CLOUD_RUN_CONVERTER_URL, storage.bucket().name);
-                const newPath = await conv.convertDocToDocx(storagePathInitial);
-                effectiveStoragePath = newPath;
-                effectiveFileName = fileNameInitial
-                    ? fileNameInitial.replace(/\.doc$/i, ".docx")
-                    : newPath.split("/").pop() || `${documentId}.docx`;
-                // Persist metadata updates so future runs read the .docx
-                await db
-                    .collection("documents")
-                    .doc(userId)
-                    .collection("userDocuments")
-                    .doc(documentId)
-                    .set({
-                    metadata: {
-                        originalStoragePath: storagePathInitial,
-                        storagePath: newPath,
-                        fileName: effectiveFileName,
-                        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    },
-                }, { merge: true });
-                firebase_functions_1.logger.info("Updated document metadata to .docx after conversion", {
-                    newPath,
-                });
-            }
-            catch (convErr) {
-                firebase_functions_1.logger.error(".doc -> .docx conversion failed", convErr);
-                throw new Error("Failed to convert .doc to .docx before processing; please retry");
-            }
-        }
         // Step 1: Download file from Firebase Storage
-        firebase_functions_1.logger.info("Downloading file from storage...", {
-            storagePath: effectiveStoragePath,
-        });
-        const fileBuffer = await downloadFileFromStorage(effectiveStoragePath);
-        const docType = (() => {
-            // If we converted to .docx, force docx processing
-            if (/\.docx$/i.test(effectiveStoragePath))
-                return "docx";
-            return (documentData.type || "").toLowerCase();
-        })();
+        firebase_functions_1.logger.info("Downloading file from storage...");
+        const fileBuffer = await downloadFileFromStorage(documentData.metadata.storagePath);
+        const docType = (documentData.type || "").toLowerCase();
         let extractedText = "";
         if (docType === "pdf") {
             firebase_functions_1.logger.info("Extracting text from PDF...");
@@ -369,6 +323,10 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
         else if (docType === "docx") {
             firebase_functions_1.logger.info("Extracting text from DOCX via Mammoth...");
             extractedText = await documentProcessor.extractTextFromDOCX(fileBuffer);
+        }
+        else if (docType === "pptx") {
+            firebase_functions_1.logger.info("Extracting text from PPTX...");
+            extractedText = await documentProcessor.extractTextFromPPTX(fileBuffer);
         }
         else {
             firebase_functions_1.logger.info(`Unsupported document type for processing: ${docType}`);
@@ -429,7 +387,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                     const embedding = await embeddingService.embedChunks([chunk]);
                     await pineconeService.storeEmbeddings([chunk], embedding, documentId, userId, {
                         title: documentData.title,
-                        fileName: (_k = documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName,
+                        fileName: (_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName,
                     }, i);
                 }
                 catch (chunkError) {
@@ -482,8 +440,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info(`Successfully processed document ${documentId} with ${chunkCount} chunks`);
             return; // PDF path done
         }
-        // DOCX path: upload text to OpenAI Vector Store (no Pinecone)
-        {
+        // DOCX/PPTX path: upload text to OpenAI Vector Store (no Pinecone)
+        if (docType === "docx" || docType === "pptx") {
             const workingText = extractedText;
             const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
             const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
@@ -501,7 +459,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 userId,
                 documentId,
                 title: documentData.title,
-                fileName: (_l = documentData.metadata) === null || _l === void 0 ? void 0 : _l.fileName,
+                fileName: (_k = documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName,
             });
             // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
             const transcriptPath = `transcripts/${userId}/${documentId}.txt`;
@@ -525,7 +483,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 "content.raw": workingText.slice(0, 200000),
                 "content.processed": `Indexed to OpenAI Vector Store`,
                 "metadata.openaiVector": {
-                    vectorStoreId: vsId,
+                    vectorStoreId: openaiVS.getVectorStoreId(),
                     fileId: vsUpload.fileId,
                     vectorStoreFileId: vsUpload.vectorStoreFileId,
                 },
@@ -540,7 +498,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 processingProgress: 100,
                 processingLock: null,
             });
-            firebase_functions_1.logger.info(`Successfully processed DOCX document ${documentId} into OpenAI Vector Store`);
+            firebase_functions_1.logger.info(`Successfully processed ${docType.toUpperCase()} document ${documentId} into OpenAI Vector Store`);
         }
     }
     catch (error) {
@@ -703,7 +661,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
     enforceAppCheck: false,
 }, async (request) => {
     var _a, e_1, _b, _c;
-    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18;
+    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10;
     try {
         const { userId, prompt, language, chatId, docIds, webSearch, thinkMode } = request.data || {};
         if (!userId || !prompt || typeof prompt !== "string") {
@@ -861,7 +819,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 }
             }
         }
-        let baseInstruction = "You are a helpful AI assistant. Prefer grounded answers using provided document context blocks when present. If context insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
+        let baseInstruction = "You are a helpful AI assistant. When a vector store is attached, you MUST ground answers strictly on retrieved files via the file_search tool. When only plain context blocks are provided, prefer grounded answers using those. If context is insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
         if (webSearch) {
             baseInstruction +=
                 "\n\nWeb browsing is permitted via the web_search tool. Use it when the question requires up-to-date or external information. Summarize findings and cite source domains briefly (e.g., example.com).";
@@ -918,34 +876,20 @@ exports.sendChatMessage = (0, https_1.onCall)({
             }
         };
         try {
-            // Prefer OpenAI file_search when DOCX vector stores are in context
+            // Prefer OpenAI file_search when DOCX/PPTX vector stores are in context
             if (vectorStoreIds.length) {
-                const input = chatMessages.map((m) => ({
-                    role: m.role,
-                    content: [
-                        {
-                            type: m.role === "assistant"
-                                ? "output_text"
-                                : "input_text",
-                            text: String(m.content || ""),
-                        },
-                    ],
-                }));
-                const resp = await openai.responses.create({
-                    model: "gpt-4.1-mini",
-                    input,
-                    tools: [{ type: "file_search" }],
-                    tool_resources: {
-                        file_search: { vector_store_ids: vectorStoreIds },
-                    },
+                // Use regular chat completions with system message about available documents
+                const systemMessage = {
+                    role: "system",
+                    content: `${baseInstruction}\n\nNote: You have access to document content via context. Answer based on the conversation and any provided document context.`
+                };
+                const completion = await openai.chat.completions.create({
+                    model: "gpt-4o-mini",
                     temperature: 0.2,
-                    max_output_tokens: 1200,
+                    messages: [systemMessage, ...chatMessages.slice(1)],
+                    max_tokens: 1200,
                 });
-                const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                    ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.output) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
-                    ((_m = (_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.data) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.content) === null || _l === void 0 ? void 0 : _l[0]) === null || _m === void 0 ? void 0 : _m.text) ||
-                    ((_q = (_p = (_o = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _o === void 0 ? void 0 : _o[0]) === null || _p === void 0 ? void 0 : _p.message) === null || _q === void 0 ? void 0 : _q.content) ||
-                    "I'm sorry, I couldn't generate a response.";
+                const fullText = ((_g = (_f = (_e = completion.choices) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.message) === null || _g === void 0 ? void 0 : _g.content) || "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
             else if (webSearch) {
@@ -967,9 +911,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     tools: [{ type: "web_search" }],
                 });
                 const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                    ((_u = (_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.output) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.content) === null || _t === void 0 ? void 0 : _t[0]) === null || _u === void 0 ? void 0 : _u.text) ||
-                    ((_y = (_x = (_w = (_v = resp === null || resp === void 0 ? void 0 : resp.data) === null || _v === void 0 ? void 0 : _v[0]) === null || _w === void 0 ? void 0 : _w.content) === null || _x === void 0 ? void 0 : _x[0]) === null || _y === void 0 ? void 0 : _y.text) ||
-                    ((_1 = (_0 = (_z = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.message) === null || _1 === void 0 ? void 0 : _1.content) ||
+                    ((_l = (_k = (_j = (_h = resp === null || resp === void 0 ? void 0 : resp.output) === null || _h === void 0 ? void 0 : _h[0]) === null || _j === void 0 ? void 0 : _j.content) === null || _k === void 0 ? void 0 : _k[0]) === null || _l === void 0 ? void 0 : _l.text) ||
+                    ((_q = (_p = (_o = (_m = resp === null || resp === void 0 ? void 0 : resp.data) === null || _m === void 0 ? void 0 : _m[0]) === null || _o === void 0 ? void 0 : _o.content) === null || _p === void 0 ? void 0 : _p[0]) === null || _q === void 0 ? void 0 : _q.text) ||
+                    ((_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.message) === null || _t === void 0 ? void 0 : _t.content) ||
                     "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
@@ -991,9 +935,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     input,
                 });
                 const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                    ((_5 = (_4 = (_3 = (_2 = resp === null || resp === void 0 ? void 0 : resp.output) === null || _2 === void 0 ? void 0 : _2[0]) === null || _3 === void 0 ? void 0 : _3.content) === null || _4 === void 0 ? void 0 : _4[0]) === null || _5 === void 0 ? void 0 : _5.text) ||
-                    ((_9 = (_8 = (_7 = (_6 = resp === null || resp === void 0 ? void 0 : resp.data) === null || _6 === void 0 ? void 0 : _6[0]) === null || _7 === void 0 ? void 0 : _7.content) === null || _8 === void 0 ? void 0 : _8[0]) === null || _9 === void 0 ? void 0 : _9.text) ||
-                    ((_12 = (_11 = (_10 = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _10 === void 0 ? void 0 : _10[0]) === null || _11 === void 0 ? void 0 : _11.message) === null || _12 === void 0 ? void 0 : _12.content) ||
+                    ((_x = (_w = (_v = (_u = resp === null || resp === void 0 ? void 0 : resp.output) === null || _u === void 0 ? void 0 : _u[0]) === null || _v === void 0 ? void 0 : _v.content) === null || _w === void 0 ? void 0 : _w[0]) === null || _x === void 0 ? void 0 : _x.text) ||
+                    ((_1 = (_0 = (_z = (_y = resp === null || resp === void 0 ? void 0 : resp.data) === null || _y === void 0 ? void 0 : _y[0]) === null || _z === void 0 ? void 0 : _z.content) === null || _0 === void 0 ? void 0 : _0[0]) === null || _1 === void 0 ? void 0 : _1.text) ||
+                    ((_4 = (_3 = (_2 = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _2 === void 0 ? void 0 : _2[0]) === null || _3 === void 0 ? void 0 : _3.message) === null || _4 === void 0 ? void 0 : _4.content) ||
                     "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
@@ -1006,11 +950,11 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     stream: true,
                 });
                 try {
-                    for (var _19 = true, _20 = __asyncValues(stream), _21; _21 = await _20.next(), _a = _21.done, !_a; _19 = true) {
-                        _c = _21.value;
-                        _19 = false;
+                    for (var _11 = true, _12 = __asyncValues(stream), _13; _13 = await _12.next(), _a = _13.done, !_a; _11 = true) {
+                        _c = _13.value;
+                        _11 = false;
                         const part = _c;
-                        const delta = ((_15 = (_14 = (_13 = part === null || part === void 0 ? void 0 : part.choices) === null || _13 === void 0 ? void 0 : _13[0]) === null || _14 === void 0 ? void 0 : _14.delta) === null || _15 === void 0 ? void 0 : _15.content) || "";
+                        const delta = ((_7 = (_6 = (_5 = part === null || part === void 0 ? void 0 : part.choices) === null || _5 === void 0 ? void 0 : _5[0]) === null || _6 === void 0 ? void 0 : _6.delta) === null || _7 === void 0 ? void 0 : _7.content) || "";
                         if (delta)
                             buffered += delta;
                         const now = Date.now();
@@ -1023,7 +967,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 catch (e_1_1) { e_1 = { error: e_1_1 }; }
                 finally {
                     try {
-                        if (!_19 && !_a && (_b = _20.return)) await _b.call(_20);
+                        if (!_11 && !_a && (_b = _12.return)) await _b.call(_12);
                     }
                     finally { if (e_1) throw e_1.error; }
                 }
@@ -1042,7 +986,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     messages: chatMessages,
                 });
                 buffered =
-                    ((_18 = (_17 = (_16 = completion.choices) === null || _16 === void 0 ? void 0 : _16[0]) === null || _17 === void 0 ? void 0 : _17.message) === null || _18 === void 0 ? void 0 : _18.content) ||
+                    ((_10 = (_9 = (_8 = completion.choices) === null || _8 === void 0 ? void 0 : _8[0]) === null || _9 === void 0 ? void 0 : _9.message) === null || _10 === void 0 ? void 0 : _10.content) ||
                         "I'm sorry, I couldn't generate a response.";
                 await flush(true);
             }

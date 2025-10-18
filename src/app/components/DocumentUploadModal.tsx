@@ -42,9 +42,10 @@ export default function DocumentUploadModal(props: any) {
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
-      // Block legacy .doc files (not .docx) and show guidance popup
+      // Block legacy .doc and .ppt files (not .docx/.pptx) and show guidance popup
       const isLegacyDoc = /\.doc$/i.test(file.name) && !/\.docx$/i.test(file.name)
-      if (isLegacyDoc) {
+      const isLegacyPpt = /\.ppt$/i.test(file.name) && !/\.pptx$/i.test(file.name)
+      if (isLegacyDoc || isLegacyPpt) {
         setShowDocAlert(true)
         setBlockedDocName(file.name)
         // Clear the input so the same file can be re-selected after converting
@@ -79,10 +80,11 @@ export default function DocumentUploadModal(props: any) {
         setUploadSuccess(true)
         setIsUploading(false)
         
-  // Start processing status monitoring for PDFs and DOC/DOCX
+  // Start processing status monitoring for PDFs, DOCX, and PPTX
   const isPdf = selectedFile.type === 'application/pdf' || /\.pdf$/i.test(selectedFile.name);
   const isDocx = /\.(docx|doc)$/i.test(selectedFile.name);
-  if (isPdf || isDocx) {
+  const isPptx = /\.(pptx)$/i.test(selectedFile.name) || /presentation/i.test(selectedFile.type);
+  if (isPdf || isDocx || isPptx) {
           setIsProcessing(true)
           setProcessingStatus("Processing document...")
           // Start optimistic progress when processing starts
@@ -259,7 +261,7 @@ export default function DocumentUploadModal(props: any) {
                   <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
                   <div className="flex-1">
                     <p className="text-sm font-medium text-card-foreground">
-                      .doc files cannot be processed by AI. Please convert to .docx and try again.
+                      Legacy Office files (.doc or .ppt) cannot be processed. Please convert to .docx or .pptx and try again.
                     </p>
                     {blockedDocName && (
                       <p className="text-xs text-muted-foreground mt-1 break-all">
@@ -270,7 +272,7 @@ export default function DocumentUploadModal(props: any) {
                       You can convert your file using
                       {' '}
                       <a
-                        href="https://cloudconvert.com/doc-to-docx"
+                        href="https://cloudconvert.com/"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="underline text-blue-600 hover:text-blue-700"
@@ -281,7 +283,7 @@ export default function DocumentUploadModal(props: any) {
                     </p>
                     <div className="mt-3 flex gap-2">
                       <a
-                        href="https://cloudconvert.com/doc-to-docx"
+                        href="https://cloudconvert.com/"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"

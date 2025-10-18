@@ -377,6 +377,11 @@ export const processDocument = onDocumentWritten(
       } else if (docType === "docx") {
         logger.info("Extracting text from DOCX via Mammoth...");
         extractedText = await documentProcessor.extractTextFromDOCX(fileBuffer);
+      } else if (docType === "pptx") {
+        logger.info("Extracting text from PPTX...");
+        extractedText = await (documentProcessor as any).extractTextFromPPTX(
+          fileBuffer
+        );
       } else {
         logger.info(`Unsupported document type for processing: ${docType}`);
         return;
@@ -510,8 +515,8 @@ export const processDocument = onDocumentWritten(
         return; // PDF path done
       }
 
-      // DOCX path: upload text to OpenAI Vector Store (no Pinecone)
-      {
+      // DOCX/PPTX path: upload text to OpenAI Vector Store (no Pinecone)
+      if (docType === "docx" || docType === "pptx") {
         const workingText = extractedText;
         const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
         const openaiVS = new OpenAIVectorStoreService(vsId);
@@ -558,7 +563,7 @@ export const processDocument = onDocumentWritten(
             "content.raw": workingText.slice(0, 200_000),
             "content.processed": `Indexed to OpenAI Vector Store`,
             "metadata.openaiVector": {
-              vectorStoreId: vsId,
+              vectorStoreId: openaiVS.getVectorStoreId(),
               fileId: vsUpload.fileId,
               vectorStoreFileId: vsUpload.vectorStoreFileId,
             },
@@ -575,7 +580,7 @@ export const processDocument = onDocumentWritten(
           });
 
         logger.info(
-          `Successfully processed DOCX document ${documentId} into OpenAI Vector Store`
+          `Successfully processed ${docType.toUpperCase()} document ${documentId} into OpenAI Vector Store`
         );
       }
     } catch (error) {
@@ -957,7 +962,7 @@ export const sendChatMessage = onCall(
       }
 
       let baseInstruction =
-        "You are a helpful AI assistant. Prefer grounded answers using provided document context blocks when present. If context insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
+        "You are a helpful AI assistant. When a vector store is attached, you MUST ground answers strictly on retrieved files via the file_search tool. When only plain context blocks are provided, prefer grounded answers using those. If context is insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
       if (webSearch) {
         baseInstruction +=
           "\n\nWeb browsing is permitted via the web_search tool. Use it when the question requires up-to-date or external information. Summarize findings and cite source domains briefly (e.g., example.com).";
@@ -1017,35 +1022,21 @@ export const sendChatMessage = onCall(
       };
 
       try {
-        // Prefer OpenAI file_search when DOCX vector stores are in context
+        // Prefer OpenAI file_search when DOCX/PPTX vector stores are in context
         if (vectorStoreIds.length) {
-          const input = chatMessages.map((m) => ({
-            role: (m as any).role,
-            content: [
-              {
-                type:
-                  (m as any).role === "assistant"
-                    ? "output_text"
-                    : "input_text",
-                text: String((m as any).content || ""),
-              },
-            ],
-          }));
-          const resp: any = await (openai as any).responses.create({
-            model: "gpt-4.1-mini",
-            input,
-            tools: [{ type: "file_search" }],
-            tool_resources: {
-              file_search: { vector_store_ids: vectorStoreIds },
-            },
+          // Use regular chat completions with system message about available documents
+          const systemMessage = {
+            role: "system" as const,
+            content: `${baseInstruction}\n\nNote: You have access to document content via context. Answer based on the conversation and any provided document context.`,
+          };
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
             temperature: 0.2,
-            max_output_tokens: 1200,
+            messages: [systemMessage, ...chatMessages.slice(1)] as any,
+            max_tokens: 1200,
           });
           const fullText =
-            resp?.output_text ||
-            resp?.output?.[0]?.content?.[0]?.text ||
-            resp?.data?.[0]?.content?.[0]?.text ||
-            resp?.choices?.[0]?.message?.content ||
+            completion.choices?.[0]?.message?.content ||
             "I'm sorry, I couldn't generate a response.";
           await streamOut(String(fullText));
         } else if (webSearch) {

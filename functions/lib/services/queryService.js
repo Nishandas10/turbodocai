@@ -22,7 +22,7 @@ class QueryService {
      * Query the RAG system with a question
      */
     async queryRAG(question, userId, documentId, topK = 5) {
-        var _a, _b, _c, _d, _e, _f, _g;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
         try {
             firebase_functions_1.logger.info(`Processing RAG query for user ${userId}: ${question}`);
             // If a specific document is targeted and it has OpenAI Vector Store metadata, use OpenAI file_search
@@ -36,7 +36,16 @@ class QueryService {
                         .doc(documentId)
                         .get();
                     const data = snap.data() || {};
-                    const vsId = (_b = (_a = data === null || data === void 0 ? void 0 : data.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.vectorStoreId;
+                    let vsId = (_b = (_a = data === null || data === void 0 ? void 0 : data.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.vectorStoreId;
+                    const isDocxPptx = String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "docx" ||
+                        String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "pptx" ||
+                        String(((_c = data === null || data === void 0 ? void 0 : data.metadata) === null || _c === void 0 ? void 0 : _c.mimeType) || "").includes("word") ||
+                        String(((_d = data === null || data === void 0 ? void 0 : data.metadata) === null || _d === void 0 ? void 0 : _d.mimeType) || "").includes("presentation");
+                    if (!vsId && isDocxPptx && ((_e = data === null || data === void 0 ? void 0 : data.metadata) === null || _e === void 0 ? void 0 : _e.openaiVector)) {
+                        vsId =
+                            process.env.OPENAI_VECTOR_STORE_ID ||
+                                "vs_68f1528dad6c8191bfb8a090e1557a86";
+                    }
                     if (vsId) {
                         firebase_functions_1.logger.info("Routing query to OpenAI Vector Store file_search", {
                             documentId,
@@ -44,7 +53,7 @@ class QueryService {
                         });
                         const answer = await this.answerWithOpenAIVectorStore(question, vsId);
                         const title = (data === null || data === void 0 ? void 0 : data.title) || "Document";
-                        const fileName = (_c = data === null || data === void 0 ? void 0 : data.metadata) === null || _c === void 0 ? void 0 : _c.fileName;
+                        const fileName = (_f = data === null || data === void 0 ? void 0 : data.metadata) === null || _f === void 0 ? void 0 : _f.fileName;
                         return {
                             answer,
                             sources: [
@@ -69,7 +78,7 @@ class QueryService {
             // Step 2: Search Pinecone for similar chunks
             const similarChunks = await this.pineconeService.querySimilarChunks(queryEmbedding, userId, topK, documentId);
             if (similarChunks.length === 0) {
-                // Fallback: if a documentId is provided, try Firestore content/summary or downloadURL text
+                // Prefer vector store fallback when available for this document
                 if (documentId) {
                     try {
                         const db = (0, firestore_1.getFirestore)();
@@ -81,12 +90,46 @@ class QueryService {
                             .get();
                         if (snap.exists) {
                             const data = snap.data();
+                            let vsId = (_h = (_g = data === null || data === void 0 ? void 0 : data.metadata) === null || _g === void 0 ? void 0 : _g.openaiVector) === null || _h === void 0 ? void 0 : _h.vectorStoreId;
+                            const isDocxPptx = String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "docx" ||
+                                String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "pptx" ||
+                                String(((_j = data === null || data === void 0 ? void 0 : data.metadata) === null || _j === void 0 ? void 0 : _j.mimeType) || "").includes("word") ||
+                                String(((_k = data === null || data === void 0 ? void 0 : data.metadata) === null || _k === void 0 ? void 0 : _k.mimeType) || "").includes("presentation");
+                            if (!vsId &&
+                                isDocxPptx &&
+                                ((_l = data === null || data === void 0 ? void 0 : data.metadata) === null || _l === void 0 ? void 0 : _l.openaiVector)) {
+                                vsId =
+                                    process.env.OPENAI_VECTOR_STORE_ID ||
+                                        "vs_68f1528dad6c8191bfb8a090e1557a86";
+                            }
+                            if (vsId) {
+                                firebase_functions_1.logger.info("No Pinecone chunks; answering via OpenAI Vector Store", { documentId, vsId });
+                                try {
+                                    const answer = await this.answerWithOpenAIVectorStore(question, vsId);
+                                    return {
+                                        answer,
+                                        sources: [
+                                            {
+                                                documentId,
+                                                title: data.title || "Document",
+                                                fileName: (_m = data === null || data === void 0 ? void 0 : data.metadata) === null || _m === void 0 ? void 0 : _m.fileName,
+                                                chunk: "Retrieved via OpenAI Vector Store file search",
+                                                score: 1.0,
+                                            },
+                                        ],
+                                        confidence: 80,
+                                    };
+                                }
+                                catch (e) {
+                                    firebase_functions_1.logger.warn("Vector store fallback failed, attempting content/summary", e);
+                                }
+                            }
                             let context = (data.summary ||
-                                ((_d = data.content) === null || _d === void 0 ? void 0 : _d.raw) ||
-                                ((_e = data.content) === null || _e === void 0 ? void 0 : _e.processed) ||
+                                ((_o = data.content) === null || _o === void 0 ? void 0 : _o.raw) ||
+                                ((_p = data.content) === null || _p === void 0 ? void 0 : _p.processed) ||
                                 "").slice(0, 24000);
                             if (!context || context.length < 80) {
-                                const url = (_f = data.metadata) === null || _f === void 0 ? void 0 : _f.downloadURL;
+                                const url = (_q = data.metadata) === null || _q === void 0 ? void 0 : _q.downloadURL;
                                 if (url) {
                                     try {
                                         const res = await fetch(url);
@@ -103,7 +146,7 @@ class QueryService {
                             if (context && context.length >= 80) {
                                 const answer = await this.generateAnswer(question, context);
                                 const sourceTitle = data.title || "Document";
-                                const fileName = (_g = data.metadata) === null || _g === void 0 ? void 0 : _g.fileName;
+                                const fileName = (_r = data.metadata) === null || _r === void 0 ? void 0 : _r.fileName;
                                 return {
                                     answer,
                                     sources: [
@@ -160,36 +203,55 @@ class QueryService {
         }
     }
     /**
-     * Answer a question using OpenAI Responses API with file_search tool over a vector store id.
+     * Answer a question using OpenAI Assistants API with file_search tool over a vector store id.
      */
     async answerWithOpenAIVectorStore(question, vectorStoreId) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        var _a;
         try {
-            const resp = await this.openai.responses.create({
-                model: "gpt-4.1-mini",
-                input: [
+            // Create a temporary assistant with file_search enabled on the vector store
+            const assistant = await this.openai.beta.assistants.create({
+                model: "gpt-4o-mini",
+                instructions: "You are a helpful assistant that answers questions based strictly on the provided documents. Use the file_search tool to find relevant information and ground your answers only on retrieved content. If you cannot find the information in the documents, say so clearly.",
+                tools: [{ type: "file_search" }],
+                tool_resources: {
+                    file_search: {
+                        vector_store_ids: [vectorStoreId]
+                    }
+                }
+            });
+            // Create a thread and add the user's question
+            const thread = await this.openai.beta.threads.create({
+                messages: [
                     {
                         role: "user",
-                        content: [
-                            {
-                                type: "input_text",
-                                text: "Use the file search tool on the attached vector store to answer strictly from the document. If insufficient, say so clearly.\n\nQuestion: " +
-                                    String(question),
-                            },
-                        ],
-                    },
-                ],
-                tools: [{ type: "file_search" }],
-                tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
-                temperature: 0.1,
-                max_output_tokens: 900,
+                        content: question
+                    }
+                ]
             });
-            const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                ((_d = (_c = (_b = (_a = resp === null || resp === void 0 ? void 0 : resp.output) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.text) ||
-                ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.data) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
-                ((_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.message) === null || _l === void 0 ? void 0 : _l.content) ||
-                "I couldn't generate an answer.";
-            return String(fullText);
+            // Run the assistant
+            const run = await this.openai.beta.threads.runs.create(thread.id, {
+                assistant_id: assistant.id
+            });
+            // Wait for completion and get the response
+            let runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
+            while (runStatus.status === 'queued' || runStatus.status === 'in_progress') {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
+            }
+            if (runStatus.status === 'completed') {
+                const messages = await this.openai.beta.threads.messages.list(thread.id);
+                const assistantMessage = messages.data.find(msg => msg.role === 'assistant');
+                const textContent = assistantMessage === null || assistantMessage === void 0 ? void 0 : assistantMessage.content.find(content => content.type === 'text');
+                const answer = ((_a = textContent === null || textContent === void 0 ? void 0 : textContent.text) === null || _a === void 0 ? void 0 : _a.value) || "I couldn't generate an answer.";
+                // Clean up temporary assistant
+                await this.openai.beta.assistants.del(assistant.id);
+                return answer;
+            }
+            else {
+                // Clean up temporary assistant on failure
+                await this.openai.beta.assistants.del(assistant.id);
+                throw new Error(`Assistant run failed with status: ${runStatus.status}`);
+            }
         }
         catch (err) {
             firebase_functions_1.logger.error("answerWithOpenAIVectorStore failed", err);
@@ -243,32 +305,57 @@ Question: ${question}
 Answer:`;
     }
     /**
-     * Summarize a document using OpenAI Responses API with file_search over a vector store.
+     * Summarize a document using OpenAI Assistants API with file_search over a vector store.
      * This asks the model to produce a structured markdown summary grounded only on the attached store.
      */
     async summarizeWithOpenAIVectorStore(vectorStoreId, maxLength, title) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        var _a;
         try {
             const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the attached document titled "${title}" using only retrieved content.\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.`;
-            const resp = await this.openai.responses.create({
-                model: "gpt-4.1-mini",
-                input: [
+            // Create a temporary assistant with file_search enabled on the vector store
+            const assistant = await this.openai.beta.assistants.create({
+                model: "gpt-4o-mini",
+                instructions: "You are a helpful assistant that creates document summaries based strictly on the provided documents. Use the file_search tool to find relevant information and create comprehensive summaries.",
+                tools: [{ type: "file_search" }],
+                tool_resources: {
+                    file_search: {
+                        vector_store_ids: [vectorStoreId]
+                    }
+                }
+            });
+            // Create a thread and add the summarization request
+            const thread = await this.openai.beta.threads.create({
+                messages: [
                     {
                         role: "user",
-                        content: [{ type: "input_text", text: prompt }],
-                    },
-                ],
-                tools: [{ type: "file_search" }],
-                tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
-                temperature: 0.2,
-                max_output_tokens: Math.ceil(maxLength * 2),
+                        content: prompt
+                    }
+                ]
             });
-            const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                ((_d = (_c = (_b = (_a = resp === null || resp === void 0 ? void 0 : resp.output) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.text) ||
-                ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.data) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
-                ((_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.message) === null || _l === void 0 ? void 0 : _l.content) ||
-                "";
-            return String(fullText || "").trim();
+            // Run the assistant
+            const run = await this.openai.beta.threads.runs.create(thread.id, {
+                assistant_id: assistant.id
+            });
+            // Wait for completion and get the response
+            let runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
+            while (runStatus.status === 'queued' || runStatus.status === 'in_progress') {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
+            }
+            if (runStatus.status === 'completed') {
+                const messages = await this.openai.beta.threads.messages.list(thread.id);
+                const assistantMessage = messages.data.find(msg => msg.role === 'assistant');
+                const textContent = assistantMessage === null || assistantMessage === void 0 ? void 0 : assistantMessage.content.find(content => content.type === 'text');
+                const summary = ((_a = textContent === null || textContent === void 0 ? void 0 : textContent.text) === null || _a === void 0 ? void 0 : _a.value) || "";
+                // Clean up temporary assistant
+                await this.openai.beta.assistants.del(assistant.id);
+                return summary.trim();
+            }
+            else {
+                // Clean up temporary assistant on failure
+                await this.openai.beta.assistants.del(assistant.id);
+                throw new Error(`Assistant run failed with status: ${runStatus.status}`);
+            }
         }
         catch (err) {
             firebase_functions_1.logger.error("summarizeWithOpenAIVectorStore failed", err);

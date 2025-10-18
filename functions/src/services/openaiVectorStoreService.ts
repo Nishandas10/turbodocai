@@ -29,6 +29,11 @@ export class OpenAIVectorStoreService {
     }
   }
 
+  /** Return the resolved vector store id used by this service */
+  getVectorStoreId(): string {
+    return this.vectorStoreId;
+  }
+
   /**
    * Store raw text as a single file in the OpenAI vector store. The platform performs chunking and embedding.
    * For large texts, it will be uploaded as a bytes blob.

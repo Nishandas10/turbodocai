@@ -1,5 +1,6 @@
 import pdf from "pdf-parse";
 import mammoth from "mammoth";
+import JSZip from "jszip";
 import { logger } from "firebase-functions";
 
 export class DocumentProcessor {
@@ -50,6 +51,69 @@ export class DocumentProcessor {
     if (type === "pdf") return this.extractTextFromPDF(buffer);
     if (type === "docx") return this.extractTextFromDOCX(buffer);
     throw new Error(`Unsupported document type for extraction: ${type}`);
+  }
+
+  /**
+   * Extract text from PPTX buffer using pptx-parser + JSZip.
+   * Adds slide boundaries like `--- Slide 3 ---` to preserve structure.
+   */
+  async extractTextFromPPTX(buffer: Buffer): Promise<string> {
+    try {
+      const zip = await JSZip.loadAsync(buffer);
+      // ppt/slides/slideN.xml files contain slide text runs
+      const slides: { index: number; text: string }[] = [];
+      for (const path of Object.keys(zip.files)) {
+        const m = path.match(/^ppt\/slides\/slide(\d+)\.xml$/);
+        if (!m) continue;
+        const idx = Number(m[1]);
+        const xml = await zip.files[path].async("string");
+        slides.push({ index: idx, text: xml });
+      }
+      slides.sort((a, b) => a.index - b.index);
+      // Extract plain text from slide XML (<a:t>text</a:t> nodes)
+      const extractFromXml = (xml: string): string => {
+        const texts: string[] = [];
+        const regex = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g;
+        let m: RegExpExecArray | null;
+        while ((m = regex.exec(xml)) !== null) {
+          const raw = m[1]
+            .replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+          texts.push(raw);
+        }
+        return texts.join(" ");
+      };
+      const parts: string[] = [];
+      for (const s of slides) {
+        try {
+          const txt = extractFromXml(s.text) || "";
+          let cleaned = txt
+            .replace(/\s+/g, " ") // collapse whitespace
+            .replace(/\bSlide\s+\d+\b/gi, "") // drop literal slide labels if present
+            .replace(/©\s*\d{4}.+?$/gm, "") // common footer patterns (best-effort)
+            .trim();
+          // Merge very short lines by normalizing spaces already; keep paragraph breaks minimal
+          if (cleaned) {
+            parts.push(`--- Slide ${s.index} ---\n${cleaned}`);
+          }
+        } catch (e) {
+          logger.warn("pptx slide parse failed", { slide: s.index, e });
+        }
+      }
+      const joined = parts.join("\n\n");
+      const finalText = this.cleanExtractedText(joined);
+      logger.info(
+        `Extracted text from PPTX: ${finalText.length} characters, slides: ${slides.length}`
+      );
+      return finalText;
+    } catch (error) {
+      logger.error("Error extracting text from PPTX:", error);
+      throw new Error("Failed to extract text from PPTX");
+    }
   }
 
   /**

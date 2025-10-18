@@ -61,11 +61,17 @@ export default function DocxViewer({ fileUrl, className }: { fileUrl: string; cl
           setHtmlContent(result.value);
           setLoading(false);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("DocxViewer error:", e);
         clearTimeout(timeoutId);
         if (!cancelled) {
-          setError(e?.message || "Failed to render DOCX");
+          const message =
+            e instanceof Error
+              ? e.message
+              : typeof e === "string"
+              ? e
+              : "Failed to render DOCX";
+          setError(message);
           setLoading(false);
         }
       }
