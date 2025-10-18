@@ -84,7 +84,7 @@ export default function TranscriptPage() {
           <h1 className="text-xl font-semibold text-foreground">Transcript</h1>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          Raw text reconstructed from your uploaded PDF (Pinecone vectors or Firestore fallback)
+          Raw text reconstructed from your uploaded document. PDFs load from Pinecone vectors; DOCX loads from stored transcript or Firestore fallback.
         </p>
       </div>
 

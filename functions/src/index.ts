@@ -536,6 +536,17 @@ export const processDocument = onDocumentWritten(
           fileName: documentData.metadata?.fileName,
         });
 
+        // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
+        const transcriptPath = `transcripts/${userId}/${documentId}.txt`;
+        try {
+          await storage.bucket().file(transcriptPath).save(workingText, {
+            contentType: "text/plain; charset=utf-8",
+          });
+          logger.info("Saved DOCX transcript to storage", { transcriptPath });
+        } catch (e) {
+          logger.warn("Failed to save DOCX transcript to storage", e as any);
+        }
+
         // Update Firestore with processed content and status
         await db
           .collection("documents")
@@ -543,13 +554,16 @@ export const processDocument = onDocumentWritten(
           .collection("userDocuments")
           .doc(documentId)
           .update({
-            "content.raw": workingText.slice(0, 1_000_000),
+            // Keep a smaller inline preview to stay well under Firestore limits
+            "content.raw": workingText.slice(0, 200_000),
             "content.processed": `Indexed to OpenAI Vector Store`,
             "metadata.openaiVector": {
               vectorStoreId: vsId,
               fileId: vsUpload.fileId,
               vectorStoreFileId: vsUpload.vectorStoreFileId,
             },
+            // Store transcript file path for full-text retrieval in UI
+            "metadata.transcriptPath": transcriptPath,
             processingStatus: "completed",
             processingCompletedAt: new Date(),
             // Remove chunkCount field if present; cannot set undefined in Firestore update
@@ -850,67 +864,95 @@ export const sendChatMessage = onCall(
 
       // Optional RAG retrieval
       let docsContext = "";
+      let vectorStoreIds: string[] = [];
       if (activeDocIds.length) {
+        // Inspect whether any of the context docs were indexed in OpenAI Vector Store (DOCX path)
         try {
-          const { embeddingService, pineconeService } = createServices();
-          const queryEmbedding = await embeddingService.embedQuery(
-            String(prompt)
+          const metaSnaps = await Promise.all(
+            activeDocIds.map((id) =>
+              db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(id)
+                .get()
+            )
           );
-          const perDoc = 3;
-          const aggregated: Array<{
-            docId: string;
-            title: string;
-            chunk: string;
-            score: number;
-          }> = [];
-          for (const dId of activeDocIds) {
-            try {
-              const matches = await pineconeService.querySimilarChunks(
-                queryEmbedding,
-                userId,
-                perDoc * 2,
-                dId
-              );
-              const seen = new Set<string>();
-              for (const m of matches) {
-                const idx = String(m.id).split("_").pop() || String(m.id);
-                if (seen.has(idx)) continue;
-                seen.add(idx);
-                aggregated.push({
-                  docId: dId,
-                  title: m.title || dId,
-                  chunk: m.chunk,
-                  score: m.score,
-                });
-                if (seen.size >= perDoc) break;
+          vectorStoreIds = Array.from(
+            new Set(
+              metaSnaps
+                .map((s) => s.data() as any)
+                .map((d) => d?.metadata?.openaiVector?.vectorStoreId)
+                .filter(Boolean) as string[]
+            )
+          );
+        } catch (e) {
+          logger.warn("Failed to read doc metadata for vector store IDs", e);
+        }
+
+        if (vectorStoreIds.length === 0) {
+          // Pinecone-based retrieval (PDF path)
+          try {
+            const { embeddingService, pineconeService } = createServices();
+            const queryEmbedding = await embeddingService.embedQuery(
+              String(prompt)
+            );
+            const perDoc = 3;
+            const aggregated: Array<{
+              docId: string;
+              title: string;
+              chunk: string;
+              score: number;
+            }> = [];
+            for (const dId of activeDocIds) {
+              try {
+                const matches = await pineconeService.querySimilarChunks(
+                  queryEmbedding,
+                  userId,
+                  perDoc * 2,
+                  dId
+                );
+                const seen = new Set<string>();
+                for (const m of matches) {
+                  const idx = String(m.id).split("_").pop() || String(m.id);
+                  if (seen.has(idx)) continue;
+                  seen.add(idx);
+                  aggregated.push({
+                    docId: dId,
+                    title: m.title || dId,
+                    chunk: m.chunk,
+                    score: m.score,
+                  });
+                  if (seen.size >= perDoc) break;
+                }
+              } catch (inner) {
+                logger.warn("RAG doc retrieval failed", { docId: dId, inner });
               }
-            } catch (inner) {
-              logger.warn("RAG doc retrieval failed", { docId: dId, inner });
             }
+            aggregated.sort((a, b) => b.score - a.score);
+            const MAX_CONTEXT_CHARS = 12000;
+            const pieces: string[] = [];
+            let used = 0;
+            for (const a of aggregated) {
+              const clean = a.chunk.replace(/\s+/g, " ").trim();
+              if (!clean) continue;
+              const snippet = clean.slice(0, 1000);
+              const block = `DOC ${a.docId} | ${a.title}\n${snippet}`;
+              if (used + block.length > MAX_CONTEXT_CHARS) break;
+              pieces.push(block);
+              used += block.length;
+            }
+            if (pieces.length) {
+              docsContext = `Retrieved document context (do not fabricate beyond this unless using general knowledge cautiously):\n\n${pieces.join(
+                "\n\n---\n\n"
+              )}`;
+            }
+          } catch (ragErr) {
+            logger.warn(
+              "RAG retrieval failed, falling back to no docsContext",
+              ragErr
+            );
           }
-          aggregated.sort((a, b) => b.score - a.score);
-          const MAX_CONTEXT_CHARS = 12000;
-          const pieces: string[] = [];
-          let used = 0;
-          for (const a of aggregated) {
-            const clean = a.chunk.replace(/\s+/g, " ").trim();
-            if (!clean) continue;
-            const snippet = clean.slice(0, 1000);
-            const block = `DOC ${a.docId} | ${a.title}\n${snippet}`;
-            if (used + block.length > MAX_CONTEXT_CHARS) break;
-            pieces.push(block);
-            used += block.length;
-          }
-          if (pieces.length) {
-            docsContext = `Retrieved document context (do not fabricate beyond this unless using general knowledge cautiously):\n\n${pieces.join(
-              "\n\n---\n\n"
-            )}`;
-          }
-        } catch (ragErr) {
-          logger.warn(
-            "RAG retrieval failed, falling back to no docsContext",
-            ragErr
-          );
         }
       }
 
@@ -975,7 +1017,38 @@ export const sendChatMessage = onCall(
       };
 
       try {
-        if (webSearch) {
+        // Prefer OpenAI file_search when DOCX vector stores are in context
+        if (vectorStoreIds.length) {
+          const input = chatMessages.map((m) => ({
+            role: (m as any).role,
+            content: [
+              {
+                type:
+                  (m as any).role === "assistant"
+                    ? "output_text"
+                    : "input_text",
+                text: String((m as any).content || ""),
+              },
+            ],
+          }));
+          const resp: any = await (openai as any).responses.create({
+            model: "gpt-4.1-mini",
+            input,
+            tools: [{ type: "file_search" }],
+            tool_resources: {
+              file_search: { vector_store_ids: vectorStoreIds },
+            },
+            temperature: 0.2,
+            max_output_tokens: 1200,
+          });
+          const fullText =
+            resp?.output_text ||
+            resp?.output?.[0]?.content?.[0]?.text ||
+            resp?.data?.[0]?.content?.[0]?.text ||
+            resp?.choices?.[0]?.message?.content ||
+            "I'm sorry, I couldn't generate a response.";
+          await streamOut(String(fullText));
+        } else if (webSearch) {
           // Non-streaming Responses API with web_search tool (gpt-4.1)
           const input = chatMessages.map((m) => ({
             role: (m as any).role,
@@ -1548,7 +1621,7 @@ export const getDocumentText = onCall(
         text = ordered.map((c) => c.chunk).join("\n\n");
       }
 
-      // Fallback to Firestore stored raw content
+      // Fallback paths for non-PDF (e.g., DOCX using OpenAI Vector Store)
       if (!text || text.length < 10) {
         source = "firestore";
         try {
@@ -1562,11 +1635,35 @@ export const getDocumentText = onCall(
             const data = snap.data() as any;
             title = title || data?.title;
             fileName = fileName || data?.metadata?.fileName;
-            text =
-              data?.content?.raw ||
-              data?.content?.processed ||
-              data?.summary ||
-              "";
+            // If a transcript file was generated (DOCX path), prefer reading full text from Storage
+            const transcriptPath = data?.metadata?.transcriptPath as
+              | string
+              | undefined;
+            if (transcriptPath) {
+              try {
+                const [buf] = await storage
+                  .bucket()
+                  .file(transcriptPath)
+                  .download();
+                text = buf.toString("utf-8");
+              } catch (e) {
+                logger.warn("Failed to read transcript from storage", {
+                  transcriptPath,
+                  e,
+                });
+                text =
+                  data?.content?.raw ||
+                  data?.content?.processed ||
+                  data?.summary ||
+                  "";
+              }
+            } else {
+              text =
+                data?.content?.raw ||
+                data?.content?.processed ||
+                data?.summary ||
+                "";
+            }
           }
         } catch {
           /* ignore */

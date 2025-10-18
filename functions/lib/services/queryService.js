@@ -255,9 +255,7 @@ Answer:`;
                 input: [
                     {
                         role: "user",
-                        content: [
-                            { type: "input_text", text: prompt },
-                        ],
+                        content: [{ type: "input_text", text: prompt }],
                     },
                 ],
                 tools: [{ type: "file_search" }],

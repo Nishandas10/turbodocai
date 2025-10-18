@@ -457,6 +457,17 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 title: documentData.title,
                 fileName: (_k = documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName,
             });
+            // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
+            const transcriptPath = `transcripts/${userId}/${documentId}.txt`;
+            try {
+                await storage.bucket().file(transcriptPath).save(workingText, {
+                    contentType: "text/plain; charset=utf-8",
+                });
+                firebase_functions_1.logger.info("Saved DOCX transcript to storage", { transcriptPath });
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("Failed to save DOCX transcript to storage", e);
+            }
             // Update Firestore with processed content and status
             await db
                 .collection("documents")
@@ -464,13 +475,16 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 .collection("userDocuments")
                 .doc(documentId)
                 .update({
-                "content.raw": workingText.slice(0, 1000000),
+                // Keep a smaller inline preview to stay well under Firestore limits
+                "content.raw": workingText.slice(0, 200000),
                 "content.processed": `Indexed to OpenAI Vector Store`,
                 "metadata.openaiVector": {
                     vectorStoreId: vsId,
                     fileId: vsUpload.fileId,
                     vectorStoreFileId: vsUpload.vectorStoreFileId,
                 },
+                // Store transcript file path for full-text retrieval in UI
+                "metadata.transcriptPath": transcriptPath,
                 processingStatus: "completed",
                 processingCompletedAt: new Date(),
                 // Remove chunkCount field if present; cannot set undefined in Firestore update
@@ -643,7 +657,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
     enforceAppCheck: false,
 }, async (request) => {
     var _a, e_1, _b, _c;
-    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7;
+    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18;
     try {
         const { userId, prompt, language, chatId, docIds, webSearch, thinkMode } = request.data || {};
         if (!userId || !prompt || typeof prompt !== "string") {
@@ -729,56 +743,76 @@ exports.sendChatMessage = (0, https_1.onCall)({
         }
         // Optional RAG retrieval
         let docsContext = "";
+        let vectorStoreIds = [];
         if (activeDocIds.length) {
+            // Inspect whether any of the context docs were indexed in OpenAI Vector Store (DOCX path)
             try {
-                const { embeddingService, pineconeService } = createServices();
-                const queryEmbedding = await embeddingService.embedQuery(String(prompt));
-                const perDoc = 3;
-                const aggregated = [];
-                for (const dId of activeDocIds) {
-                    try {
-                        const matches = await pineconeService.querySimilarChunks(queryEmbedding, userId, perDoc * 2, dId);
-                        const seen = new Set();
-                        for (const m of matches) {
-                            const idx = String(m.id).split("_").pop() || String(m.id);
-                            if (seen.has(idx))
-                                continue;
-                            seen.add(idx);
-                            aggregated.push({
-                                docId: dId,
-                                title: m.title || dId,
-                                chunk: m.chunk,
-                                score: m.score,
-                            });
-                            if (seen.size >= perDoc)
-                                break;
+                const metaSnaps = await Promise.all(activeDocIds.map((id) => db
+                    .collection("documents")
+                    .doc(userId)
+                    .collection("userDocuments")
+                    .doc(id)
+                    .get()));
+                vectorStoreIds = Array.from(new Set(metaSnaps
+                    .map((s) => s.data())
+                    .map((d) => { var _a, _b; return (_b = (_a = d === null || d === void 0 ? void 0 : d.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.vectorStoreId; })
+                    .filter(Boolean)));
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("Failed to read doc metadata for vector store IDs", e);
+            }
+            if (vectorStoreIds.length === 0) {
+                // Pinecone-based retrieval (PDF path)
+                try {
+                    const { embeddingService, pineconeService } = createServices();
+                    const queryEmbedding = await embeddingService.embedQuery(String(prompt));
+                    const perDoc = 3;
+                    const aggregated = [];
+                    for (const dId of activeDocIds) {
+                        try {
+                            const matches = await pineconeService.querySimilarChunks(queryEmbedding, userId, perDoc * 2, dId);
+                            const seen = new Set();
+                            for (const m of matches) {
+                                const idx = String(m.id).split("_").pop() || String(m.id);
+                                if (seen.has(idx))
+                                    continue;
+                                seen.add(idx);
+                                aggregated.push({
+                                    docId: dId,
+                                    title: m.title || dId,
+                                    chunk: m.chunk,
+                                    score: m.score,
+                                });
+                                if (seen.size >= perDoc)
+                                    break;
+                            }
+                        }
+                        catch (inner) {
+                            firebase_functions_1.logger.warn("RAG doc retrieval failed", { docId: dId, inner });
                         }
                     }
-                    catch (inner) {
-                        firebase_functions_1.logger.warn("RAG doc retrieval failed", { docId: dId, inner });
+                    aggregated.sort((a, b) => b.score - a.score);
+                    const MAX_CONTEXT_CHARS = 12000;
+                    const pieces = [];
+                    let used = 0;
+                    for (const a of aggregated) {
+                        const clean = a.chunk.replace(/\s+/g, " ").trim();
+                        if (!clean)
+                            continue;
+                        const snippet = clean.slice(0, 1000);
+                        const block = `DOC ${a.docId} | ${a.title}\n${snippet}`;
+                        if (used + block.length > MAX_CONTEXT_CHARS)
+                            break;
+                        pieces.push(block);
+                        used += block.length;
+                    }
+                    if (pieces.length) {
+                        docsContext = `Retrieved document context (do not fabricate beyond this unless using general knowledge cautiously):\n\n${pieces.join("\n\n---\n\n")}`;
                     }
                 }
-                aggregated.sort((a, b) => b.score - a.score);
-                const MAX_CONTEXT_CHARS = 12000;
-                const pieces = [];
-                let used = 0;
-                for (const a of aggregated) {
-                    const clean = a.chunk.replace(/\s+/g, " ").trim();
-                    if (!clean)
-                        continue;
-                    const snippet = clean.slice(0, 1000);
-                    const block = `DOC ${a.docId} | ${a.title}\n${snippet}`;
-                    if (used + block.length > MAX_CONTEXT_CHARS)
-                        break;
-                    pieces.push(block);
-                    used += block.length;
+                catch (ragErr) {
+                    firebase_functions_1.logger.warn("RAG retrieval failed, falling back to no docsContext", ragErr);
                 }
-                if (pieces.length) {
-                    docsContext = `Retrieved document context (do not fabricate beyond this unless using general knowledge cautiously):\n\n${pieces.join("\n\n---\n\n")}`;
-                }
-            }
-            catch (ragErr) {
-                firebase_functions_1.logger.warn("RAG retrieval failed, falling back to no docsContext", ragErr);
             }
         }
         let baseInstruction = "You are a helpful AI assistant. Prefer grounded answers using provided document context blocks when present. If context insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
@@ -838,7 +872,37 @@ exports.sendChatMessage = (0, https_1.onCall)({
             }
         };
         try {
-            if (webSearch) {
+            // Prefer OpenAI file_search when DOCX vector stores are in context
+            if (vectorStoreIds.length) {
+                const input = chatMessages.map((m) => ({
+                    role: m.role,
+                    content: [
+                        {
+                            type: m.role === "assistant"
+                                ? "output_text"
+                                : "input_text",
+                            text: String(m.content || ""),
+                        },
+                    ],
+                }));
+                const resp = await openai.responses.create({
+                    model: "gpt-4.1-mini",
+                    input,
+                    tools: [{ type: "file_search" }],
+                    tool_resources: {
+                        file_search: { vector_store_ids: vectorStoreIds },
+                    },
+                    temperature: 0.2,
+                    max_output_tokens: 1200,
+                });
+                const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                    ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.output) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
+                    ((_m = (_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.data) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.content) === null || _l === void 0 ? void 0 : _l[0]) === null || _m === void 0 ? void 0 : _m.text) ||
+                    ((_q = (_p = (_o = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _o === void 0 ? void 0 : _o[0]) === null || _p === void 0 ? void 0 : _p.message) === null || _q === void 0 ? void 0 : _q.content) ||
+                    "I'm sorry, I couldn't generate a response.";
+                await streamOut(String(fullText));
+            }
+            else if (webSearch) {
                 // Non-streaming Responses API with web_search tool (gpt-4.1)
                 const input = chatMessages.map((m) => ({
                     role: m.role,
@@ -857,9 +921,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     tools: [{ type: "web_search" }],
                 });
                 const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                    ((_h = (_g = (_f = (_e = resp === null || resp === void 0 ? void 0 : resp.output) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g[0]) === null || _h === void 0 ? void 0 : _h.text) ||
-                    ((_m = (_l = (_k = (_j = resp === null || resp === void 0 ? void 0 : resp.data) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.content) === null || _l === void 0 ? void 0 : _l[0]) === null || _m === void 0 ? void 0 : _m.text) ||
-                    ((_q = (_p = (_o = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _o === void 0 ? void 0 : _o[0]) === null || _p === void 0 ? void 0 : _p.message) === null || _q === void 0 ? void 0 : _q.content) ||
+                    ((_u = (_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.output) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.content) === null || _t === void 0 ? void 0 : _t[0]) === null || _u === void 0 ? void 0 : _u.text) ||
+                    ((_y = (_x = (_w = (_v = resp === null || resp === void 0 ? void 0 : resp.data) === null || _v === void 0 ? void 0 : _v[0]) === null || _w === void 0 ? void 0 : _w.content) === null || _x === void 0 ? void 0 : _x[0]) === null || _y === void 0 ? void 0 : _y.text) ||
+                    ((_1 = (_0 = (_z = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.message) === null || _1 === void 0 ? void 0 : _1.content) ||
                     "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
@@ -881,9 +945,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     input,
                 });
                 const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                    ((_u = (_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.output) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.content) === null || _t === void 0 ? void 0 : _t[0]) === null || _u === void 0 ? void 0 : _u.text) ||
-                    ((_y = (_x = (_w = (_v = resp === null || resp === void 0 ? void 0 : resp.data) === null || _v === void 0 ? void 0 : _v[0]) === null || _w === void 0 ? void 0 : _w.content) === null || _x === void 0 ? void 0 : _x[0]) === null || _y === void 0 ? void 0 : _y.text) ||
-                    ((_1 = (_0 = (_z = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.message) === null || _1 === void 0 ? void 0 : _1.content) ||
+                    ((_5 = (_4 = (_3 = (_2 = resp === null || resp === void 0 ? void 0 : resp.output) === null || _2 === void 0 ? void 0 : _2[0]) === null || _3 === void 0 ? void 0 : _3.content) === null || _4 === void 0 ? void 0 : _4[0]) === null || _5 === void 0 ? void 0 : _5.text) ||
+                    ((_9 = (_8 = (_7 = (_6 = resp === null || resp === void 0 ? void 0 : resp.data) === null || _6 === void 0 ? void 0 : _6[0]) === null || _7 === void 0 ? void 0 : _7.content) === null || _8 === void 0 ? void 0 : _8[0]) === null || _9 === void 0 ? void 0 : _9.text) ||
+                    ((_12 = (_11 = (_10 = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _10 === void 0 ? void 0 : _10[0]) === null || _11 === void 0 ? void 0 : _11.message) === null || _12 === void 0 ? void 0 : _12.content) ||
                     "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
@@ -896,11 +960,11 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     stream: true,
                 });
                 try {
-                    for (var _8 = true, _9 = __asyncValues(stream), _10; _10 = await _9.next(), _a = _10.done, !_a; _8 = true) {
-                        _c = _10.value;
-                        _8 = false;
+                    for (var _19 = true, _20 = __asyncValues(stream), _21; _21 = await _20.next(), _a = _21.done, !_a; _19 = true) {
+                        _c = _21.value;
+                        _19 = false;
                         const part = _c;
-                        const delta = ((_4 = (_3 = (_2 = part === null || part === void 0 ? void 0 : part.choices) === null || _2 === void 0 ? void 0 : _2[0]) === null || _3 === void 0 ? void 0 : _3.delta) === null || _4 === void 0 ? void 0 : _4.content) || "";
+                        const delta = ((_15 = (_14 = (_13 = part === null || part === void 0 ? void 0 : part.choices) === null || _13 === void 0 ? void 0 : _13[0]) === null || _14 === void 0 ? void 0 : _14.delta) === null || _15 === void 0 ? void 0 : _15.content) || "";
                         if (delta)
                             buffered += delta;
                         const now = Date.now();
@@ -913,7 +977,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 catch (e_1_1) { e_1 = { error: e_1_1 }; }
                 finally {
                     try {
-                        if (!_8 && !_a && (_b = _9.return)) await _b.call(_9);
+                        if (!_19 && !_a && (_b = _20.return)) await _b.call(_20);
                     }
                     finally { if (e_1) throw e_1.error; }
                 }
@@ -932,7 +996,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     messages: chatMessages,
                 });
                 buffered =
-                    ((_7 = (_6 = (_5 = completion.choices) === null || _5 === void 0 ? void 0 : _5[0]) === null || _6 === void 0 ? void 0 : _6.message) === null || _7 === void 0 ? void 0 : _7.content) ||
+                    ((_18 = (_17 = (_16 = completion.choices) === null || _16 === void 0 ? void 0 : _16[0]) === null || _17 === void 0 ? void 0 : _17.message) === null || _18 === void 0 ? void 0 : _18.content) ||
                         "I'm sorry, I couldn't generate a response.";
                 await flush(true);
             }
@@ -1285,7 +1349,7 @@ exports.evaluateLongAnswer = (0, https_1.onCall)({ enforceAppCheck: false }, asy
 exports.getDocumentText = (0, https_1.onCall)({
     enforceAppCheck: false,
 }, async (request) => {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         const { documentId, userId, limitChars } = request.data || {};
         if (!documentId || !userId) {
@@ -1310,7 +1374,7 @@ exports.getDocumentText = (0, https_1.onCall)({
                 fileName = (_a = data === null || data === void 0 ? void 0 : data.metadata) === null || _a === void 0 ? void 0 : _a.fileName;
             }
         }
-        catch (_e) {
+        catch (_h) {
             /* ignore */
         }
         // If chunkCount unknown, attempt a cheap probe
@@ -1323,7 +1387,7 @@ exports.getDocumentText = (0, https_1.onCall)({
                 if (indices.length)
                     chunkCount = Math.max(...indices) + 1;
             }
-            catch (_f) {
+            catch (_j) {
                 /* ignore */
             }
         }
@@ -1333,7 +1397,7 @@ exports.getDocumentText = (0, https_1.onCall)({
             const ordered = await pineconeService.fetchDocumentChunks(documentId, userId, chunkCount);
             text = ordered.map((c) => c.chunk).join("\n\n");
         }
-        // Fallback to Firestore stored raw content
+        // Fallback paths for non-PDF (e.g., DOCX using OpenAI Vector Store)
         if (!text || text.length < 10) {
             source = "firestore";
             try {
@@ -1347,14 +1411,38 @@ exports.getDocumentText = (0, https_1.onCall)({
                     const data = snap.data();
                     title = title || (data === null || data === void 0 ? void 0 : data.title);
                     fileName = fileName || ((_b = data === null || data === void 0 ? void 0 : data.metadata) === null || _b === void 0 ? void 0 : _b.fileName);
-                    text =
-                        ((_c = data === null || data === void 0 ? void 0 : data.content) === null || _c === void 0 ? void 0 : _c.raw) ||
-                            ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.processed) ||
-                            (data === null || data === void 0 ? void 0 : data.summary) ||
-                            "";
+                    // If a transcript file was generated (DOCX path), prefer reading full text from Storage
+                    const transcriptPath = (_c = data === null || data === void 0 ? void 0 : data.metadata) === null || _c === void 0 ? void 0 : _c.transcriptPath;
+                    if (transcriptPath) {
+                        try {
+                            const [buf] = await storage
+                                .bucket()
+                                .file(transcriptPath)
+                                .download();
+                            text = buf.toString("utf-8");
+                        }
+                        catch (e) {
+                            firebase_functions_1.logger.warn("Failed to read transcript from storage", {
+                                transcriptPath,
+                                e,
+                            });
+                            text =
+                                ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.raw) ||
+                                    ((_e = data === null || data === void 0 ? void 0 : data.content) === null || _e === void 0 ? void 0 : _e.processed) ||
+                                    (data === null || data === void 0 ? void 0 : data.summary) ||
+                                    "";
+                        }
+                    }
+                    else {
+                        text =
+                            ((_f = data === null || data === void 0 ? void 0 : data.content) === null || _f === void 0 ? void 0 : _f.raw) ||
+                                ((_g = data === null || data === void 0 ? void 0 : data.content) === null || _g === void 0 ? void 0 : _g.processed) ||
+                                (data === null || data === void 0 ? void 0 : data.summary) ||
+                                "";
+                    }
                 }
             }
-            catch (_g) {
+            catch (_k) {
                 /* ignore */
             }
         }
