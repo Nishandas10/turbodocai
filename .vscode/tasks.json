@@ -71,6 +71,39 @@
 				"$eslint-stylish"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Install functions deps and build",
+			"type": "shell",
+			"command": "npm --prefix functions install && npm --prefix functions run build",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Install functions deps and build (PowerShell)",
+			"type": "shell",
+			"command": "npm --prefix functions install; npm --prefix functions run build",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
 		}
 	]
 }

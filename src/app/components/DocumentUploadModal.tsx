@@ -2,7 +2,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useRef, useEffect, useMemo } from "react"
-import { ChevronDown, Cloud, FileText, Upload, Loader2, CheckCircle } from "lucide-react"
+import { ChevronDown, Cloud, FileText, Upload, Loader2, CheckCircle, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import { uploadDocumentFile } from "@/lib/fileUploadService"
@@ -24,6 +24,8 @@ export default function DocumentUploadModal(props: any) {
   const { user } = useAuth()
   const router = useRouter()
   const [generatedSummary, setGeneratedSummary] = useState<string>("")
+  const [showDocAlert, setShowDocAlert] = useState<boolean>(false)
+  const [blockedDocName, setBlockedDocName] = useState<string>("")
 
   const handleSubmitText = () => {
     if (textContent.trim()) {
@@ -40,6 +42,17 @@ export default function DocumentUploadModal(props: any) {
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
+      // Block legacy .doc files (not .docx) and show guidance popup
+      const isLegacyDoc = /\.doc$/i.test(file.name) && !/\.docx$/i.test(file.name)
+      if (isLegacyDoc) {
+        setShowDocAlert(true)
+        setBlockedDocName(file.name)
+        // Clear the input so the same file can be re-selected after converting
+        event.target.value = ""
+        // Ensure no file is staged for upload
+        setSelectedFile(null)
+        return
+      }
       setSelectedFile(file)
       console.log('File selected:', file.name)
       // Reset progress/UI state on new file selection
@@ -132,6 +145,8 @@ export default function DocumentUploadModal(props: any) {
       setOptimisticProgress(0)
       setProcessingProgress(null)
       setProcessingStatus("")
+      setShowDocAlert(false)
+      setBlockedDocName("")
     }
   }, [isOpen])
 
@@ -236,6 +251,56 @@ export default function DocumentUploadModal(props: any) {
               onChange={handleFileUpload}
               className="hidden"
             />
+
+            {/* .doc file guidance popup */}
+            {showDocAlert && (
+              <div className="p-4 rounded-lg border border-yellow-500/40 bg-yellow-500/10">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-card-foreground">
+                      .doc files cannot be processed by AI. Please convert to .docx and try again.
+                    </p>
+                    {blockedDocName && (
+                      <p className="text-xs text-muted-foreground mt-1 break-all">
+                        Blocked file: {blockedDocName}
+                      </p>
+                    )}
+                    <p className="text-sm text-card-foreground mt-2">
+                      You can convert your file using
+                      {' '}
+                      <a
+                        href="https://cloudconvert.com/doc-to-docx"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline text-blue-600 hover:text-blue-700"
+                      >
+                        CloudConvert
+                      </a>
+                      . Once converted, upload the .docx file here.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <a
+                        href="https://cloudconvert.com/doc-to-docx"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                      >
+                        Open converter
+                      </a>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowDocAlert(false)}
+                        className="border-border"
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Show selected file if any */}
             {selectedFile && (

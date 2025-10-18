@@ -47,52 +47,6 @@ class OpenAIVectorStoreService {
             throw error;
         }
     }
-    /**
-     * Upload pre-chunked text as multiple files to the vector store. This gives us control over chunk sizes
-     * (e.g., ~800 words ≈ 500–1000 tokens) while still letting OpenAI handle embeddings inside the store.
-     * Returns the list of created fileIds and vectorStoreFileIds.
-     */
-    async uploadChunksAsFiles(chunks, metadata) {
-        const results = [];
-        try {
-            for (let i = 0; i < chunks.length; i++) {
-                const chunk = chunks[i];
-                if (!chunk || !chunk.trim())
-                    continue;
-                const name = `${metadata.documentId}_chunk_${i + 1}.txt`;
-                const uploadFile = await (0, openai_1.toFile)(Buffer.from(chunk, "utf-8"), name, {
-                    type: "text/plain",
-                });
-                const file = await this.openai.files.create({
-                    file: uploadFile,
-                    purpose: "assistants",
-                });
-                const vector = await this.openai.vectorStores.files.create(this.vectorStoreId, { file_id: file.id });
-                results.push({
-                    fileId: file.id,
-                    vectorStoreFileId: (vector === null || vector === void 0 ? void 0 : vector.id) || file.id,
-                });
-                if ((i + 1) % 20 === 0) {
-                    firebase_functions_1.logger.info("Uploaded chunks to OpenAI Vector Store", {
-                        vsId: this.vectorStoreId,
-                        uploaded: i + 1,
-                        total: chunks.length,
-                    });
-                }
-                // brief delay to avoid rate spikes
-                await new Promise((r) => setTimeout(r, 60));
-            }
-            firebase_functions_1.logger.info("Completed chunk uploads to OpenAI Vector Store", {
-                vsId: this.vectorStoreId,
-                total: results.length,
-            });
-            return { files: results };
-        }
-        catch (error) {
-            firebase_functions_1.logger.error("Failed to upload chunks to OpenAI Vector Store", error);
-            throw error;
-        }
-    }
 }
 exports.OpenAIVectorStoreService = OpenAIVectorStoreService;
 //# sourceMappingURL=openaiVectorStoreService.js.map

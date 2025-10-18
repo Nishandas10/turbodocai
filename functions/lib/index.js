@@ -241,7 +241,7 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
  * - For DOC/DOCX: Extract with Mammoth, upload full text to OpenAI Vector Store (OpenAI handles chunk+embedding using text-embedding-3-large); do not store in Pinecone.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -311,10 +311,56 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info("Processing lock not acquired; exiting");
             return;
         }
+        // If the uploaded file is legacy .doc, convert it to .docx via Cloud Run before further processing
+        const storagePathInitial = documentData.metadata.storagePath;
+        const fileNameInitial = String(((_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName) || "");
+        let effectiveStoragePath = storagePathInitial;
+        let effectiveFileName = fileNameInitial;
+        if (/\.doc$/i.test(storagePathInitial)) {
+            firebase_functions_1.logger.info("Detected .doc file; invoking Cloud Run conversion to .docx", {
+                storagePathInitial,
+            });
+            try {
+                const conv = new services_1.ConversionService(process.env.CLOUD_RUN_CONVERTER_URL, storage.bucket().name);
+                const newPath = await conv.convertDocToDocx(storagePathInitial);
+                effectiveStoragePath = newPath;
+                effectiveFileName = fileNameInitial
+                    ? fileNameInitial.replace(/\.doc$/i, ".docx")
+                    : newPath.split("/").pop() || `${documentId}.docx`;
+                // Persist metadata updates so future runs read the .docx
+                await db
+                    .collection("documents")
+                    .doc(userId)
+                    .collection("userDocuments")
+                    .doc(documentId)
+                    .set({
+                    metadata: {
+                        originalStoragePath: storagePathInitial,
+                        storagePath: newPath,
+                        fileName: effectiveFileName,
+                        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    },
+                }, { merge: true });
+                firebase_functions_1.logger.info("Updated document metadata to .docx after conversion", {
+                    newPath,
+                });
+            }
+            catch (convErr) {
+                firebase_functions_1.logger.error(".doc -> .docx conversion failed", convErr);
+                throw new Error("Failed to convert .doc to .docx before processing; please retry");
+            }
+        }
         // Step 1: Download file from Firebase Storage
-        firebase_functions_1.logger.info("Downloading file from storage...");
-        const fileBuffer = await downloadFileFromStorage(documentData.metadata.storagePath);
-        const docType = (documentData.type || "").toLowerCase();
+        firebase_functions_1.logger.info("Downloading file from storage...", {
+            storagePath: effectiveStoragePath,
+        });
+        const fileBuffer = await downloadFileFromStorage(effectiveStoragePath);
+        const docType = (() => {
+            // If we converted to .docx, force docx processing
+            if (/\.docx$/i.test(effectiveStoragePath))
+                return "docx";
+            return (documentData.type || "").toLowerCase();
+        })();
         let extractedText = "";
         if (docType === "pdf") {
             firebase_functions_1.logger.info("Extracting text from PDF...");
@@ -383,7 +429,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                     const embedding = await embeddingService.embedChunks([chunk]);
                     await pineconeService.storeEmbeddings([chunk], embedding, documentId, userId, {
                         title: documentData.title,
-                        fileName: (_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName,
+                        fileName: (_k = documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName,
                     }, i);
                 }
                 catch (chunkError) {
@@ -455,7 +501,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 userId,
                 documentId,
                 title: documentData.title,
-                fileName: (_k = documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName,
+                fileName: (_l = documentData.metadata) === null || _l === void 0 ? void 0 : _l.fileName,
             });
             // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
             const transcriptPath = `transcripts/${userId}/${documentId}.txt`;
