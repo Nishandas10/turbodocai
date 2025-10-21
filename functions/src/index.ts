@@ -382,6 +382,15 @@ export const processDocument = onDocumentWritten(
         extractedText = await (documentProcessor as any).extractTextFromPPTX(
           fileBuffer
         );
+      } else if (
+        docType === "text" ||
+        String(documentData?.metadata?.mimeType || "").includes("text") ||
+        /\.txt$/i.test(String(documentData?.metadata?.fileName || ""))
+      ) {
+        logger.info("Extracting text from TXT...");
+        extractedText = await (documentProcessor as any).extractTextFromTXT(
+          fileBuffer
+        );
       } else {
         logger.info(`Unsupported document type for processing: ${docType}`);
         return;
@@ -515,8 +524,8 @@ export const processDocument = onDocumentWritten(
         return; // PDF path done
       }
 
-      // DOCX/PPTX path: upload text to OpenAI Vector Store (no Pinecone)
-      if (docType === "docx" || docType === "pptx") {
+      // DOCX/PPTX/TXT path: upload text to OpenAI Vector Store (no Pinecone)
+      if (docType === "docx" || docType === "pptx" || docType === "text") {
         const workingText = extractedText;
         const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
         const openaiVS = new OpenAIVectorStoreService(vsId);
@@ -547,9 +556,9 @@ export const processDocument = onDocumentWritten(
           await storage.bucket().file(transcriptPath).save(workingText, {
             contentType: "text/plain; charset=utf-8",
           });
-          logger.info("Saved DOCX transcript to storage", { transcriptPath });
+          logger.info("Saved transcript to storage", { transcriptPath });
         } catch (e) {
-          logger.warn("Failed to save DOCX transcript to storage", e as any);
+          logger.warn("Failed to save transcript to storage", e as any);
         }
 
         // Update Firestore with processed content and status

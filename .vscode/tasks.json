@@ -104,6 +104,29 @@
 				"$tsc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Install react-file-viewer",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"install",
+				"react-file-viewer"
+			],
+			"problemMatcher": [
+				"$eslint - stylish"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build web (next build)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"group": "build"
 		}
 	]
 }

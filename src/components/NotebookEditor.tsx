@@ -625,25 +625,21 @@ export default function NotebookEditor(props: NotebookEditorProps) {
         }
       }
       const isOwner = user?.uid && user.uid === ownerId
+      // Never overwrite the original uploaded file in Storage from the editor.
+      // For text docs, persist editor content in Firestore content.raw only.
       if (isOwner && docType === 'text') {
-        // Owner path for text docs: upload to Storage and update metadata
-        const { uploadDocument } = await import('@/lib/storage')
-        const file = new File([currentContent], `${currentTitle}.txt`, { type: 'text/plain' })
-        const uploadResult = await uploadDocument(file, ownerId, noteId)
-        if (!uploadResult.success) throw new Error(uploadResult.error || 'Upload failed')
         await updateFirestoreDocument(noteId, ownerId, {
           title: currentTitle,
-          content: { raw: '', processed: '' },
+          content: { raw: currentContent, processed: '' },
+          // Do not modify metadata.storagePath or downloadURL here
           metadata: {
             fileName: `${currentTitle}.txt`,
             fileSize: new Blob([currentContent]).size,
             mimeType: 'text/plain',
-            storagePath: uploadResult.storagePath,
-            downloadURL: uploadResult.downloadURL,
           },
         })
       } else {
-        // Collaborator edits OR owner editing non-text doc (e.g., PDF): store raw content only, do not touch Storage metadata
+        // Collaborator edits OR owner editing non-text doc (e.g., PDF): store raw content only
         await updateFirestoreDocument(noteId, ownerId, {
           title: currentTitle,
           content: { raw: currentContent, processed: '' },

@@ -241,7 +241,7 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
  * - For DOC/DOCX: Extract with Mammoth, upload full text to OpenAI Vector Store (OpenAI handles chunk+embedding using text-embedding-3-large); do not store in Pinecone.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -328,6 +328,12 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info("Extracting text from PPTX...");
             extractedText = await documentProcessor.extractTextFromPPTX(fileBuffer);
         }
+        else if (docType === "text" ||
+            String(((_j = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _j === void 0 ? void 0 : _j.mimeType) || "").includes("text") ||
+            /\.txt$/i.test(String(((_k = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName) || ""))) {
+            firebase_functions_1.logger.info("Extracting text from TXT...");
+            extractedText = await documentProcessor.extractTextFromTXT(fileBuffer);
+        }
         else {
             firebase_functions_1.logger.info(`Unsupported document type for processing: ${docType}`);
             return;
@@ -387,7 +393,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                     const embedding = await embeddingService.embedChunks([chunk]);
                     await pineconeService.storeEmbeddings([chunk], embedding, documentId, userId, {
                         title: documentData.title,
-                        fileName: (_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.fileName,
+                        fileName: (_l = documentData.metadata) === null || _l === void 0 ? void 0 : _l.fileName,
                     }, i);
                 }
                 catch (chunkError) {
@@ -440,8 +446,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info(`Successfully processed document ${documentId} with ${chunkCount} chunks`);
             return; // PDF path done
         }
-        // DOCX/PPTX path: upload text to OpenAI Vector Store (no Pinecone)
-        if (docType === "docx" || docType === "pptx") {
+        // DOCX/PPTX/TXT path: upload text to OpenAI Vector Store (no Pinecone)
+        if (docType === "docx" || docType === "pptx" || docType === "text") {
             const workingText = extractedText;
             const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
             const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
@@ -459,7 +465,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 userId,
                 documentId,
                 title: documentData.title,
-                fileName: (_k = documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName,
+                fileName: (_m = documentData.metadata) === null || _m === void 0 ? void 0 : _m.fileName,
             });
             // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
             const transcriptPath = `transcripts/${userId}/${documentId}.txt`;
@@ -467,10 +473,10 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 await storage.bucket().file(transcriptPath).save(workingText, {
                     contentType: "text/plain; charset=utf-8",
                 });
-                firebase_functions_1.logger.info("Saved DOCX transcript to storage", { transcriptPath });
+                firebase_functions_1.logger.info("Saved transcript to storage", { transcriptPath });
             }
             catch (e) {
-                firebase_functions_1.logger.warn("Failed to save DOCX transcript to storage", e);
+                firebase_functions_1.logger.warn("Failed to save transcript to storage", e);
             }
             // Update Firestore with processed content and status
             await db
@@ -881,7 +887,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 // Use regular chat completions with system message about available documents
                 const systemMessage = {
                     role: "system",
-                    content: `${baseInstruction}\n\nNote: You have access to document content via context. Answer based on the conversation and any provided document context.`
+                    content: `${baseInstruction}\n\nNote: You have access to document content via context. Answer based on the conversation and any provided document context.`,
                 };
                 const completion = await openai.chat.completions.create({
                     model: "gpt-4o-mini",
@@ -889,7 +895,8 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     messages: [systemMessage, ...chatMessages.slice(1)],
                     max_tokens: 1200,
                 });
-                const fullText = ((_g = (_f = (_e = completion.choices) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.message) === null || _g === void 0 ? void 0 : _g.content) || "I'm sorry, I couldn't generate a response.";
+                const fullText = ((_g = (_f = (_e = completion.choices) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.message) === null || _g === void 0 ? void 0 : _g.content) ||
+                    "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
             else if (webSearch) {

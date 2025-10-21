@@ -21,7 +21,7 @@ export type PublicDocument = {
   id: string;
   ownerId: string;
   title: string;
-  type: "pdf" | "docx" | "ppt" | "audio" | "youtube" | "note" | string;
+  type: "pdf" | "docx" | "pptx" | "text" | "audio" | "youtube" | "note" | string;
   status: "uploading" | "processing" | "ready" | "error" | string;
   isPublic: boolean;
   tags?: string[];

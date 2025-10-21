@@ -45,11 +45,30 @@ export class DocumentProcessor {
   }
 
   /**
+   * Extract text from plain TXT buffer (UTF-8 assumed)
+   */
+  async extractTextFromTXT(buffer: Buffer): Promise<string> {
+    try {
+      const text = buffer.toString("utf8");
+      const cleaned = this.cleanExtractedText(text || "");
+      logger.info(`Extracted text from TXT: ${cleaned.length} characters`);
+      return cleaned;
+    } catch (error) {
+      logger.error("Error extracting text from TXT:", error);
+      throw new Error("Failed to extract text from TXT");
+    }
+  }
+
+  /**
    * Dispatch extraction by mime/extension hint
    */
-  async extractText(buffer: Buffer, type: "pdf" | "docx"): Promise<string> {
+  async extractText(
+    buffer: Buffer,
+    type: "pdf" | "docx" | "text"
+  ): Promise<string> {
     if (type === "pdf") return this.extractTextFromPDF(buffer);
     if (type === "docx") return this.extractTextFromDOCX(buffer);
+    if (type === "text") return this.extractTextFromTXT(buffer);
     throw new Error(`Unsupported document type for extraction: ${type}`);
   }
 

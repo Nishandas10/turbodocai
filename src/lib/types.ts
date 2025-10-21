@@ -48,7 +48,6 @@ export interface Document {
     | "audio"
     | "pdf"
     | "docx"
-    | "ppt"
     | "pptx"
     | "youtube"
     | "website"

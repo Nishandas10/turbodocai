@@ -2,7 +2,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useRef, useEffect, useMemo } from "react"
-import { ChevronDown, Cloud, FileText, Upload, Loader2, CheckCircle, AlertTriangle } from "lucide-react"
+import { ChevronDown, Upload, Loader2, CheckCircle, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import { uploadDocumentFile } from "@/lib/fileUploadService"
@@ -11,7 +11,6 @@ import { useRouter } from 'next/navigation'
 
 export default function DocumentUploadModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
-  const [textContent, setTextContent] = useState("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -20,6 +19,7 @@ export default function DocumentUploadModal(props: any) {
   const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
   const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { user } = useAuth()
   const router = useRouter()
@@ -27,15 +27,7 @@ export default function DocumentUploadModal(props: any) {
   const [showDocAlert, setShowDocAlert] = useState<boolean>(false)
   const [blockedDocName, setBlockedDocName] = useState<string>("")
 
-  const handleSubmitText = () => {
-    if (textContent.trim()) {
-      console.log('Submitting text:', textContent)
-      // TODO: Implement text submission logic
-      onClose()
-    }
-  }
-
-  const handleImportPDF = () => {
+  const openFilePicker = () => {
     fileInputRef.current?.click()
   }
 
@@ -65,6 +57,31 @@ export default function DocumentUploadModal(props: any) {
     }
   }
 
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragging(false)
+    const file = event.dataTransfer.files?.[0]
+    if (file) {
+      // Block legacy .doc and .ppt files (not .docx/.pptx) and show guidance popup
+      const isLegacyDoc = /\.doc$/i.test(file.name) && !/\.docx$/i.test(file.name)
+      const isLegacyPpt = /\.ppt$/i.test(file.name) && !/\.pptx$/i.test(file.name)
+      if (isLegacyDoc || isLegacyPpt) {
+        setShowDocAlert(true)
+        setBlockedDocName(file.name)
+        setSelectedFile(null)
+        return
+      }
+      setSelectedFile(file)
+      // Reset progress/UI state on new file selection
+      setProcessingProgress(null)
+      setOptimisticProgress(0)
+      setOptimisticTimerActive(false)
+      setProcessingStatus("")
+      setGeneratedSummary("")
+    }
+  }
+
   const handleFileSubmit = async () => {
     if (!selectedFile || !user?.uid) return
 
@@ -80,11 +97,12 @@ export default function DocumentUploadModal(props: any) {
         setUploadSuccess(true)
         setIsUploading(false)
         
-  // Start processing status monitoring for PDFs, DOCX, and PPTX
+  // Start processing status monitoring for PDFs, DOCX, PPTX, and TXT
   const isPdf = selectedFile.type === 'application/pdf' || /\.pdf$/i.test(selectedFile.name);
-  const isDocx = /\.(docx|doc)$/i.test(selectedFile.name);
+  const isDocx = /\.(docx|doc)$/i.test(selectedFile.name) || /word/i.test(selectedFile.type);
   const isPptx = /\.(pptx)$/i.test(selectedFile.name) || /presentation/i.test(selectedFile.type);
-  if (isPdf || isDocx || isPptx) {
+  const isTxt = /\.txt$/i.test(selectedFile.name) || /text\/plain/i.test(selectedFile.type);
+  if (isPdf || isDocx || isPptx || isTxt) {
           setIsProcessing(true)
           setProcessingStatus("Processing document...")
           // Start optimistic progress when processing starts
@@ -149,6 +167,7 @@ export default function DocumentUploadModal(props: any) {
       setProcessingStatus("")
       setShowDocAlert(false)
       setBlockedDocName("")
+      setSelectedFile(null)
     }
   }, [isOpen])
 
@@ -198,7 +217,7 @@ export default function DocumentUploadModal(props: any) {
       >
         {/* Modal Header */}
         <div className="p-6 border-b border-border flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-card-foreground">Upload text</h2>
+          <h2 className="text-2xl font-bold text-card-foreground">Upload file</h2>
           <button
             onClick={onClose}
             className="w-8 h-8 bg-muted rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
@@ -209,47 +228,33 @@ export default function DocumentUploadModal(props: any) {
 
         {/* Modal Content */}
         <div className="p-6 space-y-6">
-          {/* Text Input Section */}
-          <div>
-            <label className="block text-sm font-medium text-card-foreground mb-3">
-              Text
-            </label>
-            <textarea
-              value={textContent}
-              onChange={(e) => setTextContent(e.target.value)}
-              placeholder="Enter or paste your text content here..."
-              className="w-full h-48 p-4 bg-background border border-border rounded-lg resize-none text-card-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors"
-            />
-          </div>
-
           {/* Action Buttons */}
           <div className="space-y-3">
-            {/* Submit Text Button */}
-            <Button 
-              onClick={handleSubmitText}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-4 text-lg font-medium"
-              disabled={!textContent.trim()}
-            >
-              <Cloud className="h-5 w-5 mr-3" />
-              Submit text
-            </Button>
-
-            {/* Import PDF Button */}
-            <Button 
-              onClick={handleImportPDF}
-              variant="outline"
-              className="w-full bg-muted border-border text-card-foreground hover:bg-muted/80 py-4 text-lg font-medium"
-              disabled={isUploading || isProcessing}
-            >
-              <FileText className="h-5 w-5 mr-3" />
-              Import File
-            </Button>
+            {/* Drag and Drop Uploader */}
+            {!selectedFile && (
+              <div
+                onClick={openFilePicker}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                onDragEnter={(e) => { e.preventDefault(); setIsDragging(true) }}
+                onDragLeave={(e) => { e.preventDefault(); setIsDragging(false) }}
+                onDrop={handleDrop}
+                className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${isDragging ? 'border-blue-600 bg-blue-600/5' : 'border-border hover:border-blue-600/60'}`}
+                aria-label="File upload dropzone"
+              >
+                <Upload className="h-8 w-8 text-muted-foreground" />
+                <div className="space-y-1">
+                  <p className="text-card-foreground font-medium">Drag and drop your file here</p>
+                  <p className="text-sm text-muted-foreground">or click to browse</p>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">Supported: .pdf, .docx, .pptx, .txt</p>
+              </div>
+            )}
 
             {/* Hidden file input */}
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.doc,.docx,.ppt,.pptx,.txt"
+              accept=".pdf,.docx,.pptx,.txt"
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -336,7 +341,7 @@ export default function DocumentUploadModal(props: any) {
                   ) : (
                     <>
                       <Upload className="h-4 w-4 mr-2" />
-                      Upload File
+                      Upload file
                     </>
                   )}
                 </Button>

@@ -42,6 +42,21 @@ class DocumentProcessor {
         }
     }
     /**
+     * Extract text from plain TXT buffer (UTF-8 assumed)
+     */
+    async extractTextFromTXT(buffer) {
+        try {
+            const text = buffer.toString("utf8");
+            const cleaned = this.cleanExtractedText(text || "");
+            firebase_functions_1.logger.info(`Extracted text from TXT: ${cleaned.length} characters`);
+            return cleaned;
+        }
+        catch (error) {
+            firebase_functions_1.logger.error("Error extracting text from TXT:", error);
+            throw new Error("Failed to extract text from TXT");
+        }
+    }
+    /**
      * Dispatch extraction by mime/extension hint
      */
     async extractText(buffer, type) {
@@ -49,6 +64,8 @@ class DocumentProcessor {
             return this.extractTextFromPDF(buffer);
         if (type === "docx")
             return this.extractTextFromDOCX(buffer);
+        if (type === "text")
+            return this.extractTextFromTXT(buffer);
         throw new Error(`Unsupported document type for extraction: ${type}`);
     }
     /**

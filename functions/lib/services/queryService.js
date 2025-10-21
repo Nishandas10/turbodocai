@@ -22,7 +22,7 @@ class QueryService {
      * Query the RAG system with a question
      */
     async queryRAG(question, userId, documentId, topK = 5) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
         try {
             firebase_functions_1.logger.info(`Processing RAG query for user ${userId}: ${question}`);
             // If a specific document is targeted and it has OpenAI Vector Store metadata, use OpenAI file_search
@@ -37,11 +37,11 @@ class QueryService {
                         .get();
                     const data = snap.data() || {};
                     let vsId = (_b = (_a = data === null || data === void 0 ? void 0 : data.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.vectorStoreId;
-                    const isDocxPptx = String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "docx" ||
-                        String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "pptx" ||
+                    const isDocxPptxTxt = ["docx", "pptx", "text"].includes(String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase()) ||
                         String(((_c = data === null || data === void 0 ? void 0 : data.metadata) === null || _c === void 0 ? void 0 : _c.mimeType) || "").includes("word") ||
-                        String(((_d = data === null || data === void 0 ? void 0 : data.metadata) === null || _d === void 0 ? void 0 : _d.mimeType) || "").includes("presentation");
-                    if (!vsId && isDocxPptx && ((_e = data === null || data === void 0 ? void 0 : data.metadata) === null || _e === void 0 ? void 0 : _e.openaiVector)) {
+                        String(((_d = data === null || data === void 0 ? void 0 : data.metadata) === null || _d === void 0 ? void 0 : _d.mimeType) || "").includes("presentation") ||
+                        String(((_e = data === null || data === void 0 ? void 0 : data.metadata) === null || _e === void 0 ? void 0 : _e.mimeType) || "").includes("text/plain");
+                    if (!vsId && isDocxPptxTxt && ((_f = data === null || data === void 0 ? void 0 : data.metadata) === null || _f === void 0 ? void 0 : _f.openaiVector)) {
                         vsId =
                             process.env.OPENAI_VECTOR_STORE_ID ||
                                 "vs_68f1528dad6c8191bfb8a090e1557a86";
@@ -53,7 +53,7 @@ class QueryService {
                         });
                         const answer = await this.answerWithOpenAIVectorStore(question, vsId);
                         const title = (data === null || data === void 0 ? void 0 : data.title) || "Document";
-                        const fileName = (_f = data === null || data === void 0 ? void 0 : data.metadata) === null || _f === void 0 ? void 0 : _f.fileName;
+                        const fileName = (_g = data === null || data === void 0 ? void 0 : data.metadata) === null || _g === void 0 ? void 0 : _g.fileName;
                         return {
                             answer,
                             sources: [
@@ -90,14 +90,14 @@ class QueryService {
                             .get();
                         if (snap.exists) {
                             const data = snap.data();
-                            let vsId = (_h = (_g = data === null || data === void 0 ? void 0 : data.metadata) === null || _g === void 0 ? void 0 : _g.openaiVector) === null || _h === void 0 ? void 0 : _h.vectorStoreId;
-                            const isDocxPptx = String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "docx" ||
-                                String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase() === "pptx" ||
-                                String(((_j = data === null || data === void 0 ? void 0 : data.metadata) === null || _j === void 0 ? void 0 : _j.mimeType) || "").includes("word") ||
-                                String(((_k = data === null || data === void 0 ? void 0 : data.metadata) === null || _k === void 0 ? void 0 : _k.mimeType) || "").includes("presentation");
+                            let vsId = (_j = (_h = data === null || data === void 0 ? void 0 : data.metadata) === null || _h === void 0 ? void 0 : _h.openaiVector) === null || _j === void 0 ? void 0 : _j.vectorStoreId;
+                            const isDocxPptxTxt = ["docx", "pptx", "text"].includes(String((data === null || data === void 0 ? void 0 : data.type) || "").toLowerCase()) ||
+                                String(((_k = data === null || data === void 0 ? void 0 : data.metadata) === null || _k === void 0 ? void 0 : _k.mimeType) || "").includes("word") ||
+                                String(((_l = data === null || data === void 0 ? void 0 : data.metadata) === null || _l === void 0 ? void 0 : _l.mimeType) || "").includes("presentation") ||
+                                String(((_m = data === null || data === void 0 ? void 0 : data.metadata) === null || _m === void 0 ? void 0 : _m.mimeType) || "").includes("text/plain");
                             if (!vsId &&
-                                isDocxPptx &&
-                                ((_l = data === null || data === void 0 ? void 0 : data.metadata) === null || _l === void 0 ? void 0 : _l.openaiVector)) {
+                                isDocxPptxTxt &&
+                                ((_o = data === null || data === void 0 ? void 0 : data.metadata) === null || _o === void 0 ? void 0 : _o.openaiVector)) {
                                 vsId =
                                     process.env.OPENAI_VECTOR_STORE_ID ||
                                         "vs_68f1528dad6c8191bfb8a090e1557a86";
@@ -112,7 +112,7 @@ class QueryService {
                                             {
                                                 documentId,
                                                 title: data.title || "Document",
-                                                fileName: (_m = data === null || data === void 0 ? void 0 : data.metadata) === null || _m === void 0 ? void 0 : _m.fileName,
+                                                fileName: (_p = data === null || data === void 0 ? void 0 : data.metadata) === null || _p === void 0 ? void 0 : _p.fileName,
                                                 chunk: "Retrieved via OpenAI Vector Store file search",
                                                 score: 1.0,
                                             },
@@ -125,11 +125,11 @@ class QueryService {
                                 }
                             }
                             let context = (data.summary ||
-                                ((_o = data.content) === null || _o === void 0 ? void 0 : _o.raw) ||
-                                ((_p = data.content) === null || _p === void 0 ? void 0 : _p.processed) ||
+                                ((_q = data.content) === null || _q === void 0 ? void 0 : _q.raw) ||
+                                ((_r = data.content) === null || _r === void 0 ? void 0 : _r.processed) ||
                                 "").slice(0, 24000);
                             if (!context || context.length < 80) {
-                                const url = (_q = data.metadata) === null || _q === void 0 ? void 0 : _q.downloadURL;
+                                const url = (_s = data.metadata) === null || _s === void 0 ? void 0 : _s.downloadURL;
                                 if (url) {
                                     try {
                                         const res = await fetch(url);
@@ -146,7 +146,7 @@ class QueryService {
                             if (context && context.length >= 80) {
                                 const answer = await this.generateAnswer(question, context);
                                 const sourceTitle = data.title || "Document";
-                                const fileName = (_r = data.metadata) === null || _r === void 0 ? void 0 : _r.fileName;
+                                const fileName = (_t = data.metadata) === null || _t === void 0 ? void 0 : _t.fileName;
                                 return {
                                     answer,
                                     sources: [
@@ -215,33 +215,34 @@ class QueryService {
                 tools: [{ type: "file_search" }],
                 tool_resources: {
                     file_search: {
-                        vector_store_ids: [vectorStoreId]
-                    }
-                }
+                        vector_store_ids: [vectorStoreId],
+                    },
+                },
             });
             // Create a thread and add the user's question
             const thread = await this.openai.beta.threads.create({
                 messages: [
                     {
                         role: "user",
-                        content: question
-                    }
-                ]
+                        content: question,
+                    },
+                ],
             });
             // Run the assistant
             const run = await this.openai.beta.threads.runs.create(thread.id, {
-                assistant_id: assistant.id
+                assistant_id: assistant.id,
             });
             // Wait for completion and get the response
             let runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
-            while (runStatus.status === 'queued' || runStatus.status === 'in_progress') {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+            while (runStatus.status === "queued" ||
+                runStatus.status === "in_progress") {
+                await new Promise((resolve) => setTimeout(resolve, 1000));
                 runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
             }
-            if (runStatus.status === 'completed') {
+            if (runStatus.status === "completed") {
                 const messages = await this.openai.beta.threads.messages.list(thread.id);
-                const assistantMessage = messages.data.find(msg => msg.role === 'assistant');
-                const textContent = assistantMessage === null || assistantMessage === void 0 ? void 0 : assistantMessage.content.find(content => content.type === 'text');
+                const assistantMessage = messages.data.find((msg) => msg.role === "assistant");
+                const textContent = assistantMessage === null || assistantMessage === void 0 ? void 0 : assistantMessage.content.find((content) => content.type === "text");
                 const answer = ((_a = textContent === null || textContent === void 0 ? void 0 : textContent.text) === null || _a === void 0 ? void 0 : _a.value) || "I couldn't generate an answer.";
                 // Clean up temporary assistant
                 await this.openai.beta.assistants.del(assistant.id);
@@ -319,33 +320,34 @@ Answer:`;
                 tools: [{ type: "file_search" }],
                 tool_resources: {
                     file_search: {
-                        vector_store_ids: [vectorStoreId]
-                    }
-                }
+                        vector_store_ids: [vectorStoreId],
+                    },
+                },
             });
             // Create a thread and add the summarization request
             const thread = await this.openai.beta.threads.create({
                 messages: [
                     {
                         role: "user",
-                        content: prompt
-                    }
-                ]
+                        content: prompt,
+                    },
+                ],
             });
             // Run the assistant
             const run = await this.openai.beta.threads.runs.create(thread.id, {
-                assistant_id: assistant.id
+                assistant_id: assistant.id,
             });
             // Wait for completion and get the response
             let runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
-            while (runStatus.status === 'queued' || runStatus.status === 'in_progress') {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+            while (runStatus.status === "queued" ||
+                runStatus.status === "in_progress") {
+                await new Promise((resolve) => setTimeout(resolve, 1000));
                 runStatus = await this.openai.beta.threads.runs.retrieve(thread.id, run.id);
             }
-            if (runStatus.status === 'completed') {
+            if (runStatus.status === "completed") {
                 const messages = await this.openai.beta.threads.messages.list(thread.id);
-                const assistantMessage = messages.data.find(msg => msg.role === 'assistant');
-                const textContent = assistantMessage === null || assistantMessage === void 0 ? void 0 : assistantMessage.content.find(content => content.type === 'text');
+                const assistantMessage = messages.data.find((msg) => msg.role === "assistant");
+                const textContent = assistantMessage === null || assistantMessage === void 0 ? void 0 : assistantMessage.content.find((content) => content.type === "text");
                 const summary = ((_a = textContent === null || textContent === void 0 ? void 0 : textContent.text) === null || _a === void 0 ? void 0 : _a.value) || "";
                 // Clean up temporary assistant
                 await this.openai.beta.assistants.del(assistant.id);

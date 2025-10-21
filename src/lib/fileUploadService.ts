@@ -35,6 +35,8 @@ export const uploadDocumentFile = async (
       documentType = "docx";
     } else if (fileExtension === "pptx" || fileExtension === "ppt") {
       documentType = "pptx";
+    } else if (fileExtension === "txt") {
+      documentType = "text";
     }
 
     // Create document in Firestore first

@@ -235,7 +235,8 @@ export const uploadFile = async (
   } else if (
     mimeType.includes("pdf") ||
     mimeType.includes("document") ||
-    mimeType.includes("presentation")
+    mimeType.includes("presentation") ||
+    mimeType.includes("text/plain")
   ) {
     return uploadDocument(file, userId, documentId);
   } else {

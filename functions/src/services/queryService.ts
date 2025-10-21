@@ -77,12 +77,14 @@ export class QueryService {
           const data = (snap.data() as any) || {};
           let vsId: string | undefined =
             data?.metadata?.openaiVector?.vectorStoreId;
-          const isDocxPptx =
-            String(data?.type || "").toLowerCase() === "docx" ||
-            String(data?.type || "").toLowerCase() === "pptx" ||
+          const isDocxPptxTxt =
+            ["docx", "pptx", "text"].includes(
+              String(data?.type || "").toLowerCase()
+            ) ||
             String(data?.metadata?.mimeType || "").includes("word") ||
-            String(data?.metadata?.mimeType || "").includes("presentation");
-          if (!vsId && isDocxPptx && data?.metadata?.openaiVector) {
+            String(data?.metadata?.mimeType || "").includes("presentation") ||
+            String(data?.metadata?.mimeType || "").includes("text/plain");
+          if (!vsId && isDocxPptxTxt && data?.metadata?.openaiVector) {
             vsId =
               process.env.OPENAI_VECTOR_STORE_ID ||
               "vs_68f1528dad6c8191bfb8a090e1557a86";
@@ -152,18 +154,22 @@ export class QueryService {
               };
               let vsId: string | undefined =
                 data?.metadata?.openaiVector?.vectorStoreId;
-              const isDocxPptx =
-                String((data as any)?.type || "").toLowerCase() === "docx" ||
-                String((data as any)?.type || "").toLowerCase() === "pptx" ||
+              const isDocxPptxTxt =
+                ["docx", "pptx", "text"].includes(
+                  String((data as any)?.type || "").toLowerCase()
+                ) ||
                 String((data as any)?.metadata?.mimeType || "").includes(
                   "word"
                 ) ||
                 String((data as any)?.metadata?.mimeType || "").includes(
                   "presentation"
+                ) ||
+                String((data as any)?.metadata?.mimeType || "").includes(
+                  "text/plain"
                 );
               if (
                 !vsId &&
-                isDocxPptx &&
+                isDocxPptxTxt &&
                 (data as any)?.metadata?.openaiVector
               ) {
                 vsId =

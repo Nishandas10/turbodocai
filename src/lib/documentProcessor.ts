@@ -233,7 +233,7 @@ export class DocumentProcessor {
           return await this.processWebsite(content as string);
 
         case "docx":
-        case "ppt":
+        case "pptx":
           // These would need specific libraries for processing
           return {
             success: false,

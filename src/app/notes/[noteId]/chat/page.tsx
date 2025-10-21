@@ -9,9 +9,11 @@ import DocumentChat from "@/components/DocumentChat";
 import PDFViewer from "@/components/PdfViewer";
 import DocxViewer from "@/components/DocxViewer";
 import PptxViewer from "@/components/PptxViewer";
+import TxtViewer from "@/components/TxtViewer";
 // import { getFileDownloadURL, getUserDocumentsPath } from "@/lib/storage";
 import { db } from "@/lib/firebase";
 import { doc as fsDoc, onSnapshot, Timestamp } from "firebase/firestore";
+import { getFileDownloadURL, getUserDocumentsPath } from "@/lib/storage";
 
 export default function ChatPage() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -72,11 +74,12 @@ export default function ChatPage() {
     if (!doc) return null;
     const mime = doc.metadata?.mimeType || "";
     const lowerName = (doc.metadata?.fileName || "").toLowerCase();
-  const isPdf = doc.type === "pdf" || mime.includes("pdf") || lowerName.endsWith(".pdf");
-  const isDocx = doc.type === "docx" || mime.includes("word") || lowerName.endsWith(".docx");
-  const isPptx = doc.type === "pptx" || mime.includes("presentation") || lowerName.endsWith(".pptx");
+    const isPdf = doc.type === "pdf" || mime.includes("pdf") || lowerName.endsWith(".pdf");
+    const isDocx = doc.type === "docx" || mime.includes("word") || lowerName.endsWith(".docx");
+    const isPptx = doc.type === "pptx" || mime.includes("presentation") || lowerName.endsWith(".pptx");
+    const isTxt = doc.type === "text" || mime.includes("text/plain") || lowerName.endsWith(".txt");
     const baseUrl = doc.metadata?.downloadURL || null;
-    if (!baseUrl) return null; // nothing to preview
+    if (!baseUrl && !isTxt) return null; // no preview for non-text without URL
     // Add cache-busting so newly uploaded PDFs don't show stale cached content
     const toMs = (val: Timestamp | Date | string | number | undefined): number => {
       try {
@@ -94,10 +97,86 @@ export default function ChatPage() {
       } catch { return Date.now(); }
     };
     const version = toMs(doc.updatedAt || doc.lastAccessed || doc.createdAt || Date.now());
-    const sep = baseUrl.includes('?') ? '&' : '?';
-    const url = `${baseUrl}${sep}v=${version}`;
-    return { url, isPdf, isDocx, isPptx };
+    let url: string | null = baseUrl;
+    if (url) {
+      const sep = url.includes('?') ? '&' : '?';
+      url = `${url}${sep}v=${version}`;
+    }
+    return { url, isPdf, isDocx, isPptx, isTxt };
   }, [doc]);
+
+  // If no downloadURL (common for older records), try resolving from storagePath
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!doc) { setResolvedUrl(null); return; }
+      const hasUrl = !!doc.metadata?.downloadURL;
+      if (hasUrl) { setResolvedUrl(null); return; }
+      // Try storagePath first
+  const storagePathDirect = doc.metadata?.storagePath || null;
+      // If missing, derive from userId + documentId + extension from fileName
+  let derivedStoragePath: string | null = storagePathDirect;
+  if (!derivedStoragePath) {
+        const fileName = doc.metadata?.fileName || "";
+        let ext = fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() : undefined;
+        if (!ext) {
+          const mime = (doc.metadata?.mimeType || "").toLowerCase();
+          if (mime.includes("text/plain")) ext = "txt";
+          else if (mime.includes("pdf")) ext = "pdf";
+          else if (mime.includes("word") || mime.includes("officedocument.wordprocessingml")) ext = "docx";
+          else if (mime.includes("presentation") || mime.includes("officedocument.presentationml")) ext = "pptx";
+        }
+        if (!ext) {
+          // fall back to doc.type
+          const t = doc.type;
+          if (t === 'text') ext = 'txt';
+          else if (t === 'pdf') ext = 'pdf';
+          else if (t === 'docx') ext = 'docx';
+          else if (t === 'pptx') ext = 'pptx';
+        }
+
+        // prefer original source owner if present (imported/public docs)
+        const ownerCandidatesRaw = [doc.metadata?.sourceOwnerId, doc.userId, effOwner].filter(Boolean) as string[];
+        const ownerCandidates = Array.from(new Set(ownerCandidatesRaw));
+        const idCandidatesRaw = [doc.metadata?.sourceDocumentId, doc.id].filter(Boolean) as string[];
+        const idCandidates = Array.from(new Set(idCandidatesRaw));
+
+        let found: string | null = null;
+        if (ext && ownerCandidates.length && idCandidates.length) {
+          for (const ownerId of ownerCandidates) {
+            for (const docId of idCandidates) {
+              const candidate = `${getUserDocumentsPath(ownerId)}/${docId}.${ext}`;
+              try {
+                const url = await getFileDownloadURL(candidate);
+                if (url) { found = url; }
+              } catch {
+                // continue to next candidate
+              }
+              if (found) break;
+            }
+            if (found) break;
+          }
+          if (found) {
+            if (active) setResolvedUrl(found);
+            return;
+          }
+        }
+        // if not found via candidates, set derived path to a best guess using primary owner+id
+        if (!found && ext && ownerCandidates.length && idCandidates.length) {
+          derivedStoragePath = `${getUserDocumentsPath(ownerCandidates[0])}/${idCandidates[0]}.${ext}`;
+        }
+      }
+      if (!derivedStoragePath) { setResolvedUrl(null); return; }
+      try {
+        const url = await getFileDownloadURL(derivedStoragePath);
+        if (active) setResolvedUrl(url);
+      } catch {
+        if (active) setResolvedUrl(null);
+      }
+    })();
+    return () => { active = false; };
+  }, [doc, effOwner]);
 
   // Fetch the PDF as a Blob to guarantee fresh content and create an object URL for the viewer
   useEffect(() => {
@@ -113,7 +192,7 @@ export default function ChatPage() {
       setVerifiedPdfUrl(null);
       try {
         // Force revalidation to bypass caches
-        const res = await fetch(fileInfo.url, { cache: 'reload' });
+  const res = await fetch(fileInfo.url!, { cache: 'reload' });
         if (!res.ok) throw new Error('Failed to fetch PDF');
         const blob = await res.blob();
         // Magic byte check
@@ -179,7 +258,7 @@ export default function ChatPage() {
           <div className="p-4 text-sm text-red-500">{error}</div>
         ) : fileInfo ? (
           fileInfo.isDocx ? (
-            <DocxViewer fileUrl={fileInfo.url} className="h-full w-full" />
+            <DocxViewer fileUrl={fileInfo.url!} className="h-full w-full" />
           ) : fileInfo.isPdf ? (
           verifyingPdf ? (
             <div className="h-full w-full flex items-center justify-center text-muted-foreground">Checking file…</div>
@@ -195,7 +274,21 @@ export default function ChatPage() {
             </div>
           )
           ) : fileInfo.isPptx ? (
-            <PptxViewer fileUrl={fileInfo.url} className="h-full w-full" />
+            <PptxViewer fileUrl={fileInfo.url!} className="h-full w-full" />
+          ) : fileInfo.isTxt ? (
+            (() => {
+              const finalUrl = fileInfo.url || resolvedUrl;
+              return finalUrl ? (
+                <TxtViewer fileUrl={finalUrl} className="h-full w-full" />
+              ) : (
+                <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
+                  <div>
+                    <div className="font-medium mb-1">TXT preview not available</div>
+                    <div className="text-sm">Missing download URL. The file may not be accessible.</div>
+                  </div>
+                </div>
+              );
+            })()
           ) : (
             <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
               <div>
@@ -210,7 +303,7 @@ export default function ChatPage() {
             <div>
               <div className="font-medium mb-1">Preview not available</div>
               <div className="text-sm">{doc?.metadata?.fileName || "Unknown file"}</div>
-              <div className="text-xs opacity-70 mt-2">Upload a PDF, DOCX, or PPTX for preview.</div>
+              <div className="text-xs opacity-70 mt-2">Upload a PDF, DOCX, PPTX, or TXT for preview.</div>
             </div>
           </div>
         )}
