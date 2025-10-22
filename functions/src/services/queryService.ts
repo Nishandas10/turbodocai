@@ -750,8 +750,9 @@ Answer:`;
   ): Promise<GeneratedQuizQuestion[]> {
     try {
       const db = getFirestore();
-      // Cache lookup first (skip if forceNew is true)
       const cacheKey = `quiz_v1_${difficulty}_${count}`;
+
+      // Cache lookup first (skip if forceNew is true)
       if (!forceNew) {
         try {
           const cacheDoc = await db
@@ -763,13 +764,13 @@ Answer:`;
             .doc(cacheKey)
             .get();
           if (cacheDoc.exists) {
-            const data = cacheDoc.data() as { quiz?: GeneratedQuizQuestion[] };
-            if (data.quiz && data.quiz.length) {
+            const cdata = cacheDoc.data() as { quiz?: GeneratedQuizQuestion[] };
+            if (cdata.quiz && cdata.quiz.length) {
               logger.info("Serving quiz from cache", {
-                len: data.quiz.length,
+                len: cdata.quiz.length,
                 difficulty,
               });
-              return data.quiz.slice(0, count);
+              return cdata.quiz.slice(0, count);
             }
           }
         } catch (e) {
@@ -797,68 +798,96 @@ Answer:`;
         summary?: string;
         metadata?: { transcriptPath?: string; downloadURL?: string };
       };
-      let sourceText = (
-        data.summary ||
-        data.content?.raw ||
-        data.content?.processed ||
-        ""
-      ).slice(0, 18000);
-      if (!sourceText || sourceText.length < 120) {
-        const transcriptPath = data.metadata?.transcriptPath;
-        if (transcriptPath) {
-          try {
-            const [buf] = await (await import("firebase-admin/storage"))
-              .getStorage()
-              .bucket()
-              .file(transcriptPath)
-              .download();
-            sourceText = buf.toString("utf-8").slice(0, 18000);
-          } catch {
-            // ignore
-          }
+
+      const preferTranscript = count >= 20;
+      let sourceText = "";
+      if (preferTranscript && data.metadata?.transcriptPath) {
+        try {
+          const [buf] = await (await import("firebase-admin/storage"))
+            .getStorage()
+            .bucket()
+            .file(data.metadata.transcriptPath)
+            .download();
+          sourceText = buf.toString("utf-8").slice(0, 18000);
+        } catch (e) {
+          logger.warn(
+            "Transcript read failed; falling back to Firestore fields",
+            e as any
+          );
         }
-        const url = data.metadata?.downloadURL;
-        if ((!sourceText || sourceText.length < 120) && url) {
-          try {
-            const res = await fetch(url);
-            if (res.ok) {
-              const txt = await res.text();
-              sourceText = (txt || "").slice(0, 18000);
-            }
-          } catch (fetchErr) {
-            logger.warn(
-              "downloadURL fetch failed for quiz fallback",
-              fetchErr as any
-            );
+      }
+      if (!sourceText) {
+        sourceText = (
+          data.summary ||
+          data.content?.raw ||
+          data.content?.processed ||
+          ""
+        ).slice(0, 18000);
+      }
+      if (
+        (!sourceText || sourceText.length < 120) &&
+        data.metadata?.transcriptPath
+      ) {
+        try {
+          const [buf] = await (await import("firebase-admin/storage"))
+            .getStorage()
+            .bucket()
+            .file(data.metadata.transcriptPath)
+            .download();
+          sourceText = buf.toString("utf-8").slice(0, 18000);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (
+        (!sourceText || sourceText.length < 120) &&
+        data.metadata?.downloadURL
+      ) {
+        try {
+          const res = await fetch(data.metadata.downloadURL);
+          if (res.ok) {
+            const txt = await res.text();
+            sourceText = (txt || "").slice(0, 18000);
           }
+        } catch (fetchErr) {
+          logger.warn(
+            "downloadURL fetch failed for quiz fallback",
+            fetchErr as any
+          );
         }
       }
 
-      if (!sourceText || sourceText.length < 120) {
-        return [];
-      }
+      if (!sourceText || sourceText.length < 120) return [];
 
-      const quizPrompt = `Generate ${count} multiple-choice quiz questions from the following text. Return ONLY a JSON array where each item has id, question, options (array of 4 strings), correctAnswer (0-3 index), explanation, category, and difficulty (easy/medium/hard). Text:\n\n${sourceText}`;
+      const quizPrompt = `Generate ${count} multiple-choice quiz questions from the following text. Return ONLY a strict JSON array (no markdown/code fences), where each item has: id, question, options (array of 4 strings), correctAnswer (0-3 index), explanation, category, difficulty (easy/medium/hard). Use valid JSON only: double quotes for strings, no comments, no trailing commas.\n\nText:\n\n${sourceText}`;
       const resp = await this.openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
             content:
-              "You produce educational quiz questions as valid JSON array only. No commentary.",
+              "You produce educational quiz questions as a strict JSON array only. No commentary, no markdown, no code fences. Do not include trailing commas.",
           },
           { role: "user", content: quizPrompt },
         ],
-        temperature: 0.4,
-        max_tokens: 2000,
+        temperature: count >= 15 ? 0.2 : 0.4,
+        max_tokens: Math.min(3500, 120 + count * 130),
       });
-      const raw = resp.choices?.[0]?.message?.content || "";
+
+      let raw = resp.choices?.[0]?.message?.content || "";
       const sIdx = raw.indexOf("[");
       const eIdx = raw.lastIndexOf("]");
       let questions: GeneratedQuizQuestion[] = [];
       if (sIdx !== -1 && eIdx !== -1) {
+        const rawSlice = raw.slice(sIdx, eIdx + 1);
+        const sanitize = (s: string) =>
+          s
+            .replace(/```json|```/g, "")
+            .replace(/[\u201C\u201D]/g, '"')
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/,\s*([}\]])/g, "$1");
         try {
-          const parsed = JSON.parse(raw.slice(sIdx, eIdx + 1)) as any[];
+          const parsed = JSON.parse(sanitize(rawSlice)) as any[];
           questions = parsed
             .filter(
               (q) =>
@@ -895,7 +924,7 @@ Answer:`;
                 : "medium") as "easy" | "medium" | "hard",
             }));
         } catch (parseErr) {
-          logger.warn("Failed to parse quiz JSON", parseErr);
+          logger.warn("Failed to parse quiz JSON", parseErr as any);
         }
       }
 

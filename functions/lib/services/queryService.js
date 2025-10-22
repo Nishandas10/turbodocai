@@ -613,11 +613,11 @@ Answer:`;
      * Similar strategy to flashcards but generates multiple choice questions with explanations.
      */
     async generateQuiz(documentId, userId, count = 10, difficulty = "mixed", forceNew = false) {
-        var _a, _b, _c, _d, _e, _f, _g;
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         try {
             const db = (0, firestore_1.getFirestore)();
-            // Cache lookup first (skip if forceNew is true)
             const cacheKey = `quiz_v1_${difficulty}_${count}`;
+            // Cache lookup first (skip if forceNew is true)
             if (!forceNew) {
                 try {
                     const cacheDoc = await db
@@ -629,13 +629,13 @@ Answer:`;
                         .doc(cacheKey)
                         .get();
                     if (cacheDoc.exists) {
-                        const data = cacheDoc.data();
-                        if (data.quiz && data.quiz.length) {
+                        const cdata = cacheDoc.data();
+                        if (cdata.quiz && cdata.quiz.length) {
                             firebase_functions_1.logger.info("Serving quiz from cache", {
-                                len: data.quiz.length,
+                                len: cdata.quiz.length,
                                 difficulty,
                             });
-                            return data.quiz.slice(0, count);
+                            return cdata.quiz.slice(0, count);
                         }
                     }
                 }
@@ -659,62 +659,82 @@ Answer:`;
             if (!docSnap.exists)
                 return [];
             const data = docSnap.data();
-            let sourceText = (data.summary ||
-                ((_a = data.content) === null || _a === void 0 ? void 0 : _a.raw) ||
-                ((_b = data.content) === null || _b === void 0 ? void 0 : _b.processed) ||
-                "").slice(0, 18000);
-            if (!sourceText || sourceText.length < 120) {
-                const transcriptPath = (_c = data.metadata) === null || _c === void 0 ? void 0 : _c.transcriptPath;
-                if (transcriptPath) {
-                    try {
-                        const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
-                            .getStorage()
-                            .bucket()
-                            .file(transcriptPath)
-                            .download();
-                        sourceText = buf.toString("utf-8").slice(0, 18000);
-                    }
-                    catch (_h) {
-                        // ignore
-                    }
+            const preferTranscript = count >= 20;
+            let sourceText = "";
+            if (preferTranscript && ((_a = data.metadata) === null || _a === void 0 ? void 0 : _a.transcriptPath)) {
+                try {
+                    const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
+                        .getStorage()
+                        .bucket()
+                        .file(data.metadata.transcriptPath)
+                        .download();
+                    sourceText = buf.toString("utf-8").slice(0, 18000);
                 }
-                const url = (_d = data.metadata) === null || _d === void 0 ? void 0 : _d.downloadURL;
-                if ((!sourceText || sourceText.length < 120) && url) {
-                    try {
-                        const res = await fetch(url);
-                        if (res.ok) {
-                            const txt = await res.text();
-                            sourceText = (txt || "").slice(0, 18000);
-                        }
-                    }
-                    catch (fetchErr) {
-                        firebase_functions_1.logger.warn("downloadURL fetch failed for quiz fallback", fetchErr);
-                    }
+                catch (e) {
+                    firebase_functions_1.logger.warn("Transcript read failed; falling back to Firestore fields", e);
                 }
             }
-            if (!sourceText || sourceText.length < 120) {
+            if (!sourceText) {
+                sourceText = (data.summary ||
+                    ((_b = data.content) === null || _b === void 0 ? void 0 : _b.raw) ||
+                    ((_c = data.content) === null || _c === void 0 ? void 0 : _c.processed) ||
+                    "").slice(0, 18000);
+            }
+            if ((!sourceText || sourceText.length < 120) &&
+                ((_d = data.metadata) === null || _d === void 0 ? void 0 : _d.transcriptPath)) {
+                try {
+                    const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
+                        .getStorage()
+                        .bucket()
+                        .file(data.metadata.transcriptPath)
+                        .download();
+                    sourceText = buf.toString("utf-8").slice(0, 18000);
+                }
+                catch (_j) {
+                    /* ignore */
+                }
+            }
+            if ((!sourceText || sourceText.length < 120) &&
+                ((_e = data.metadata) === null || _e === void 0 ? void 0 : _e.downloadURL)) {
+                try {
+                    const res = await fetch(data.metadata.downloadURL);
+                    if (res.ok) {
+                        const txt = await res.text();
+                        sourceText = (txt || "").slice(0, 18000);
+                    }
+                }
+                catch (fetchErr) {
+                    firebase_functions_1.logger.warn("downloadURL fetch failed for quiz fallback", fetchErr);
+                }
+            }
+            if (!sourceText || sourceText.length < 120)
                 return [];
-            }
-            const quizPrompt = `Generate ${count} multiple-choice quiz questions from the following text. Return ONLY a JSON array where each item has id, question, options (array of 4 strings), correctAnswer (0-3 index), explanation, category, and difficulty (easy/medium/hard). Text:\n\n${sourceText}`;
+            const quizPrompt = `Generate ${count} multiple-choice quiz questions from the following text. Return ONLY a strict JSON array (no markdown/code fences), where each item has: id, question, options (array of 4 strings), correctAnswer (0-3 index), explanation, category, difficulty (easy/medium/hard). Use valid JSON only: double quotes for strings, no comments, no trailing commas.\n\nText:\n\n${sourceText}`;
             const resp = await this.openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     {
                         role: "system",
-                        content: "You produce educational quiz questions as valid JSON array only. No commentary.",
+                        content: "You produce educational quiz questions as a strict JSON array only. No commentary, no markdown, no code fences. Do not include trailing commas.",
                     },
                     { role: "user", content: quizPrompt },
                 ],
-                temperature: 0.4,
-                max_tokens: 2000,
+                temperature: count >= 15 ? 0.2 : 0.4,
+                max_tokens: Math.min(3500, 120 + count * 130),
             });
-            const raw = ((_g = (_f = (_e = resp.choices) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.message) === null || _g === void 0 ? void 0 : _g.content) || "";
+            let raw = ((_h = (_g = (_f = resp.choices) === null || _f === void 0 ? void 0 : _f[0]) === null || _g === void 0 ? void 0 : _g.message) === null || _h === void 0 ? void 0 : _h.content) || "";
             const sIdx = raw.indexOf("[");
             const eIdx = raw.lastIndexOf("]");
             let questions = [];
             if (sIdx !== -1 && eIdx !== -1) {
+                const rawSlice = raw.slice(sIdx, eIdx + 1);
+                const sanitize = (s) => s
+                    .replace(/```json|```/g, "")
+                    .replace(/[\u201C\u201D]/g, '"')
+                    .replace(/[\u2018\u2019]/g, "'")
+                    .replace(/,\s*([}\]])/g, "$1");
                 try {
-                    const parsed = JSON.parse(raw.slice(sIdx, eIdx + 1));
+                    const parsed = JSON.parse(sanitize(rawSlice));
                     questions = parsed
                         .filter((q) => q &&
                         q.question &&

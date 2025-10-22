@@ -112,7 +112,13 @@ export default function FlashcardsPage() {
         return;
       }
       console.log('Generating flashcards for noteId:', noteId, 'owner:', targetOwner);
-      const cards = await generateFlashcards({ documentId: noteId, userId: targetOwner, count: DEFAULT_FLASHCARD_COUNT });
+      const cards = await generateFlashcards({ 
+        documentId: noteId, 
+        userId: targetOwner, 
+        count: DEFAULT_FLASHCARD_COUNT,
+        // When user clicks Regenerate, bypass cache and ask backend for a fresh set
+        forceNew: opts.force === true,
+      });
       console.log('Generated flashcards:', cards);
       setFlashcards(cards.map((c) => ({ ...c })));
       setCurrentCardIndex(0);
