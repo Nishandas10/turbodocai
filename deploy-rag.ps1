@@ -82,8 +82,8 @@ Write-Host ""
 Write-Host "🎉 RAG Pipeline Setup Complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "1. Create a Pinecone index named 'tnotesai' with 1536 dimensions" -ForegroundColor White
-Write-Host "2. Set up your Pinecone API key in the Firebase console" -ForegroundColor White
+Write-Host "1. Ensure OPENAI_API_KEY is set in your Functions environment" -ForegroundColor White
+Write-Host "2. Optionally set OPENAI_VECTOR_STORE_ID if using a pre-created store; otherwise the app manages uploads per document" -ForegroundColor White
 Write-Host "3. Test by uploading a PDF document" -ForegroundColor White
 Write-Host ""
 Write-Host "📚 For detailed documentation, see RAG_IMPLEMENTATION.md" -ForegroundColor Cyan

@@ -10,7 +10,6 @@ import { randomUUID } from "crypto";
 import {
   DocumentProcessor,
   EmbeddingService,
-  PineconeService,
   QueryService,
   OpenAIVectorStoreService,
 } from "./services";
@@ -37,7 +36,6 @@ const createServices = () => {
   return {
     documentProcessor: new DocumentProcessor(),
     embeddingService: new EmbeddingService(),
-    pineconeService: new PineconeService(),
     queryService: new QueryService(),
   };
 };
@@ -266,9 +264,9 @@ export const resolveUserByEmail = onCall(
 
 /**
  * Cloud Function triggered when a document is created or updated in Firestore
- * Processes documents through the RAG pipeline:
- * - For PDF: Extract with pdf-parse, chunk, embed with text-embedding-3-small (1024 dims) and store in Pinecone (existing flow)
- * - For DOC/DOCX: Extract with Mammoth, upload full text to OpenAI Vector Store (OpenAI handles chunk+embedding using text-embedding-3-large); do not store in Pinecone.
+ * Processes documents through the RAG pipeline (OpenAI Vector Store only):
+ * - For PDF/DOC/DOCX/PPTX/TXT: Extract text, then upload full text to OpenAI Vector Store
+ *   (OpenAI handles chunking + embeddings). No Pinecone is used anywhere.
  */
 export const processDocument = onDocumentWritten(
   "documents/{userId}/userDocuments/{documentId}",
@@ -309,8 +307,7 @@ export const processDocument = onDocumentWritten(
       }
 
       // Initialize services
-      const { documentProcessor, embeddingService, pineconeService } =
-        createServices();
+      const { documentProcessor } = createServices();
 
       // Only proceed when we have a storage path
       if (!documentData.metadata?.storagePath) {
@@ -412,121 +409,8 @@ export const processDocument = onDocumentWritten(
         );
       }
 
-      // If PDF: continue existing Pinecone streaming pipeline
-      if (docType === "pdf") {
-        // Streaming chunk generation to avoid holding all chunks
-        function* generateChunks(text: string, chunkSize = 300, overlap = 20) {
-          const words = text.split(/\s+/);
-          let start = 0;
-          while (start < words.length) {
-            const end = Math.min(start + chunkSize, words.length);
-            const chunk = words.slice(start, end).join(" ").trim();
-            if (chunk) yield chunk;
-            // If we've reached the end, stop to avoid repeating the last window forever
-            if (end >= words.length) break;
-            const nextStart = end - overlap;
-            // Safety: ensure forward progress
-            start = Math.max(nextStart, start + 1);
-          }
-        }
-
-        logger.info("Beginning streaming chunk processing...");
-        let chunkCount = 0;
-        const memLog = () => {
-          const mu = process.memoryUsage();
-          logger.info("Memory usage", {
-            rss: mu.rss,
-            heapUsed: mu.heapUsed,
-            heapTotal: mu.heapTotal,
-            external: mu.external,
-          });
-        };
-
-        let processedChars = 0;
-        const totalChars = workingText.length;
-        for (const chunk of generateChunks(workingText, 300, 20)) {
-          const i = chunkCount;
-          chunkCount++;
-          if (chunkCount === 1)
-            logger.info("First chunk length", { len: chunk.length });
-          if (chunkCount % 25 === 0)
-            logger.info(`Processed ${chunkCount} chunks so far`);
-          try {
-            const embedding = await embeddingService.embedChunks([chunk]);
-            await pineconeService.storeEmbeddings(
-              [chunk],
-              embedding,
-              documentId,
-              userId,
-              {
-                title: documentData.title,
-                fileName: documentData.metadata?.fileName,
-              },
-              i
-            );
-          } catch (chunkError) {
-            logger.error(`Error processing chunk ${chunkCount}`, chunkError);
-          }
-          processedChars += chunk.length;
-          // Periodic progress update (every 25 chunks) capped below 100 until completion
-          if (chunkCount % 25 === 0) {
-            const progressPct = Math.min(
-              99,
-              Math.round((processedChars / totalChars) * 100)
-            );
-            try {
-              await db
-                .collection("documents")
-                .doc(userId)
-                .collection("userDocuments")
-                .doc(documentId)
-                .set(
-                  {
-                    processingProgress: progressPct,
-                    processingStatus: "processing",
-                    chunkCount,
-                  },
-                  { merge: true }
-                );
-            } catch (progressErr) {
-              logger.warn("Progress update failed", progressErr);
-            }
-          }
-          if (global.gc) global.gc();
-          if (chunkCount % 10 === 0) memLog();
-          // Tiny delay to yield event loop & allow GC
-          await new Promise((r) => setTimeout(r, 40));
-        }
-
-        // Update document with processed content and status
-        await db
-          .collection("documents")
-          .doc(userId)
-          .collection("userDocuments")
-          .doc(documentId)
-          .update({
-            "content.raw": workingText.slice(0, 1_000_000),
-            "content.processed": `Indexed ${chunkCount} chunks${
-              truncated ? " (truncated)" : ""
-            }`,
-            processingStatus: "completed",
-            processingCompletedAt: new Date(),
-            chunkCount,
-            characterCount: workingText.length,
-            truncated,
-            processingProgress: 100,
-            processingLock: null,
-          });
-
-        logger.info(
-          `Successfully processed document ${documentId} with ${chunkCount} chunks`
-        );
-        return; // PDF path done
-      }
-
-      // DOCX/PPTX/TXT path: upload text to OpenAI Vector Store (no Pinecone)
-      if (docType === "docx" || docType === "pptx" || docType === "text") {
-        const workingText = extractedText;
+      // All supported types (pdf, docx, pptx, text): upload text to OpenAI Vector Store
+      if (["pdf", "docx", "pptx", "text"].includes(docType)) {
         const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
         const openaiVS = new OpenAIVectorStoreService(vsId);
         // Update progress early
@@ -583,7 +467,7 @@ export const processDocument = onDocumentWritten(
             // Remove chunkCount field if present; cannot set undefined in Firestore update
             chunkCount: FieldValue.delete(),
             characterCount: workingText.length,
-            truncated: false,
+            truncated,
             processingProgress: 100,
             processingLock: null,
           });
@@ -975,10 +859,11 @@ export const sendChatMessage = onCall(
       // Optional RAG retrieval
       let docsContext = "";
       let vectorStoreIds: string[] = [];
+      let metaSnaps: any[] = [];
       if (activeDocIds.length) {
-        // Inspect whether any of the context docs were indexed in OpenAI Vector Store (DOCX path)
+        // Inspect whether any of the context docs were indexed in OpenAI Vector Store
         try {
-          const metaSnaps = await Promise.all(
+          metaSnaps = await Promise.all(
             activeDocIds.map((id) =>
               db
                 .collection("documents")
@@ -999,69 +884,51 @@ export const sendChatMessage = onCall(
         } catch (e) {
           logger.warn("Failed to read doc metadata for vector store IDs", e);
         }
-
+        // If no vector stores are available, build a lightweight context by reading Firestore content/summary/transcripts
         if (vectorStoreIds.length === 0) {
-          // Pinecone-based retrieval (PDF path)
           try {
-            const { embeddingService, pineconeService } = createServices();
-            const queryEmbedding = await embeddingService.embedQuery(
-              String(prompt)
-            );
-            const perDoc = 3;
-            const aggregated: Array<{
-              docId: string;
-              title: string;
-              chunk: string;
-              score: number;
-            }> = [];
-            for (const dId of activeDocIds) {
-              try {
-                const matches = await pineconeService.querySimilarChunks(
-                  queryEmbedding,
-                  userId,
-                  perDoc * 2,
-                  dId
-                );
-                const seen = new Set<string>();
-                for (const m of matches) {
-                  const idx = String(m.id).split("_").pop() || String(m.id);
-                  if (seen.has(idx)) continue;
-                  seen.add(idx);
-                  aggregated.push({
-                    docId: dId,
-                    title: m.title || dId,
-                    chunk: m.chunk,
-                    score: m.score,
-                  });
-                  if (seen.size >= perDoc) break;
+            const pieces: string[] = [];
+            const MAX_CONTEXT_CHARS = 12000;
+            let used = 0;
+            for (let i = 0; i < metaSnaps.length; i++) {
+              const s = metaSnaps[i];
+              const d = (s.data() as any) || {};
+              let text =
+                (d.summary as string) ||
+                (d.content?.raw as string) ||
+                (d.content?.processed as string) ||
+                "";
+              if ((!text || text.length < 120) && d?.metadata?.transcriptPath) {
+                try {
+                  const [buf] = await storage
+                    .bucket()
+                    .file(String(d.metadata.transcriptPath))
+                    .download();
+                  text = buf.toString("utf-8");
+                } catch {
+                  /* ignore */
                 }
-              } catch (inner) {
-                logger.warn("RAG doc retrieval failed", { docId: dId, inner });
+              }
+              if (text) {
+                const clean = String(text).replace(/\s+/g, " ").trim();
+                if (clean) {
+                  const snippet = clean.slice(0, 1000);
+                  const block = `DOC ${activeDocIds[i]} | ${
+                    d.title || "Document"
+                  }\n${snippet}`;
+                  if (used + block.length > MAX_CONTEXT_CHARS) break;
+                  pieces.push(block);
+                  used += block.length;
+                }
               }
             }
-            aggregated.sort((a, b) => b.score - a.score);
-            const MAX_CONTEXT_CHARS = 12000;
-            const pieces: string[] = [];
-            let used = 0;
-            for (const a of aggregated) {
-              const clean = a.chunk.replace(/\s+/g, " ").trim();
-              if (!clean) continue;
-              const snippet = clean.slice(0, 1000);
-              const block = `DOC ${a.docId} | ${a.title}\n${snippet}`;
-              if (used + block.length > MAX_CONTEXT_CHARS) break;
-              pieces.push(block);
-              used += block.length;
-            }
             if (pieces.length) {
-              docsContext = `Retrieved document context (do not fabricate beyond this unless using general knowledge cautiously):\n\n${pieces.join(
+              docsContext = `Retrieved document context (no vector store available):\n\n${pieces.join(
                 "\n\n---\n\n"
               )}`;
             }
-          } catch (ragErr) {
-            logger.warn(
-              "RAG retrieval failed, falling back to no docsContext",
-              ragErr
-            );
+          } catch (fbErr) {
+            logger.warn("Context fallback assembly failed", fbErr);
           }
         }
       }
@@ -1651,8 +1518,9 @@ export const evaluateLongAnswer = onCall(
 );
 
 /**
- * Callable function to fetch full raw document text from Pinecone (ordered by chunk index)
- * Falls back to Firestore stored raw content if vectors are not available.
+ * Callable function to fetch full raw document text.
+ * Uses stored transcript in Cloud Storage or Firestore content; vector store retrieval
+ * is handled in other endpoints (chat/query) via file_search.
  */
 export const getDocumentText = onCall(
   {
@@ -1665,10 +1533,7 @@ export const getDocumentText = onCall(
         throw new Error("Missing required parameters: documentId and userId");
       }
 
-      const { pineconeService } = createServices();
-
-      // Try to read document metadata (including chunkCount) from Firestore
-      let chunkCount = 0;
+      // Try to read document metadata
       let title: string | undefined;
       let fileName: string | undefined;
       try {
@@ -1680,90 +1545,52 @@ export const getDocumentText = onCall(
           .get();
         if (snap.exists) {
           const data = snap.data() as any;
-          chunkCount = Number(data?.chunkCount || 0);
           title = data?.title;
           fileName = data?.metadata?.fileName;
         }
       } catch {
         /* ignore */
       }
-
-      // If chunkCount unknown, attempt a cheap probe
-      if (!chunkCount) {
-        try {
-          const probe = await pineconeService.querySimilarChunks(
-            new Array(1024).fill(0),
-            userId,
-            50,
-            documentId
-          );
-          const indices = probe
-            .map((m) => parseInt(String(m.id).split("_").pop() || "0", 10))
-            .filter((n) => !isNaN(n));
-          if (indices.length) chunkCount = Math.max(...indices) + 1;
-        } catch {
-          /* ignore */
-        }
-      }
-
       let text = "";
-      let source: "pinecone" | "firestore" = "pinecone";
-      if (chunkCount > 0) {
-        const ordered = await pineconeService.fetchDocumentChunks(
-          documentId,
-          userId,
-          chunkCount
-        );
-        text = ordered.map((c) => c.chunk).join("\n\n");
-      }
-
-      // Fallback paths for non-PDF (e.g., DOCX using OpenAI Vector Store)
-      if (!text || text.length < 10) {
-        source = "firestore";
-        try {
-          const snap = await db
-            .collection("documents")
-            .doc(userId)
-            .collection("userDocuments")
-            .doc(documentId)
-            .get();
-          if (snap.exists) {
-            const data = snap.data() as any;
-            title = title || data?.title;
-            fileName = fileName || data?.metadata?.fileName;
-            // If a transcript file was generated (DOCX path), prefer reading full text from Storage
-            const transcriptPath = data?.metadata?.transcriptPath as
-              | string
-              | undefined;
-            if (transcriptPath) {
-              try {
-                const [buf] = await storage
-                  .bucket()
-                  .file(transcriptPath)
-                  .download();
-                text = buf.toString("utf-8");
-              } catch (e) {
-                logger.warn("Failed to read transcript from storage", {
-                  transcriptPath,
-                  e,
-                });
-                text =
-                  data?.content?.raw ||
-                  data?.content?.processed ||
-                  data?.summary ||
-                  "";
-              }
-            } else {
-              text =
-                data?.content?.raw ||
-                data?.content?.processed ||
-                data?.summary ||
-                "";
+      let source: "firestore" = "firestore";
+      try {
+        const snap = await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .get();
+        if (snap.exists) {
+          const data = snap.data() as any;
+          title = title || data?.title;
+          fileName = fileName || data?.metadata?.fileName;
+          const transcriptPath = data?.metadata?.transcriptPath as
+            | string
+            | undefined;
+          if (transcriptPath) {
+            try {
+              const [buf] = await storage
+                .bucket()
+                .file(transcriptPath)
+                .download();
+              text = buf.toString("utf-8");
+            } catch (e) {
+              logger.warn("Failed to read transcript from storage", {
+                transcriptPath,
+                e,
+              });
             }
           }
-        } catch {
-          /* ignore */
+          if (!text) {
+            text =
+              data?.content?.raw ||
+              data?.content?.processed ||
+              data?.summary ||
+              "";
+          }
         }
+      } catch {
+        /* ignore */
       }
 
       const totalChars = text.length;
@@ -1780,7 +1607,7 @@ export const getDocumentText = onCall(
           text: sliced,
           title,
           fileName,
-          chunkCount: chunkCount || undefined,
+          chunkCount: undefined,
           characterCount: totalChars,
           source,
           truncated,

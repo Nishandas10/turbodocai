@@ -278,7 +278,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
           : '') +
         formattingDirective
       
-      // Query with document ID for better context from Pinecone
+  // Query with document ID for better context from OpenAI Vector Store
       const res = await queryDocuments({ 
         question: contextualQuery, 
         userId: effOwner || user.uid,

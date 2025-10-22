@@ -1,7 +1,5 @@
 import { OpenAI } from "openai";
 import { logger } from "firebase-functions";
-import { EmbeddingService } from "./embeddingService";
-import { PineconeService } from "./pineconeService";
 import { getFirestore } from "firebase-admin/firestore";
 
 interface QueryResult {
@@ -34,8 +32,7 @@ export interface GeneratedQuizQuestion {
 
 export class QueryService {
   private openai: OpenAI;
-  private embeddingService: EmbeddingService;
-  private pineconeService: PineconeService;
+  // Pinecone removed; using OpenAI Vector Store and content fallbacks.
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -47,9 +44,6 @@ export class QueryService {
     this.openai = new OpenAI({
       apiKey: apiKey,
     });
-
-    this.embeddingService = new EmbeddingService();
-    this.pineconeService = new PineconeService();
   }
 
   /**
@@ -119,19 +113,8 @@ export class QueryService {
         }
       }
 
-      // Step 1: Generate embedding for the question
-      const queryEmbedding = await this.embeddingService.embedQuery(question);
-
-      // Step 2: Search Pinecone for similar chunks
-      const similarChunks = await this.pineconeService.querySimilarChunks(
-        queryEmbedding,
-        userId,
-        topK,
-        documentId
-      );
-
-      if (similarChunks.length === 0) {
-        // Prefer vector store fallback when available for this document
+      // Prefer vector store if available for this document
+      {
         if (documentId) {
           try {
             const db = getFirestore();
@@ -154,33 +137,11 @@ export class QueryService {
               };
               let vsId: string | undefined =
                 data?.metadata?.openaiVector?.vectorStoreId;
-              const isDocxPptxTxt =
-                ["docx", "pptx", "text"].includes(
-                  String((data as any)?.type || "").toLowerCase()
-                ) ||
-                String((data as any)?.metadata?.mimeType || "").includes(
-                  "word"
-                ) ||
-                String((data as any)?.metadata?.mimeType || "").includes(
-                  "presentation"
-                ) ||
-                String((data as any)?.metadata?.mimeType || "").includes(
-                  "text/plain"
-                );
-              if (
-                !vsId &&
-                isDocxPptxTxt &&
-                (data as any)?.metadata?.openaiVector
-              ) {
-                vsId =
-                  process.env.OPENAI_VECTOR_STORE_ID ||
-                  "vs_68f1528dad6c8191bfb8a090e1557a86";
-              }
               if (vsId) {
-                logger.info(
-                  "No Pinecone chunks; answering via OpenAI Vector Store",
-                  { documentId, vsId }
-                );
+                logger.info("Answering via OpenAI Vector Store", {
+                  documentId,
+                  vsId,
+                });
                 try {
                   const answer = await this.answerWithOpenAIVectorStore(
                     question,
@@ -201,7 +162,7 @@ export class QueryService {
                   };
                 } catch (e) {
                   logger.warn(
-                    "Vector store fallback failed, attempting content/summary",
+                    "Vector store answering failed, falling back",
                     e as any
                   );
                 }
@@ -265,31 +226,12 @@ export class QueryService {
           confidence: 0,
         };
       }
-
-      // Step 3: Combine chunks into context
-      const context = similarChunks
-        .map((chunk) => `[Source: ${chunk.title}] ${chunk.chunk}`)
-        .join("\n\n");
-
-      // Step 4: Generate answer using GPT-4o-mini
-      const answer = await this.generateAnswer(question, context);
-
-      // Calculate confidence based on similarity scores
-      const avgScore =
-        similarChunks.reduce((sum, chunk) => sum + chunk.score, 0) /
-        similarChunks.length;
-      const confidence = Math.min(avgScore * 100, 95); // Cap at 95%
-
+      // Multi-doc path not implemented for vector store yet; fall back to insufficient context
       return {
-        answer,
-        sources: similarChunks.map((chunk) => ({
-          documentId: chunk.documentId,
-          title: chunk.title,
-          fileName: chunk.fileName,
-          chunk: chunk.chunk.substring(0, 200) + "...", // Truncate for display
-          score: chunk.score,
-        })),
-        confidence,
+        answer:
+          "I can answer best when a specific document is provided. Please attach a document with vector indexing.",
+        sources: [],
+        confidence: 0,
       };
     } catch (error) {
       logger.error("Error in queryRAG:", error);
@@ -583,121 +525,42 @@ Answer:`;
         }
       } catch (vsCheckErr) {
         logger.warn(
-          "Vector store check failed; proceeding with Pinecone path",
+          "Vector store check failed; attempting content fallback",
           vsCheckErr as any
         );
       }
 
-      // First attempt to infer chunkCount from a representative vector (by querying 1 similar vector)
-      // Fallback: assume up to 1000 chunks cap
-      let chunkCount = 0;
-      try {
-        const probe = await this.pineconeService.querySimilarChunks(
-          new Array(1024).fill(0),
-          userId,
-          1,
-          documentId
-        );
-        if (probe.length) {
-          // Try to parse highest index by querying a wider set
-          const broader = await this.pineconeService.querySimilarChunks(
-            new Array(1024).fill(0),
-            userId,
-            50,
-            documentId
-          );
-          const indices = broader
-            .map((m) => parseInt(m.id.split("_").pop() || "0", 10))
-            .filter((n) => !isNaN(n));
-          if (indices.length) chunkCount = Math.max(...indices) + 1;
-        }
-      } catch (e) {
-        // ignore
-      }
-      if (chunkCount === 0) chunkCount = 300; // safe default
-
-      // Fetch ordered chunks (limit for summarization efficiency)
-      const MAX_CHUNKS_FOR_SUMMARY = 200; // tuneable
-      const ordered = await this.pineconeService.fetchDocumentChunks(
-        documentId,
-        userId,
-        chunkCount,
-        MAX_CHUNKS_FOR_SUMMARY
-      );
-
-      if (!ordered.length) return "No content available for summary.";
-
-      // Map-Reduce style summarization for very large documents
-      const PART_SIZE_CHARS = 6000; // each part fed to model
-      const parts: string[] = [];
-      let buffer = "";
-      for (const c of ordered) {
-        if (buffer.length + c.chunk.length > PART_SIZE_CHARS) {
-          parts.push(buffer);
-          buffer = "";
-        }
-        buffer += (buffer ? " " : "") + c.chunk;
-      }
-      if (buffer) parts.push(buffer);
-
-      const intermediateSummaries: string[] = [];
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i].substring(0, PART_SIZE_CHARS);
-        const resp = await this.openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `You summarize document sections. Produce a concise bullet summary of the section's key points.`,
-            },
-            {
-              role: "user",
-              content: `Section ${i + 1} of ${
-                parts.length
-              } (truncate if noisy):\n\n${part}`,
-            },
-          ],
-          max_tokens: 300,
-          temperature: 0.2,
-        });
-        const partial = resp.choices[0]?.message?.content?.trim();
-        if (partial) intermediateSummaries.push(partial);
-        if (intermediateSummaries.length >= 12) break; // prevent runaway cost
-      }
-
-      // Final synthesis
-      const synthesisInput = intermediateSummaries
-        .join("\n\n")
-        .substring(0, 8000);
-
-      const finalResp = await this.openai.chat.completions.create({
+      // Content fallback for summary
+      const db = getFirestore();
+      const snap = await db
+        .collection("documents")
+        .doc(userId)
+        .collection("userDocuments")
+        .doc(documentId)
+        .get();
+      if (!snap.exists) return "No content available for summary.";
+      const data = (snap.data() as any) || {};
+      let rawText: string = String(
+        data?.content?.raw || data?.content?.processed || data?.summary || ""
+      ).slice(0, 24000);
+      if (!rawText || rawText.length < 80)
+        return "No content available for summary.";
+      const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
+      const resp = await this.openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: `You are an expert summarizer. Create beautiful professional summary of the entire document according to the requiremnts, RICH markdown summary (~${maxLength} words).
-Output Requirements:
-- Start with a paragraph summary summarizing the document
-- Use hierarchical headings (##, ###) to group concepts.
-- Use a mix of paragraphs, bullet lists and numbered lists for key points and procedures.
-- Bold important terms and labels (e.g., **Definition:**) and optionally append 1 relevant emoji per major heading (no more than 1 emoji per heading).
-- Include a short "Key Takeaways" section near the end as a bulleted list.
-- Avoid redundancy and filler. No preamble like 'Here is the summary'.
-- Do NOT wrap the entire response in code fences.
-Return valid markdown only.`,
+            content:
+              "You are an expert summarizer. Produce clear, well-structured markdown. No code fences.",
           },
-          {
-            role: "user",
-            content: synthesisInput,
-          },
+          { role: "user", content: prompt },
         ],
         max_tokens: Math.ceil(maxLength * 1.6),
         temperature: 0.25,
       });
-
-      return (
-        finalResp.choices[0]?.message?.content || "Could not generate summary."
-      );
+      const txt = resp.choices?.[0]?.message?.content || "";
+      return txt || "Could not generate summary.";
     } catch (error) {
       logger.error("Error generating document summary:", error);
       throw new Error("Failed to generate document summary");
@@ -707,7 +570,7 @@ Return valid markdown only.`,
   /**
    * Generate study flashcards for a document.
    * Strategy:
-   *  - Probe Pinecone for chunkCount (same heuristic as summary)
+   *  - Probe available content for chunkCount (same heuristic as summary)
    *  - Fetch up to MAX_CHUNKS_FOR_FLASHCARDS ordered chunks
    *  - Concatenate & truncate context
    *  - Prompt OpenAI to emit clean JSON ONLY: [{"front":"...","back":"...","category":"..."}, ...]
@@ -752,221 +615,98 @@ Return valid markdown only.`,
         documentId,
         requested: count,
       });
-      // Estimate chunk count (reuse probe logic)
-      let chunkCount = 0;
-      try {
-        const probe = await this.pineconeService.querySimilarChunks(
-          new Array(1024).fill(0),
-          userId,
-          1,
-          documentId
-        );
-        if (probe.length) {
-          const broader = await this.pineconeService.querySimilarChunks(
-            new Array(1024).fill(0),
-            userId,
-            50,
-            documentId
-          );
-          const indices = broader
-            .map((m) => parseInt(m.id.split("_").pop() || "0", 10))
-            .filter((n) => !isNaN(n));
-          if (indices.length) chunkCount = Math.max(...indices) + 1;
-        }
-      } catch (e) {
-        // ignore probe failures
-      }
-      if (chunkCount === 0) chunkCount = 300;
 
-      const MAX_CHUNKS_FOR_FLASHCARDS = 120; // tuneable cost/performance knob
-      const ordered = await this.pineconeService.fetchDocumentChunks(
-        documentId,
-        userId,
-        chunkCount,
-        MAX_CHUNKS_FOR_FLASHCARDS
-      );
-
-      if (!ordered.length) {
-        logger.warn(
-          "No vectors found for document. Falling back to Firestore raw content",
-          { documentId }
-        );
-        try {
-          const docSnap = await db
-            .collection("documents")
-            .doc(userId)
-            .collection("userDocuments")
-            .doc(documentId)
-            .get();
-          if (docSnap.exists) {
-            const data = docSnap.data() as {
-              content?: { raw?: string; processed?: string };
-              summary?: string;
-              metadata?: { downloadURL?: string };
-            };
-            let sourceText = (
-              data.summary ||
-              data.content?.raw ||
-              data.content?.processed ||
-              ""
-            ).slice(0, 18000);
-            // If Firestore content is missing, try to fetch from downloadURL as a final fallback
-            if (!sourceText || sourceText.length < 120) {
-              const url = data.metadata?.downloadURL;
-              if (url) {
-                try {
-                  const res = await fetch(url);
-                  if (res.ok) {
-                    const txt = await res.text();
-                    sourceText = (txt || "").slice(0, 18000);
-                  }
-                } catch (fetchErr) {
-                  logger.warn(
-                    "downloadURL fetch failed for flashcards fallback",
-                    fetchErr as any
-                  );
-                }
-              }
-            }
-            if (sourceText.length > 120) {
-              const fcPrompt = `Generate ${count} JSON flashcards from the following text. Same JSON array spec as before (front, back, category). Text:\n\n${sourceText}`;
-              const resp = await this.openai.chat.completions.create({
-                model: "gpt-4o-mini",
-                messages: [
-                  {
-                    role: "system",
-                    content:
-                      "You produce concise educational flashcards as valid JSON array only.",
-                  },
-                  { role: "user", content: fcPrompt },
-                ],
-                temperature: 0.4,
-                max_tokens: 1400,
-              });
-              const rawAlt = resp.choices[0]?.message?.content || "";
-              const start = rawAlt.indexOf("[");
-              const end = rawAlt.lastIndexOf("]");
-              if (start !== -1 && end !== -1) {
-                try {
-                  const parsedAlt = JSON.parse(
-                    rawAlt.slice(start, end + 1)
-                  ) as any[];
-                  const cardsAlt: GeneratedFlashcard[] = parsedAlt
-                    .filter((c) => c && c.front && c.back)
-                    .slice(0, count)
-                    .map((c) => ({
-                      front: String(c.front).trim().slice(0, 200),
-                      back: String(c.back).trim().slice(0, 600),
-                      category: (c.category ? String(c.category) : "Concept")
-                        .trim()
-                        .slice(0, 40),
-                    }));
-                  if (cardsAlt.length) {
-                    logger.info(
-                      "Flashcards generated via raw-content fallback",
-                      { len: cardsAlt.length }
-                    );
-                    // cache
-                    db.collection("documents")
-                      .doc(userId)
-                      .collection("userDocuments")
-                      .doc(documentId)
-                      .collection("aiArtifacts")
-                      .doc("flashcards_v1")
-                      .set(
-                        {
-                          flashcards: cardsAlt,
-                          updatedAt: new Date(),
-                          fallback: true,
-                        },
-                        { merge: true }
-                      )
-                      .catch((err) =>
-                        logger.warn("Cache write fail (fallback)", err)
-                      );
-                    return cardsAlt;
-                  }
-                } catch (e) {
-                  logger.warn("Fallback flashcard parse failed", e);
-                }
-              }
-            }
+      // Read document and build source text
+      const docSnap = await db
+        .collection("documents")
+        .doc(userId)
+        .collection("userDocuments")
+        .doc(documentId)
+        .get();
+      if (!docSnap.exists) return [];
+      const data = docSnap.data() as {
+        content?: { raw?: string; processed?: string };
+        summary?: string;
+        metadata?: { downloadURL?: string; transcriptPath?: string };
+      };
+      let sourceText = (
+        data.summary ||
+        data.content?.raw ||
+        data.content?.processed ||
+        ""
+      ).slice(0, 18000);
+      if (!sourceText || sourceText.length < 120) {
+        const transcriptPath = data.metadata?.transcriptPath;
+        if (transcriptPath) {
+          try {
+            const [buf] = await (await import("firebase-admin/storage"))
+              .getStorage()
+              .bucket()
+              .file(transcriptPath)
+              .download();
+            sourceText = buf.toString("utf-8").slice(0, 18000);
+          } catch {
+            // ignore
           }
-        } catch (rawErr) {
-          logger.warn("Raw content fallback failed", rawErr);
         }
+        const url = data.metadata?.downloadURL;
+        if ((!sourceText || sourceText.length < 120) && url) {
+          try {
+            const res = await fetch(url);
+            if (res.ok) {
+              const txt = await res.text();
+              sourceText = (txt || "").slice(0, 18000);
+            }
+          } catch (fetchErr) {
+            logger.warn(
+              "downloadURL fetch failed for flashcards fallback",
+              fetchErr as any
+            );
+          }
+        }
+      }
+
+      if (!sourceText || sourceText.length < 120) {
         return [];
       }
 
-      // Build context (limit to ~24k chars to control tokens)
-      const rawContext = ordered.map((c) => c.chunk).join("\n\n");
-      const context = rawContext.slice(0, 24000);
-
-      logger.info("Flashcards doc stats", {
-        estimatedChunks: chunkCount,
-        usedVectors: ordered.length,
-        contextChars: context.length,
-      });
-
-      const systemPrompt = `You are an expert educator generating high-quality spaced-repetition flashcards from source material. Guidelines:\n- Produce exactly ${count} diverse flashcards unless material is too small (then produce as many as reasonable, minimum 3).\n- Vary categories among Definition, Concept, Process, Fact, Application, Comparison, Cause/Effect, Example.\n- FRONT should be a concise question (max 110 chars) or cloze deletion using {{blank}}.\n- BACK should be a clear, factual answer (1-3 sentences or bullet list <= 220 chars).\n- Avoid trivia; focus on core ideas, relationships, and important details.\n- If original text contains another language, keep answer in that language but translate key term in parentheses if helpful.\n- Output ONLY raw JSON array, no commentary, no code fences.`;
-
-      const userPrompt = `Source Content (truncated):\n${context}\n\nGenerate flashcards now.`;
-
-      const response = await this.openai.chat.completions.create({
+      const fcPrompt = `Generate ${count} JSON flashcards from the following text. Return ONLY a JSON array where each item has front, back, and category. Text:\n\n${sourceText}`;
+      const resp = await this.openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
+          {
+            role: "system",
+            content:
+              "You produce concise educational flashcards as valid JSON array only. Do not include any commentary.",
+          },
+          { role: "user", content: fcPrompt },
         ],
-        temperature: 0.35,
-        max_tokens: 1600,
+        temperature: 0.4,
+        max_tokens: 1400,
       });
-
-      const raw = response.choices[0]?.message?.content || "";
-      let jsonText = raw.trim();
-      // Attempt to salvage JSON if model added prose
-      const firstBracket = jsonText.indexOf("[");
-      const lastBracket = jsonText.lastIndexOf("]");
-      if (firstBracket !== -1 && lastBracket !== -1) {
-        jsonText = jsonText.slice(firstBracket, lastBracket + 1);
+      const raw = resp.choices?.[0]?.message?.content || "";
+      const sIdx = raw.indexOf("[");
+      const eIdx = raw.lastIndexOf("]");
+      let cards: GeneratedFlashcard[] = [];
+      if (sIdx !== -1 && eIdx !== -1) {
+        try {
+          const parsed = JSON.parse(raw.slice(sIdx, eIdx + 1)) as any[];
+          cards = parsed
+            .filter((c) => c && c.front && c.back)
+            .slice(0, count)
+            .map((c) => ({
+              front: String(c.front).trim().slice(0, 200),
+              back: String(c.back).trim().slice(0, 400),
+              category: (c.category ? String(c.category) : "Concept")
+                .trim()
+                .slice(0, 40),
+            }));
+        } catch (parseErr) {
+          logger.warn("Failed to parse flashcards JSON", parseErr);
+        }
       }
 
-      let parsed: unknown[] = [];
-      try {
-        parsed = JSON.parse(jsonText) as unknown[];
-      } catch (e) {
-        logger.warn("Flashcard JSON parse failed", { raw: raw.slice(0, 500) });
-        return [];
-      }
-
-      // Normalize & validate
-      const cards: GeneratedFlashcard[] = parsed
-        .filter(
-          (c): c is Record<string, unknown> =>
-            typeof c === "object" &&
-            c !== null &&
-            typeof (c as any).front === "string" &&
-            typeof (c as any).back === "string"
-        )
-        .slice(0, count)
-        .map((c) => ({
-          front: String((c as any).front)
-            .trim()
-            .slice(0, 200),
-          back: String((c as any).back)
-            .trim()
-            .slice(0, 600),
-          category: ((c as any).category
-            ? String((c as any).category)
-            : "Concept"
-          )
-            .trim()
-            .slice(0, 40),
-        }));
-
-      logger.info("Flashcards generated (vector pathway)", {
-        count: cards.length,
-      });
+      logger.info("Flashcards generated", { count: cards.length });
 
       // Persist cache asynchronously
       if (cards.length) {
@@ -1044,245 +784,122 @@ Return valid markdown only.`,
         difficulty,
       });
 
-      // Estimate chunk count (reuse probe logic from flashcards)
-      let chunkCount = 0;
-      try {
-        const probe = await this.pineconeService.querySimilarChunks(
-          new Array(1024).fill(0),
-          userId,
-          1,
-          documentId
-        );
-        if (probe.length) {
-          const broader = await this.pineconeService.querySimilarChunks(
-            new Array(1024).fill(0),
-            userId,
-            50,
-            documentId
-          );
-          const indices = broader
-            .map((m) => parseInt(m.id.split("_").pop() || "0", 10))
-            .filter((n) => !isNaN(n));
-          if (indices.length) chunkCount = Math.max(...indices) + 1;
-        }
-      } catch (e) {
-        // ignore probe failures
-      }
-      if (chunkCount === 0) chunkCount = 300;
-
-      const MAX_CHUNKS_FOR_QUIZ = 100; // tuneable cost/performance knob
-      const ordered = await this.pineconeService.fetchDocumentChunks(
-        documentId,
-        userId,
-        chunkCount,
-        MAX_CHUNKS_FOR_QUIZ
-      );
-
-      if (!ordered.length) {
-        logger.warn(
-          "No vectors found for document. Falling back to Firestore raw content",
-          { documentId }
-        );
-        try {
-          const docSnap = await db
-            .collection("documents")
-            .doc(userId)
-            .collection("userDocuments")
-            .doc(documentId)
-            .get();
-          if (docSnap.exists) {
-            const data = docSnap.data() as {
-              content?: { raw?: string; processed?: string };
-              summary?: string;
-            };
-            const sourceText = (
-              data.summary ||
-              data.content?.raw ||
-              data.content?.processed ||
-              ""
-            ).slice(0, 18000);
-            if (sourceText.length > 120) {
-              const quizPrompt = `Generate ${count} multiple-choice quiz questions from the following text. Return as JSON array with id, question, options (4 choices), correctAnswer (0-3 index), explanation, category, and difficulty. Text:\n\n${sourceText}`;
-              const resp = await this.openai.chat.completions.create({
-                model: "gpt-4o-mini",
-                messages: [
-                  {
-                    role: "system",
-                    content:
-                      "You produce educational quiz questions as valid JSON array only. Each question should have 4 options with one correct answer.",
-                  },
-                  { role: "user", content: quizPrompt },
-                ],
-                temperature: 0.4,
-                max_tokens: 2000,
-              });
-              const rawAlt = resp.choices[0]?.message?.content || "";
-              const start = rawAlt.indexOf("[");
-              const end = rawAlt.lastIndexOf("]");
-              if (start !== -1 && end !== -1) {
-                try {
-                  const parsedAlt = JSON.parse(
-                    rawAlt.slice(start, end + 1)
-                  ) as any[];
-                  const questionsAlt: GeneratedQuizQuestion[] = parsedAlt
-                    .filter(
-                      (q) =>
-                        q &&
-                        q.question &&
-                        q.options &&
-                        Array.isArray(q.options) &&
-                        q.options.length === 4
-                    )
-                    .slice(0, count)
-                    .map((q, index) => ({
-                      id: String(index + 1),
-                      question: String(q.question).trim().slice(0, 300),
-                      options: q.options.map((opt: any) =>
-                        String(opt).trim().slice(0, 150)
-                      ),
-                      correctAnswer: Math.max(
-                        0,
-                        Math.min(3, parseInt(q.correctAnswer) || 0)
-                      ),
-                      explanation: String(q.explanation || "")
-                        .trim()
-                        .slice(0, 400),
-                      category: (q.category ? String(q.category) : "General")
-                        .trim()
-                        .slice(0, 40),
-                      difficulty: (["easy", "medium", "hard"].includes(
-                        q.difficulty
-                      )
-                        ? q.difficulty
-                        : "medium") as "easy" | "medium" | "hard",
-                    }));
-                  if (questionsAlt.length) {
-                    logger.info("Quiz generated via raw-content fallback", {
-                      len: questionsAlt.length,
-                    });
-                    // cache
-                    db.collection("documents")
-                      .doc(userId)
-                      .collection("userDocuments")
-                      .doc(documentId)
-                      .collection("aiArtifacts")
-                      .doc(cacheKey)
-                      .set(
-                        {
-                          quiz: questionsAlt,
-                          updatedAt: new Date(),
-                          fallback: true,
-                        },
-                        { merge: true }
-                      )
-                      .catch((err) =>
-                        logger.warn("Cache write fail (fallback)", err)
-                      );
-                    return questionsAlt;
-                  }
-                } catch (e) {
-                  logger.warn("Fallback quiz parse failed", e);
-                }
-              }
-            }
+      // Read document and build source text
+      const docSnap = await db
+        .collection("documents")
+        .doc(userId)
+        .collection("userDocuments")
+        .doc(documentId)
+        .get();
+      if (!docSnap.exists) return [];
+      const data = docSnap.data() as {
+        content?: { raw?: string; processed?: string };
+        summary?: string;
+        metadata?: { transcriptPath?: string; downloadURL?: string };
+      };
+      let sourceText = (
+        data.summary ||
+        data.content?.raw ||
+        data.content?.processed ||
+        ""
+      ).slice(0, 18000);
+      if (!sourceText || sourceText.length < 120) {
+        const transcriptPath = data.metadata?.transcriptPath;
+        if (transcriptPath) {
+          try {
+            const [buf] = await (await import("firebase-admin/storage"))
+              .getStorage()
+              .bucket()
+              .file(transcriptPath)
+              .download();
+            sourceText = buf.toString("utf-8").slice(0, 18000);
+          } catch {
+            // ignore
           }
-        } catch (rawErr) {
-          logger.warn("Raw content fallback failed", rawErr);
         }
+        const url = data.metadata?.downloadURL;
+        if ((!sourceText || sourceText.length < 120) && url) {
+          try {
+            const res = await fetch(url);
+            if (res.ok) {
+              const txt = await res.text();
+              sourceText = (txt || "").slice(0, 18000);
+            }
+          } catch (fetchErr) {
+            logger.warn(
+              "downloadURL fetch failed for quiz fallback",
+              fetchErr as any
+            );
+          }
+        }
+      }
+
+      if (!sourceText || sourceText.length < 120) {
         return [];
       }
 
-      // Build context (limit to ~20k chars to control tokens)
-      const rawContext = ordered.map((c) => c.chunk).join("\n\n");
-      const context = rawContext.slice(0, 20000);
-
-      logger.info("Quiz doc stats", {
-        estimatedChunks: chunkCount,
-        usedVectors: ordered.length,
-        contextChars: context.length,
-      });
-
-      const difficultyInstruction =
-        difficulty === "mixed"
-          ? "Mix difficulty levels (easy, medium, hard) across questions."
-          : `Focus on ${difficulty} difficulty level questions.`;
-
-      const systemPrompt = `You are an expert educator generating high-quality multiple-choice quiz questions from source material. Guidelines:\n- Produce exactly ${count} diverse quiz questions unless material is too small (then produce as many as reasonable, minimum 3).\n- Each question must have exactly 4 options (A, B, C, D) with only one correct answer.\n- Vary categories among Definition, Concept, Process, Fact, Application, Analysis, Synthesis, Evaluation.\n- ${difficultyInstruction}\n- Questions should be clear and unambiguous (max 200 chars).\n- Options should be plausible but only one correct (max 120 chars each).\n- Explanations should clarify why the answer is correct and others are wrong (max 300 chars).\n- Avoid trivial questions; focus on understanding, application, and critical thinking.\n- Output ONLY raw JSON array, no commentary, no code fences.\n- Format: [{"id":"1","question":"...","options":["A","B","C","D"],"correctAnswer":0,"explanation":"...","category":"...","difficulty":"easy|medium|hard"}]`;
-
-      const userPrompt = `Source Content (truncated):\n${context}\n\nGenerate quiz questions now.`;
-
-      const response = await this.openai.chat.completions.create({
+      const quizPrompt = `Generate ${count} multiple-choice quiz questions from the following text. Return ONLY a JSON array where each item has id, question, options (array of 4 strings), correctAnswer (0-3 index), explanation, category, and difficulty (easy/medium/hard). Text:\n\n${sourceText}`;
+      const resp = await this.openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
+          {
+            role: "system",
+            content:
+              "You produce educational quiz questions as valid JSON array only. No commentary.",
+          },
+          { role: "user", content: quizPrompt },
         ],
-        temperature: 0.3,
-        max_tokens: 2200,
+        temperature: 0.4,
+        max_tokens: 2000,
       });
-
-      const raw = response.choices[0]?.message?.content || "";
-      let jsonText = raw.trim();
-      // Attempt to salvage JSON if model added prose
-      const firstBracket = jsonText.indexOf("[");
-      const lastBracket = jsonText.lastIndexOf("]");
-      if (firstBracket !== -1 && lastBracket !== -1) {
-        jsonText = jsonText.slice(firstBracket, lastBracket + 1);
+      const raw = resp.choices?.[0]?.message?.content || "";
+      const sIdx = raw.indexOf("[");
+      const eIdx = raw.lastIndexOf("]");
+      let questions: GeneratedQuizQuestion[] = [];
+      if (sIdx !== -1 && eIdx !== -1) {
+        try {
+          const parsed = JSON.parse(raw.slice(sIdx, eIdx + 1)) as any[];
+          questions = parsed
+            .filter(
+              (q) =>
+                q &&
+                q.question &&
+                q.options &&
+                Array.isArray(q.options) &&
+                q.options.length === 4
+            )
+            .slice(0, count)
+            .map((q, index) => ({
+              id: String((q as any).id || index + 1),
+              question: String(q.question).trim().slice(0, 300),
+              options: (q.options as any[]).map((opt: any) =>
+                String(opt).trim().slice(0, 150)
+              ),
+              correctAnswer: Math.max(
+                0,
+                Math.min(3, Number((q as any).correctAnswer ?? 0))
+              ),
+              explanation: String((q as any).explanation || "")
+                .trim()
+                .slice(0, 400),
+              category: ((q as any).category
+                ? String((q as any).category)
+                : "General"
+              )
+                .trim()
+                .slice(0, 40),
+              difficulty: (["easy", "medium", "hard"].includes(
+                (q as any).difficulty
+              )
+                ? (q as any).difficulty
+                : "medium") as "easy" | "medium" | "hard",
+            }));
+        } catch (parseErr) {
+          logger.warn("Failed to parse quiz JSON", parseErr);
+        }
       }
 
-      let parsed: unknown[] = [];
-      try {
-        parsed = JSON.parse(jsonText) as unknown[];
-      } catch (e) {
-        logger.warn("Quiz JSON parse failed", { raw: raw.slice(0, 500) });
-        return [];
-      }
-
-      // Normalize & validate
-      const questions: GeneratedQuizQuestion[] = parsed
-        .filter(
-          (q): q is Record<string, unknown> =>
-            typeof q === "object" &&
-            q !== null &&
-            typeof (q as any).question === "string" &&
-            Array.isArray((q as any).options) &&
-            (q as any).options.length === 4 &&
-            typeof (q as any).correctAnswer === "number" &&
-            (q as any).correctAnswer >= 0 &&
-            (q as any).correctAnswer <= 3
-        )
-        .slice(0, count)
-        .map((q, index) => ({
-          id: String((q as any).id || index + 1),
-          question: String((q as any).question)
-            .trim()
-            .slice(0, 300),
-          options: (q as any).options.map((opt: any) =>
-            String(opt).trim().slice(0, 150)
-          ),
-          correctAnswer: Math.max(
-            0,
-            Math.min(3, Number((q as any).correctAnswer))
-          ),
-          explanation: String((q as any).explanation || "")
-            .trim()
-            .slice(0, 400),
-          category: ((q as any).category
-            ? String((q as any).category)
-            : "General"
-          )
-            .trim()
-            .slice(0, 40),
-          difficulty: (["easy", "medium", "hard"].includes(
-            (q as any).difficulty
-          )
-            ? (q as any).difficulty
-            : "medium") as "easy" | "medium" | "hard",
-        }));
-
-      logger.info("Quiz generated (vector pathway)", {
-        count: questions.length,
-      });
+      logger.info("Quiz generated", { count: questions.length, difficulty });
 
       // Persist cache asynchronously
       if (questions.length) {

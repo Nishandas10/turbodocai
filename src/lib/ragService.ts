@@ -72,7 +72,7 @@ export interface DocumentTextResponse {
   fileName?: string;
   chunkCount?: number;
   characterCount: number;
-  source: "pinecone" | "firestore";
+  source: "openai-vector" | "firestore";
   truncated: boolean;
 }
 
@@ -190,7 +190,7 @@ export const evaluateLongAnswer = async (
   throw new Error(data.error || "Failed to evaluate answer");
 };
 
-/** Fetch full raw text of a document (concatenated from Pinecone or Firestore fallback) */
+/** Fetch full raw text of a document (from transcript/storage or Firestore; OpenAI vector store is used for retrieval in other endpoints) */
 export const getDocumentText = async (
   params: GetDocumentTextParams
 ): Promise<DocumentTextResponse> => {

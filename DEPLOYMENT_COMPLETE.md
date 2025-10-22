@@ -10,14 +10,10 @@ The Firebase Cloud Functions for the RAG pipeline have been successfully deploye
 
 ## Next Steps
 
-### 1. Create Pinecone Index
+### 1. Configure OpenAI
 
-1. Go to [Pinecone Console](https://app.pinecone.io/)
-2. Create a new index with these settings:
-   - **Name**: `tnotesai`
-   - **Dimensions**: `1536`
-   - **Metric**: `cosine`
-   - **Pod Type**: `starter` (free tier)
+1. Ensure you have an OpenAI API key and set `OPENAI_API_KEY` in your Functions environment.
+2. Optionally set `OPENAI_VECTOR_STORE_ID` if you want to use a pre-created vector store; the app can also manage uploads per document automatically.
 
 ### 2. Test the Implementation
 
@@ -39,7 +35,7 @@ The Firebase Cloud Functions for the RAG pipeline have been successfully deploye
 2. File stored in Firebase Storage
 3. Document metadata saved to Firestore
 4. Cloud Function `processDocument` automatically triggered
-5. PDF text extracted, chunked, embedded, and stored in Pinecone
+5. PDF text extracted, then uploaded to OpenAI Vector Store (OpenAI handles chunking + embeddings)
 6. Processing status updated in Firestore
 
 ### Query Flow
@@ -47,7 +43,7 @@ The Firebase Cloud Functions for the RAG pipeline have been successfully deploye
 1. User asks question via DocumentChat
 2. Client calls `queryDocuments` function
 3. Question embedded using OpenAI
-4. Similar chunks retrieved from Pinecone
+4. Relevant content retrieved via OpenAI Vector Store (file_search)
 5. Context assembled and sent to GPT-4o-mini
 6. Answer returned with source attribution
 
@@ -65,8 +61,7 @@ Check Firebase Console for:
 The following are configured in the functions:
 
 - `OPENAI_API_KEY` ✅
-- `PINECONE_API_KEY` ✅
-- `PINECONE_INDEX` ✅
+- `OPENAI_VECTOR_STORE_ID` (optional)
 
 ## Features Enabled
 
@@ -74,7 +69,7 @@ The following are configured in the functions:
 - ✅ Text extraction with pdf-parse
 - ✅ Intelligent chunking with overlap
 - ✅ OpenAI embeddings (text-embedding-3-small)
-- ✅ Pinecone vector storage
+- ✅ OpenAI Vector Store retrieval
 - ✅ RAG querying with GPT-4o-mini
 - ✅ Document summarization
 - ✅ Processing status tracking
