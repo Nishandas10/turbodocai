@@ -35,6 +35,23 @@ export class OpenAIVectorStoreService {
   }
 
   /**
+   * Delete a file from the vector store if it exists. Safe no-op on errors.
+   */
+  async deleteFile(vectorStoreId: string, fileId: string): Promise<void> {
+    try {
+      const vsId = vectorStoreId || this.vectorStoreId;
+      // SDK shape uses vectorStores.files.del(vsId, fileId)
+      await (this.openai as any).vectorStores.files.del(vsId, fileId);
+      logger.info("Deleted file from OpenAI Vector Store", { vsId, fileId });
+    } catch (e) {
+      logger.warn(
+        "Failed to delete file from vector store (continuing)",
+        e as any
+      );
+    }
+  }
+
+  /**
    * Store raw text as a single file in the OpenAI vector store. The platform performs chunking and embedding.
    * For large texts, it will be uploaded as a bytes blob.
    */
@@ -70,5 +87,36 @@ export class OpenAIVectorStoreService {
       logger.error("Failed to upload text to OpenAI Vector Store", error);
       throw error;
     }
+  }
+
+  /**
+   * Upsert text for a given document into the vector store. If an existing fileId is provided,
+   * it will be deleted before uploading the new content to keep the store clean.
+   */
+  async upsertTextDocument(
+    text: string,
+    metadata: VectorDocMetadata & {
+      existing?: { vectorStoreId?: string; fileId?: string };
+    }
+  ): Promise<{
+    vectorStoreId: string;
+    fileId: string;
+    vectorStoreFileId: string;
+  }> {
+    const vsId = metadata.existing?.vectorStoreId || this.vectorStoreId;
+    if (metadata.existing?.fileId) {
+      await this.deleteFile(vsId, metadata.existing.fileId);
+    }
+    const uploaded = await this.uploadTextAsDocument(text, {
+      userId: metadata.userId,
+      documentId: metadata.documentId,
+      title: metadata.title,
+      fileName: metadata.fileName,
+    });
+    return {
+      vectorStoreId: vsId,
+      fileId: uploaded.fileId,
+      vectorStoreFileId: uploaded.vectorStoreFileId,
+    };
   }
 }

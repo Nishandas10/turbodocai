@@ -7,7 +7,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.evaluateLongAnswer = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.recommendPublicDocs = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.processDocument = exports.resolveUserByEmail = exports.createChat = void 0;
+exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.evaluateLongAnswer = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.recommendPublicDocs = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.syncNotebookEmbeddings = exports.processDocument = exports.resolveUserByEmail = exports.createChat = void 0;
 const v2_1 = require("firebase-functions/v2");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -521,6 +521,84 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             processingFailedAt: new Date(),
             processingLock: null,
         });
+    }
+});
+/**
+ * Realtime sync for Notebook (type: "text") documents.
+ * - On create: ensure vector store metadata exists; if content present, upload to OpenAI Vector Store.
+ * - On update: when content.raw changes, replace the vector store file with new content.
+ */
+exports.syncNotebookEmbeddings = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
+    const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
+    if (!(afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.exists))
+        return; // ignore deletes
+    const { userId, documentId } = event.params;
+    const after = afterSnap.data() || {};
+    const before = (beforeSnap === null || beforeSnap === void 0 ? void 0 : beforeSnap.data()) || {};
+    // Only handle text notebook docs (inline editable)
+    const type = String((after === null || after === void 0 ? void 0 : after.type) || "").toLowerCase();
+    if (type !== "text")
+        return;
+    const afterRaw = String(((_c = after === null || after === void 0 ? void 0 : after.content) === null || _c === void 0 ? void 0 : _c.raw) || "");
+    const beforeRaw = String(((_d = before === null || before === void 0 ? void 0 : before.content) === null || _d === void 0 ? void 0 : _d.raw) || "");
+    const created = !(beforeSnap === null || beforeSnap === void 0 ? void 0 : beforeSnap.exists) && !!afterSnap.exists;
+    const contentChanged = created || afterRaw !== beforeRaw;
+    // If nothing meaningful changed, skip
+    if (!contentChanged)
+        return;
+    const docRef = db
+        .collection("documents")
+        .doc(userId)
+        .collection("userDocuments")
+        .doc(documentId);
+    try {
+        const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
+        const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
+        // If empty content: ensure vector store id metadata exists; nothing to upload
+        if (!afterRaw || afterRaw.trim().length === 0) {
+            await docRef.set({
+                status: "ready",
+                processingStatus: "completed",
+                processingCompletedAt: new Date(),
+                characterCount: 0,
+                chunkCount: firestore_2.FieldValue.delete(),
+                "metadata.openaiVector": {
+                    vectorStoreId: openaiVS.getVectorStoreId(),
+                },
+            }, { merge: true });
+            return;
+        }
+        // Upsert into vector store (delete old file if present)
+        const existingVS = {
+            vectorStoreId: ((_f = (_e = after === null || after === void 0 ? void 0 : after.metadata) === null || _e === void 0 ? void 0 : _e.openaiVector) === null || _f === void 0 ? void 0 : _f.vectorStoreId) ||
+                openaiVS.getVectorStoreId(),
+            fileId: (_h = (_g = after === null || after === void 0 ? void 0 : after.metadata) === null || _g === void 0 ? void 0 : _g.openaiVector) === null || _h === void 0 ? void 0 : _h.fileId,
+        };
+        const result = await openaiVS.upsertTextDocument(afterRaw, {
+            userId,
+            documentId,
+            title: String((after === null || after === void 0 ? void 0 : after.title) || "Document"),
+            fileName: String(((_j = after === null || after === void 0 ? void 0 : after.metadata) === null || _j === void 0 ? void 0 : _j.fileName) || `${documentId}.txt`),
+            existing: existingVS,
+        });
+        await docRef.set({
+            status: "ready",
+            processingStatus: "completed",
+            processingCompletedAt: new Date(),
+            characterCount: afterRaw.length,
+            chunkCount: firestore_2.FieldValue.delete(),
+            "content.processed": "Indexed to OpenAI Vector Store",
+            "metadata.openaiVector": {
+                vectorStoreId: result.vectorStoreId,
+                fileId: result.fileId,
+                vectorStoreFileId: result.vectorStoreFileId,
+            },
+        }, { merge: true });
+    }
+    catch (e) {
+        firebase_functions_1.logger.warn("syncNotebookEmbeddings failed", { userId, documentId, e });
     }
 });
 /**

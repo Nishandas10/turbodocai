@@ -613,6 +613,102 @@ export const processDocument = onDocumentWritten(
 );
 
 /**
+ * Realtime sync for Notebook (type: "text") documents.
+ * - On create: ensure vector store metadata exists; if content present, upload to OpenAI Vector Store.
+ * - On update: when content.raw changes, replace the vector store file with new content.
+ */
+export const syncNotebookEmbeddings = onDocumentWritten(
+  "documents/{userId}/userDocuments/{documentId}",
+  async (event) => {
+    const afterSnap = event.data?.after;
+    const beforeSnap = event.data?.before;
+    if (!afterSnap?.exists) return; // ignore deletes
+
+    const { userId, documentId } = event.params as {
+      userId: string;
+      documentId: string;
+    };
+    const after = (afterSnap.data() as any) || {};
+    const before = (beforeSnap?.data() as any) || {};
+
+    // Only handle text notebook docs (inline editable)
+    const type = String(after?.type || "").toLowerCase();
+    if (type !== "text") return;
+
+    const afterRaw = String(after?.content?.raw || "");
+    const beforeRaw = String(before?.content?.raw || "");
+    const created = !beforeSnap?.exists && !!afterSnap.exists;
+    const contentChanged = created || afterRaw !== beforeRaw;
+
+    // If nothing meaningful changed, skip
+    if (!contentChanged) return;
+
+    const docRef = db
+      .collection("documents")
+      .doc(userId)
+      .collection("userDocuments")
+      .doc(documentId);
+
+    try {
+      const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
+      const openaiVS = new OpenAIVectorStoreService(vsId);
+
+      // If empty content: ensure vector store id metadata exists; nothing to upload
+      if (!afterRaw || afterRaw.trim().length === 0) {
+        await docRef.set(
+          {
+            status: "ready",
+            processingStatus: "completed",
+            processingCompletedAt: new Date(),
+            characterCount: 0,
+            chunkCount: FieldValue.delete(),
+            "metadata.openaiVector": {
+              vectorStoreId: openaiVS.getVectorStoreId(),
+            },
+          },
+          { merge: true }
+        );
+        return;
+      }
+
+      // Upsert into vector store (delete old file if present)
+      const existingVS = {
+        vectorStoreId:
+          (after?.metadata?.openaiVector?.vectorStoreId as string) ||
+          openaiVS.getVectorStoreId(),
+        fileId: after?.metadata?.openaiVector?.fileId as string | undefined,
+      };
+      const result = await openaiVS.upsertTextDocument(afterRaw, {
+        userId,
+        documentId,
+        title: String(after?.title || "Document"),
+        fileName: String(after?.metadata?.fileName || `${documentId}.txt`),
+        existing: existingVS,
+      });
+
+      await docRef.set(
+        {
+          status: "ready",
+          processingStatus: "completed",
+          processingCompletedAt: new Date(),
+          characterCount: afterRaw.length,
+          chunkCount: FieldValue.delete(),
+          "content.processed": "Indexed to OpenAI Vector Store",
+          "metadata.openaiVector": {
+            vectorStoreId: result.vectorStoreId,
+            fileId: result.fileId,
+            vectorStoreFileId: result.vectorStoreFileId,
+          },
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      logger.warn("syncNotebookEmbeddings failed", { userId, documentId, e });
+    }
+  }
+);
+
+/**
  * Mirror nested user document to top-level /userDocuments for public Explore.
  * Doc id format: `${ownerId}_${documentId}` to keep unique and traceable.
  * On delete, remove mirror.
