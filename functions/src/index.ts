@@ -306,11 +306,13 @@ export const processDocument = onDocumentWritten(
         return;
       }
 
-      // Initialize services
-      const { documentProcessor } = createServices();
+      // Initialize services (will be instantiated as needed below)
 
-      // Only proceed when we have a storage path
-      if (!documentData.metadata?.storagePath) {
+      // Determine type early for branching
+      const docType = String(documentData.type || "").toLowerCase();
+
+      // Only proceed when we have a storage path, unless this is a website URL doc
+      if (docType !== "website" && !documentData.metadata?.storagePath) {
         logger.info(
           `Document ${documentId} doesn't have storagePath yet, will process when storage info is updated`
         );
@@ -359,38 +361,75 @@ export const processDocument = onDocumentWritten(
         return;
       }
 
-      // Step 1: Download file from Firebase Storage
-      logger.info("Downloading file from storage...");
-      const fileBuffer = await downloadFileFromStorage(
-        documentData.metadata.storagePath
-      );
-
-      const docType = (documentData.type || "").toLowerCase();
-
       let extractedText = "";
-      if (docType === "pdf") {
-        logger.info("Extracting text from PDF...");
-        extractedText = await documentProcessor.extractTextFromPDF(fileBuffer);
-      } else if (docType === "docx") {
-        logger.info("Extracting text from DOCX via Mammoth...");
-        extractedText = await documentProcessor.extractTextFromDOCX(fileBuffer);
-      } else if (docType === "pptx") {
-        logger.info("Extracting text from PPTX...");
-        extractedText = await (documentProcessor as any).extractTextFromPPTX(
-          fileBuffer
+      if (docType === "website") {
+        // Webpage extraction path: use metadata.url
+        const url = String(
+          documentData?.metadata?.url || documentData?.content?.raw || ""
         );
-      } else if (
-        docType === "text" ||
-        String(documentData?.metadata?.mimeType || "").includes("text") ||
-        /\.txt$/i.test(String(documentData?.metadata?.fileName || ""))
-      ) {
-        logger.info("Extracting text from TXT...");
-        extractedText = await (documentProcessor as any).extractTextFromTXT(
-          fileBuffer
-        );
+        if (!url) throw new Error("Website document missing URL");
+        logger.info("Extracting article from website URL...");
+        const result = await (
+          createServices().documentProcessor as any
+        ).extractTextFromURL(url);
+        extractedText = result.text || "";
+        // Optional: update title if missing and extractor provided one
+        if (
+          result.title &&
+          (!documentData.title ||
+            String(documentData.title).toLowerCase().includes("website -"))
+        ) {
+          try {
+            await db
+              .collection("documents")
+              .doc(userId)
+              .collection("userDocuments")
+              .doc(documentId)
+              .set(
+                { title: String(result.title).slice(0, 140) },
+                { merge: true }
+              );
+          } catch {
+            /* ignore */
+          }
+        }
       } else {
-        logger.info(`Unsupported document type for processing: ${docType}`);
-        return;
+        // File-based extraction path
+        logger.info("Downloading file from storage...");
+        const fileBuffer = await downloadFileFromStorage(
+          documentData.metadata.storagePath
+        );
+
+        if (docType === "pdf") {
+          logger.info("Extracting text from PDF...");
+          extractedText =
+            await createServices().documentProcessor.extractTextFromPDF(
+              fileBuffer
+            );
+        } else if (docType === "docx") {
+          logger.info("Extracting text from DOCX via Mammoth...");
+          extractedText =
+            await createServices().documentProcessor.extractTextFromDOCX(
+              fileBuffer
+            );
+        } else if (docType === "pptx") {
+          logger.info("Extracting text from PPTX...");
+          extractedText = await (
+            createServices().documentProcessor as any
+          ).extractTextFromPPTX(fileBuffer);
+        } else if (
+          docType === "text" ||
+          String(documentData?.metadata?.mimeType || "").includes("text") ||
+          /\.txt$/i.test(String(documentData?.metadata?.fileName || ""))
+        ) {
+          logger.info("Extracting text from TXT...");
+          extractedText = await (
+            createServices().documentProcessor as any
+          ).extractTextFromTXT(fileBuffer);
+        } else {
+          logger.info(`Unsupported document type for processing: ${docType}`);
+          return;
+        }
       }
 
       if (!extractedText || extractedText.length < 10) {
@@ -409,8 +448,8 @@ export const processDocument = onDocumentWritten(
         );
       }
 
-      // All supported types (pdf, docx, pptx, text): upload text to OpenAI Vector Store
-      if (["pdf", "docx", "pptx", "text"].includes(docType)) {
+      // All supported types (pdf, docx, pptx, text, website): upload text to OpenAI Vector Store
+      if (["pdf", "docx", "pptx", "text", "website"].includes(docType)) {
         const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
         const openaiVS = new OpenAIVectorStoreService(vsId);
         // Update progress early

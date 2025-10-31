@@ -240,7 +240,7 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
  *   (OpenAI handles chunking + embeddings). No Pinecone is used anywhere.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -270,10 +270,11 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             });
             return;
         }
-        // Initialize services
-        const { documentProcessor } = createServices();
-        // Only proceed when we have a storage path
-        if (!((_h = documentData.metadata) === null || _h === void 0 ? void 0 : _h.storagePath)) {
+        // Initialize services (will be instantiated as needed below)
+        // Determine type early for branching
+        const docType = String(documentData.type || "").toLowerCase();
+        // Only proceed when we have a storage path, unless this is a website URL doc
+        if (docType !== "website" && !((_h = documentData.metadata) === null || _h === void 0 ? void 0 : _h.storagePath)) {
             firebase_functions_1.logger.info(`Document ${documentId} doesn't have storagePath yet, will process when storage info is updated`);
             return;
         }
@@ -310,32 +311,60 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info("Processing lock not acquired; exiting");
             return;
         }
-        // Step 1: Download file from Firebase Storage
-        firebase_functions_1.logger.info("Downloading file from storage...");
-        const fileBuffer = await downloadFileFromStorage(documentData.metadata.storagePath);
-        const docType = (documentData.type || "").toLowerCase();
         let extractedText = "";
-        if (docType === "pdf") {
-            firebase_functions_1.logger.info("Extracting text from PDF...");
-            extractedText = await documentProcessor.extractTextFromPDF(fileBuffer);
-        }
-        else if (docType === "docx") {
-            firebase_functions_1.logger.info("Extracting text from DOCX via Mammoth...");
-            extractedText = await documentProcessor.extractTextFromDOCX(fileBuffer);
-        }
-        else if (docType === "pptx") {
-            firebase_functions_1.logger.info("Extracting text from PPTX...");
-            extractedText = await documentProcessor.extractTextFromPPTX(fileBuffer);
-        }
-        else if (docType === "text" ||
-            String(((_j = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _j === void 0 ? void 0 : _j.mimeType) || "").includes("text") ||
-            /\.txt$/i.test(String(((_k = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _k === void 0 ? void 0 : _k.fileName) || ""))) {
-            firebase_functions_1.logger.info("Extracting text from TXT...");
-            extractedText = await documentProcessor.extractTextFromTXT(fileBuffer);
+        if (docType === "website") {
+            // Webpage extraction path: use metadata.url
+            const url = String(((_j = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _j === void 0 ? void 0 : _j.url) || ((_k = documentData === null || documentData === void 0 ? void 0 : documentData.content) === null || _k === void 0 ? void 0 : _k.raw) || "");
+            if (!url)
+                throw new Error("Website document missing URL");
+            firebase_functions_1.logger.info("Extracting article from website URL...");
+            const result = await createServices().documentProcessor.extractTextFromURL(url);
+            extractedText = result.text || "";
+            // Optional: update title if missing and extractor provided one
+            if (result.title &&
+                (!documentData.title ||
+                    String(documentData.title).toLowerCase().includes("website -"))) {
+                try {
+                    await db
+                        .collection("documents")
+                        .doc(userId)
+                        .collection("userDocuments")
+                        .doc(documentId)
+                        .set({ title: String(result.title).slice(0, 140) }, { merge: true });
+                }
+                catch (_p) {
+                    /* ignore */
+                }
+            }
         }
         else {
-            firebase_functions_1.logger.info(`Unsupported document type for processing: ${docType}`);
-            return;
+            // File-based extraction path
+            firebase_functions_1.logger.info("Downloading file from storage...");
+            const fileBuffer = await downloadFileFromStorage(documentData.metadata.storagePath);
+            if (docType === "pdf") {
+                firebase_functions_1.logger.info("Extracting text from PDF...");
+                extractedText =
+                    await createServices().documentProcessor.extractTextFromPDF(fileBuffer);
+            }
+            else if (docType === "docx") {
+                firebase_functions_1.logger.info("Extracting text from DOCX via Mammoth...");
+                extractedText =
+                    await createServices().documentProcessor.extractTextFromDOCX(fileBuffer);
+            }
+            else if (docType === "pptx") {
+                firebase_functions_1.logger.info("Extracting text from PPTX...");
+                extractedText = await createServices().documentProcessor.extractTextFromPPTX(fileBuffer);
+            }
+            else if (docType === "text" ||
+                String(((_l = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _l === void 0 ? void 0 : _l.mimeType) || "").includes("text") ||
+                /\.txt$/i.test(String(((_m = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _m === void 0 ? void 0 : _m.fileName) || ""))) {
+                firebase_functions_1.logger.info("Extracting text from TXT...");
+                extractedText = await createServices().documentProcessor.extractTextFromTXT(fileBuffer);
+            }
+            else {
+                firebase_functions_1.logger.info(`Unsupported document type for processing: ${docType}`);
+                return;
+            }
         }
         if (!extractedText || extractedText.length < 10) {
             throw new Error("No meaningful text extracted from PDF");
@@ -349,8 +378,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             truncated = true;
             firebase_functions_1.logger.warn(`Document text truncated to ${MAX_CHARS} characters to conserve memory`);
         }
-        // All supported types (pdf, docx, pptx, text): upload text to OpenAI Vector Store
-        if (["pdf", "docx", "pptx", "text"].includes(docType)) {
+        // All supported types (pdf, docx, pptx, text, website): upload text to OpenAI Vector Store
+        if (["pdf", "docx", "pptx", "text", "website"].includes(docType)) {
             const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
             const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
             // Update progress early
@@ -367,7 +396,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 userId,
                 documentId,
                 title: documentData.title,
-                fileName: (_l = documentData.metadata) === null || _l === void 0 ? void 0 : _l.fileName,
+                fileName: (_o = documentData.metadata) === null || _o === void 0 ? void 0 : _o.fileName,
             });
             // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
             const transcriptPath = `transcripts/${userId}/${documentId}.txt`;

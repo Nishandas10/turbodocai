@@ -8,6 +8,7 @@ const pdf_parse_1 = __importDefault(require("pdf-parse"));
 const mammoth_1 = __importDefault(require("mammoth"));
 const jszip_1 = __importDefault(require("jszip"));
 const firebase_functions_1 = require("firebase-functions");
+const article_extractor_1 = require("@extractus/article-extractor");
 class DocumentProcessor {
     /**
      * Extract text from PDF buffer using pdf-parse
@@ -67,6 +68,88 @@ class DocumentProcessor {
         if (type === "text")
             return this.extractTextFromTXT(buffer);
         throw new Error(`Unsupported document type for extraction: ${type}`);
+    }
+    /**
+     * Extract main article text from a webpage URL using @extractus/article-extractor.
+     * Strips HTML, normalizes whitespace, and returns cleaned text.
+     */
+    async extractTextFromURL(url) {
+        try {
+            // Basic validation
+            let u;
+            try {
+                u = new URL(String(url));
+                if (!/^https?:$/i.test(u.protocol))
+                    throw new Error("Invalid protocol");
+            }
+            catch (e) {
+                throw new Error("Invalid URL provided");
+            }
+            const article = await (0, article_extractor_1.extract)(u.toString());
+            if (!article)
+                throw new Error("Could not extract article content");
+            const html = String(article.content || "");
+            const rawText = String(article.text || "");
+            const title = article.title;
+            // Prefer provided text if present; otherwise strip HTML
+            let text = rawText && rawText.trim().length > 80 ? rawText : this.stripHtml(html);
+            text = this.cleanExtractedText(text);
+            // Extra cleanup: drop very short fragments that are likely nav/boilerplate
+            text = this.dropShortFragments(text, 24);
+            if (!text || text.length < 80) {
+                throw new Error("No meaningful text extracted from webpage");
+            }
+            firebase_functions_1.logger.info("Extracted article from URL", {
+                url: u.hostname,
+                title: title || "(untitled)",
+                length: text.length,
+            });
+            return { title, text };
+        }
+        catch (error) {
+            firebase_functions_1.logger.error("Error extracting text from URL:", error);
+            throw new Error("Failed to extract text from URL");
+        }
+    }
+    /**
+     * Best-effort HTML stripping without extra deps
+     */
+    stripHtml(html) {
+        if (!html)
+            return "";
+        // Remove scripts/styles
+        let s = html
+            .replace(/<script[\s\S]*?<\/script>/gi, " ")
+            .replace(/<style[\s\S]*?<\/style>/gi, " ");
+        // Remove all tags
+        s = s.replace(/<[^>]+>/g, " ");
+        // Decode a few common entities
+        s = s
+            .replace(/&nbsp;/g, " ")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+        return s;
+    }
+    /**
+     * Remove overly short lines/fragments that look like nav or boilerplate
+     */
+    dropShortFragments(text, minLen) {
+        const lines = text
+            .split(/\n+/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+        const kept = [];
+        for (const l of lines) {
+            // keep headings and paragraphs; drop tiny crumbs
+            if (l.length >= minLen ||
+                /\b(abstract|summary|introduction|conclusion|references)\b/i.test(l)) {
+                kept.push(l);
+            }
+        }
+        return kept.join("\n");
     }
     /**
      * Extract text from PPTX buffer using pptx-parser + JSZip.

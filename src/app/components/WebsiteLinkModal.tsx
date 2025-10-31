@@ -1,17 +1,25 @@
 "use client"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { X, Globe, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import { createWebsiteDocument } from "@/lib/firestore"
+import { waitAndGenerateSummary } from "@/lib/ragService"
+import { useRouter } from "next/navigation"
 
 export default function WebsiteLinkModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [websiteLink, setWebsiteLink] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStatus, setProcessingStatus] = useState<string>("")
+  const [processingProgress, setProcessingProgress] = useState<number | null>(null)
+  const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
+  const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
+  const [displayedProgress, setDisplayedProgress] = useState<number>(0)
   const { user } = useAuth()
+  const router = useRouter()
 
   const isValidUrl = (url: string) => {
     try {
@@ -48,18 +56,100 @@ export default function WebsiteLinkModal(props: any) {
     setIsProcessing(true)
     try {
       const normalizedUrl = normalizeUrl(websiteLink)
-  const documentId = await createWebsiteDocument(user.uid, normalizedUrl, undefined, spaceId)
+      const documentId = await createWebsiteDocument(user.uid, normalizedUrl, undefined, spaceId)
       console.log('Website saved successfully:', documentId)
-      alert(`Website saved successfully! Document ID: ${documentId}`)
-      setWebsiteLink("") // Reset the input
-      onClose()
+
+      // Start processing monitoring similar to document upload modal
+      setProcessingStatus("Processing webpage...")
+  setProcessingProgress(null)
+  setOptimisticProgress(0)
+  setDisplayedProgress(0)
+  setOptimisticTimerActive(true)
+
+      try {
+        await waitAndGenerateSummary(
+          documentId,
+          user.uid,
+          (status, progress) => {
+            const isDone = status === 'completed' || status === 'ready'
+            const raw = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null
+            // Prevent regressions and premature 100: cap server progress at 95 until done
+            const capped = typeof raw === 'number' && !isDone ? Math.min(95, raw) : raw
+            setProcessingProgress(typeof capped === 'number' ? capped : null)
+            setDisplayedProgress((prev) => {
+              const candidate = typeof capped === 'number' ? capped : prev
+              const withOptimistic = Math.max(candidate, optimisticProgress)
+              const notDoneCap = isDone ? withOptimistic : Math.min(99, withOptimistic)
+              return Math.max(prev, notDoneCap)
+            })
+            setProcessingStatus(`Processing: ${status}`)
+          },
+          350
+        )
+        setProcessingProgress(100)
+        setDisplayedProgress(100)
+        setProcessingStatus("Processed! Redirecting...")
+        setTimeout(() => {
+          onClose()
+          router.push(`/notes/${documentId}`)
+        }, 1200)
+      } catch (e) {
+        console.error('Website processing error:', e)
+        setProcessingStatus("Processing failed or timed out")
+        setOptimisticTimerActive(false)
+        setTimeout(() => {
+          onClose()
+        }, 2000)
+      } finally {
+        setIsProcessing(false)
+        setOptimisticTimerActive(false)
+      }
     } catch (error) {
       console.error('Error saving website:', error)
-      alert('Failed to save website. Please try again.')
+      setProcessingStatus('Failed to save website. Please try again.')
     } finally {
-      setIsProcessing(false)
+      // isProcessing is stopped after wait/generation completes above
     }
   }
+
+  // Cleanup when modal closes: reset progress state
+  useEffect(() => {
+    if (!isOpen) {
+      setOptimisticTimerActive(false)
+      setOptimisticProgress(0)
+      setProcessingProgress(null)
+      setDisplayedProgress(0)
+      setProcessingStatus("")
+    }
+  }, [isOpen])
+
+  // Optimistic progress timer: smoothly advance up to 90% while processing
+  useEffect(() => {
+    if (!optimisticTimerActive) return
+    let raf: number | null = null
+    let start: number | null = null
+    const cap = 90
+    const step = (ts: number) => {
+      if (start === null) start = ts
+      const elapsed = ts - start
+      const duration = 25000
+      const t = Math.min(1, elapsed / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = Math.min(cap, Math.round(eased * cap))
+      setOptimisticProgress((prev) => (next > prev ? next : prev))
+      setDisplayedProgress((prev) => Math.max(prev, next))
+      if (next < cap && optimisticTimerActive) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => { if (raf) cancelAnimationFrame(raf) }
+  }, [optimisticTimerActive])
+
+  // Keep displayedProgress in sync if backend reports a higher value (still monotonic)
+  useEffect(() => {
+    if (typeof processingProgress === 'number') {
+      setDisplayedProgress((prev) => Math.max(prev, Math.min(99, processingProgress)))
+    }
+  }, [processingProgress])
 
   if (!isOpen) return null
 
@@ -117,12 +207,28 @@ export default function WebsiteLinkModal(props: any) {
             {isProcessing ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Saving Website...
+                Processing...
               </>
             ) : (
-              "Save Website"
+              "Upload Website"
             )}
           </Button>
+
+          {/* Processing status */}
+          {(isProcessing || processingStatus) && (
+            <div className="mt-3 p-3 rounded-md border border-border bg-muted/40">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-card-foreground">{processingStatus || 'Processing webpage...'}</p>
+                <span className="text-xs text-muted-foreground tabular-nums">{Math.round(displayedProgress)}%</span>
+              </div>
+              <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-blue-600 transition-[width] duration-300"
+                  style={{ width: `${Math.max(0, Math.min(100, displayedProgress))}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
