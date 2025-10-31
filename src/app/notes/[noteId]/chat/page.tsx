@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { Plus, Minus, ExternalLink } from "lucide-react";
 // import { getDocument } from "@/lib/firestore";
 import type { Document as Doc } from "@/lib/types";
 import DocumentChat from "@/components/DocumentChat";
@@ -31,6 +32,8 @@ export default function ChatPage() {
   // Split state for resizable panes (0.3 <= split <= 0.7)
   const [split, setSplit] = useState<number>(0.6);
   const draggingRef = useRef<boolean>(false);
+  // Website preview zoom (0.5x - 2x)
+  const [websiteZoom, setWebsiteZoom] = useState<number>(1);
 
   useEffect(() => {
     // Keep shared owner consistent with notes page behavior
@@ -74,11 +77,16 @@ export default function ChatPage() {
     if (!doc) return null;
     const mime = doc.metadata?.mimeType || "";
     const lowerName = (doc.metadata?.fileName || "").toLowerCase();
+    const isWebsite = doc.type === "website";
+    const websiteUrl = isWebsite ? (doc.metadata as any)?.url || (doc as any)?.metadata?.sourceUrl || null : null;
     const isPdf = doc.type === "pdf" || mime.includes("pdf") || lowerName.endsWith(".pdf");
     const isDocx = doc.type === "docx" || mime.includes("word") || lowerName.endsWith(".docx");
     const isPptx = doc.type === "pptx" || mime.includes("presentation") || lowerName.endsWith(".pptx");
     const isTxt = doc.type === "text" || mime.includes("text/plain") || lowerName.endsWith(".txt");
     const baseUrl = doc.metadata?.downloadURL || null;
+    if (isWebsite) {
+      return { isWebsite: true, websiteUrl } as any;
+    }
     if (!baseUrl && !isTxt) return null; // no preview for non-text without URL
     // Add cache-busting so newly uploaded PDFs don't show stale cached content
     const toMs = (val: Timestamp | Date | string | number | undefined): number => {
@@ -102,7 +110,7 @@ export default function ChatPage() {
       const sep = url.includes('?') ? '&' : '?';
       url = `${url}${sep}v=${version}`;
     }
-    return { url, isPdf, isDocx, isPptx, isTxt };
+    return { url, isPdf, isDocx, isPptx, isTxt } as any;
   }, [doc]);
 
   // If no downloadURL (common for older records), try resolving from storagePath
@@ -257,6 +265,94 @@ export default function ChatPage() {
         ) : error ? (
           <div className="p-4 text-sm text-red-500">{error}</div>
         ) : fileInfo ? (
+          (fileInfo as any).isWebsite ? (
+            (() => {
+              const url = (fileInfo as any).websiteUrl as string | null;
+              if (!url) {
+                return (
+                  <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
+                    <div>
+                      <div className="font-medium mb-1">Website preview not available</div>
+                      <div className="text-sm">Missing or invalid URL.</div>
+                    </div>
+                  </div>
+                );
+              }
+              const proxySrc = `/api/webpage-proxy?url=${encodeURIComponent(url)}`;
+              const z = Math.max(0.5, Math.min(2, websiteZoom));
+              const inc = () => setWebsiteZoom((v) => Math.min(2, +(v + 0.1).toFixed(2)));
+              const dec = () => setWebsiteZoom((v) => Math.max(0.5, +(v - 0.1).toFixed(2)));
+              const reset = () => setWebsiteZoom(1);
+              return (
+                <div className="h-full w-full flex flex-col">
+                  {/* Toolbar */}
+                  <div className="px-3 py-2 border-b border-border bg-background/80 backdrop-blur flex items-center justify-between">
+                    <div className="text-sm font-medium text-card-foreground truncate" title={url}>
+                      Web preview
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={dec}
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border text-card-foreground hover:bg-muted"
+                        aria-label="Zoom out"
+                        title="Zoom out"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={reset}
+                        className="px-2 h-8 rounded-md border border-border text-xs font-medium text-card-foreground hover:bg-muted min-w-[64px]"
+                        aria-label="Reset zoom"
+                        title="Reset zoom"
+                      >
+                        {Math.round(z * 100)}%
+                      </button>
+                      <button
+                        type="button"
+                        onClick={inc}
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border text-card-foreground hover:bg-muted"
+                        aria-label="Zoom in"
+                        title="Zoom in"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-2 inline-flex items-center gap-1 px-2 h-8 rounded-md border border-border text-xs font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                        title="Open original in new tab"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Open
+                      </a>
+                    </div>
+                  </div>
+                  {/* Content */}
+                  <div className="flex-1 overflow-auto bg-white">
+                    <div className="relative h-full w-full">
+                      <div
+                        style={{
+                          transform: `scale(${z})`,
+                          transformOrigin: "0 0",
+                          width: `${100 / z}%`,
+                          height: `${100 / z}%`,
+                        }}
+                      >
+                        <iframe
+                          src={proxySrc}
+                          className="w-full h-full bg-white"
+                          sandbox="allow-same-origin allow-top-navigation-by-user-activation"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
           fileInfo.isDocx ? (
             <DocxViewer fileUrl={fileInfo.url!} className="h-full w-full" />
           ) : fileInfo.isPdf ? (
@@ -297,7 +393,7 @@ export default function ChatPage() {
                 <div className="text-xs opacity-70 mt-2">This file type isn&#39;t supported for inline preview.</div>
               </div>
             </div>
-          )
+          ))
         ) : (
           <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
             <div>
