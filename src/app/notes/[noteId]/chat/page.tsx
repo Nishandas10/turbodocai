@@ -73,19 +73,29 @@ export default function ChatPage() {
     return () => unsub();
   }, [noteId, user?.uid, effOwner]);
 
-  const fileInfo = useMemo(() => {
+  type FileInfo =
+    | { kind: 'website'; websiteUrl: string | null }
+    | { kind: 'youtube'; youtubeUrl: string | null }
+    | { kind: 'file'; url: string | null; isPdf: boolean; isDocx: boolean; isPptx: boolean; isTxt: boolean };
+
+  const fileInfo: FileInfo | null = useMemo(() => {
     if (!doc) return null;
     const mime = doc.metadata?.mimeType || "";
     const lowerName = (doc.metadata?.fileName || "").toLowerCase();
     const isWebsite = doc.type === "website";
-    const websiteUrl = isWebsite ? (doc.metadata as any)?.url || (doc as any)?.metadata?.sourceUrl || null : null;
+    const isYouTube = doc.type === "youtube";
+    const websiteUrl = isWebsite ? (doc.metadata as { url?: string } | undefined)?.url || null : null;
+    const youtubeUrl = isYouTube ? (doc.metadata as { url?: string } | undefined)?.url || null : null;
     const isPdf = doc.type === "pdf" || mime.includes("pdf") || lowerName.endsWith(".pdf");
     const isDocx = doc.type === "docx" || mime.includes("word") || lowerName.endsWith(".docx");
     const isPptx = doc.type === "pptx" || mime.includes("presentation") || lowerName.endsWith(".pptx");
     const isTxt = doc.type === "text" || mime.includes("text/plain") || lowerName.endsWith(".txt");
     const baseUrl = doc.metadata?.downloadURL || null;
     if (isWebsite) {
-      return { isWebsite: true, websiteUrl } as any;
+      return { kind: 'website', websiteUrl };
+    }
+    if (isYouTube) {
+      return { kind: 'youtube', youtubeUrl };
     }
     if (!baseUrl && !isTxt) return null; // no preview for non-text without URL
     // Add cache-busting so newly uploaded PDFs don't show stale cached content
@@ -110,7 +120,7 @@ export default function ChatPage() {
       const sep = url.includes('?') ? '&' : '?';
       url = `${url}${sep}v=${version}`;
     }
-    return { url, isPdf, isDocx, isPptx, isTxt } as any;
+    return { kind: 'file', url, isPdf, isDocx, isPptx, isTxt };
   }, [doc]);
 
   // If no downloadURL (common for older records), try resolving from storagePath
@@ -191,7 +201,7 @@ export default function ChatPage() {
     let cancelled = false;
     let objUrl: string | null = null;
     (async () => {
-      if (!fileInfo || !fileInfo.isPdf) {
+      if (!fileInfo || fileInfo.kind !== 'file' || !fileInfo.isPdf) {
         setVerifiedPdfUrl(null);
         setVerifyingPdf(false);
         return;
@@ -265,9 +275,9 @@ export default function ChatPage() {
         ) : error ? (
           <div className="p-4 text-sm text-red-500">{error}</div>
         ) : fileInfo ? (
-          (fileInfo as any).isWebsite ? (
+          fileInfo.kind === 'website' ? (
             (() => {
-              const url = (fileInfo as any).websiteUrl as string | null;
+              const url = fileInfo.websiteUrl;
               if (!url) {
                 return (
                   <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
@@ -352,7 +362,72 @@ export default function ChatPage() {
                 </div>
               );
             })()
-          ) : (
+          ) : fileInfo.kind === 'youtube' ? (
+            (() => {
+              const ytUrl = fileInfo.youtubeUrl;
+              if (!ytUrl) {
+                return (
+                  <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
+                    <div>
+                      <div className="font-medium mb-1">YouTube preview not available</div>
+                      <div className="text-sm">Missing or invalid URL.</div>
+                    </div>
+                  </div>
+                );
+              }
+              const extractVideoId = (input: string): string | null => {
+                try {
+                  const idPattern = /^[a-zA-Z0-9_-]{11}$/;
+                  const m = input.match(idPattern) || input.match(/[?&]v=([a-zA-Z0-9_-]{11})/) || input.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/) || input.match(/embed\/([a-zA-Z0-9_-]{11})/);
+                  const id = m ? (m[1] || m[0]) : null;
+                  return id || null;
+                } catch { return null; }
+              };
+              const vid = extractVideoId(ytUrl);
+              const embedSrc = vid
+                ? `https://www.youtube-nocookie.com/embed/${vid}?rel=0&modestbranding=1`
+                : undefined;
+              return (
+                <div className="h-full w-full flex flex-col">
+                  <div className="px-3 py-2 border-b border-border bg-background/80 backdrop-blur flex items-center justify-between">
+                    <div className="text-sm font-medium text-card-foreground truncate" title={ytUrl}>
+                      YouTube
+                    </div>
+                    <a
+                      href={ytUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2 h-8 rounded-md border border-border text-xs font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                      title="Open on YouTube"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open
+                    </a>
+                  </div>
+                  <div className="flex-1 overflow-auto p-4">
+                    {embedSrc ? (
+                      <div className="w-full max-w-4xl mx-auto aspect-video bg-black rounded-lg overflow-hidden shadow">
+                        <iframe
+                          className="w-full h-full"
+                          src={embedSrc}
+                          title="YouTube video player"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
+                        <div>
+                          <div className="font-medium mb-1">Cannot embed video</div>
+                          <div className="text-sm">Unsupported YouTube URL format.</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()
+          ) : fileInfo.kind === 'file' ? (
           fileInfo.isDocx ? (
             <DocxViewer fileUrl={fileInfo.url!} className="h-full w-full" />
           ) : fileInfo.isPdf ? (
@@ -393,7 +468,15 @@ export default function ChatPage() {
                 <div className="text-xs opacity-70 mt-2">This file type isn&#39;t supported for inline preview.</div>
               </div>
             </div>
-          ))
+          )
+          ) : (
+            <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
+              <div>
+                <div className="font-medium mb-1">Preview not available</div>
+                <div className="text-sm">Unsupported document type.</div>
+              </div>
+            </div>
+          )
         ) : (
           <div className="h-full w-full p-6 flex items-center justify-center text-center text-muted-foreground">
             <div>
