@@ -145,6 +145,42 @@
 			"type": "shell",
 			"command": "npm --prefix functions install; npm --prefix functions run build",
 			"group": "build"
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"group": "build"
 		}
 	]
 }

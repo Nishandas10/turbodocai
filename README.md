@@ -34,3 +34,23 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## YouTube RAG pipeline
+
+- Submit a YouTube URL via the UI (YouTube modal). This creates a Firestore document of type `youtube` with the URL.
+- A Cloud Function fetches the transcript using the Transcript API and stores the full text at `transcripts/{userId}/{documentId}.txt` in Firebase Storage.
+- The transcript text is uploaded to the OpenAI Vector Store for retrieval-augmented QA and summaries.
+- You can then use existing actions to generate on demand:
+  - Summaries
+  - Chat with the video (RAG)
+  - Podcasts (TTS summary)
+  - Flashcards
+  - Quiz questions
+
+Environment variables:
+
+```
+TRANSCRIPT_API_KEY=... # required
+# Optional override (defaults to https://api.transcriptapi.com/v1/youtube/transcript)
+TRANSCRIPT_API_BASE=https://your-transcript-api-base
+```

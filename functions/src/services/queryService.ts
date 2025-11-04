@@ -499,9 +499,30 @@ Answer:`;
                 e as any
               );
               // Fallback to Firestore raw content if available
-              const rawText: string = String(
+              let rawText: string = String(
                 data?.content?.raw || data?.content?.processed || ""
               ).slice(0, 24000);
+              // If no inline content, try transcript from Storage (e.g., YouTube)
+              if (!rawText || rawText.length < 100) {
+                const transcriptPath = data?.metadata?.transcriptPath as
+                  | string
+                  | undefined;
+                if (transcriptPath) {
+                  try {
+                    const [buf] = await (await import("firebase-admin/storage"))
+                      .getStorage()
+                      .bucket()
+                      .file(transcriptPath)
+                      .download();
+                    rawText = buf.toString("utf-8").slice(0, 24000);
+                  } catch (trErr) {
+                    logger.warn(
+                      "Transcript read failed for summary fallback",
+                      trErr as any
+                    );
+                  }
+                }
+              }
               if (rawText && rawText.length > 100) {
                 const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
                 const resp = await this.openai.chat.completions.create({
@@ -543,6 +564,25 @@ Answer:`;
       let rawText: string = String(
         data?.content?.raw || data?.content?.processed || data?.summary || ""
       ).slice(0, 24000);
+      // If still no content, try reading transcript stored in Storage (YouTube, audio, etc.)
+      if (
+        (!rawText || rawText.length < 100) &&
+        data?.metadata?.transcriptPath
+      ) {
+        try {
+          const [buf] = await (await import("firebase-admin/storage"))
+            .getStorage()
+            .bucket()
+            .file(String(data.metadata.transcriptPath))
+            .download();
+          rawText = buf.toString("utf-8").slice(0, 24000);
+        } catch (e) {
+          logger.warn(
+            "Transcript read failed for main summary fallback",
+            e as any
+          );
+        }
+      }
       if (!rawText || rawText.length < 80)
         return "No content available for summary.";
       const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;

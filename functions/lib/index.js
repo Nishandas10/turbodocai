@@ -240,7 +240,7 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
  *   (OpenAI handles chunking + embeddings). No Pinecone is used anywhere.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -273,8 +273,9 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
         // Initialize services (will be instantiated as needed below)
         // Determine type early for branching
         const docType = String(documentData.type || "").toLowerCase();
-        // Only proceed when we have a storage path, unless this is a website URL doc
-        if (docType !== "website" && !((_h = documentData.metadata) === null || _h === void 0 ? void 0 : _h.storagePath)) {
+        // Only proceed when we have a storage path, unless this is a website or youtube URL doc
+        if (!["website", "youtube"].includes(docType) &&
+            !((_h = documentData.metadata) === null || _h === void 0 ? void 0 : _h.storagePath)) {
             firebase_functions_1.logger.info(`Document ${documentId} doesn't have storagePath yet, will process when storage info is updated`);
             return;
         }
@@ -332,8 +333,37 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                         .doc(documentId)
                         .set({ title: String(result.title).slice(0, 140) }, { merge: true });
                 }
-                catch (_p) {
+                catch (_r) {
                     /* ignore */
+                }
+            }
+        }
+        else if (docType === "youtube") {
+            // YouTube transcript path: use metadata.url
+            const videoUrl = String(((_l = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _l === void 0 ? void 0 : _l.url) || ((_m = documentData === null || documentData === void 0 ? void 0 : documentData.content) === null || _m === void 0 ? void 0 : _m.raw) || "").trim();
+            if (!videoUrl)
+                throw new Error("YouTube document missing URL");
+            firebase_functions_1.logger.info("Fetching transcript via Transcript API...");
+            const { text: transcriptText, title: apiTitle } = await fetchYouTubeTranscript(videoUrl);
+            // Clean text using TXT pipeline cleaner
+            const buffer = Buffer.from(transcriptText, "utf-8");
+            extractedText = await createServices().documentProcessor.extractTextFromTXT(buffer);
+            // Optionally update document title if API provided one and current title is generic
+            if (apiTitle) {
+                const currentTitle = String(documentData.title || "");
+                const looksGeneric = /YouTube\s*Video/i.test(currentTitle) || !currentTitle.trim();
+                if (looksGeneric) {
+                    try {
+                        await db
+                            .collection("documents")
+                            .doc(userId)
+                            .collection("userDocuments")
+                            .doc(documentId)
+                            .set({ title: String(apiTitle).slice(0, 140) }, { merge: true });
+                    }
+                    catch (_s) {
+                        /* ignore */
+                    }
                 }
             }
         }
@@ -356,8 +386,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 extractedText = await createServices().documentProcessor.extractTextFromPPTX(fileBuffer);
             }
             else if (docType === "text" ||
-                String(((_l = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _l === void 0 ? void 0 : _l.mimeType) || "").includes("text") ||
-                /\.txt$/i.test(String(((_m = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _m === void 0 ? void 0 : _m.fileName) || ""))) {
+                String(((_o = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _o === void 0 ? void 0 : _o.mimeType) || "").includes("text") ||
+                /\.txt$/i.test(String(((_p = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _p === void 0 ? void 0 : _p.fileName) || ""))) {
                 firebase_functions_1.logger.info("Extracting text from TXT...");
                 extractedText = await createServices().documentProcessor.extractTextFromTXT(fileBuffer);
             }
@@ -378,8 +408,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             truncated = true;
             firebase_functions_1.logger.warn(`Document text truncated to ${MAX_CHARS} characters to conserve memory`);
         }
-        // All supported types (pdf, docx, pptx, text, website): upload text to OpenAI Vector Store
-        if (["pdf", "docx", "pptx", "text", "website"].includes(docType)) {
+        // All supported types (pdf, docx, pptx, text, website, youtube): upload text to OpenAI Vector Store
+        if (["pdf", "docx", "pptx", "text", "website", "youtube"].includes(docType)) {
             const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
             const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
             // Update progress early
@@ -396,7 +426,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 userId,
                 documentId,
                 title: documentData.title,
-                fileName: (_o = documentData.metadata) === null || _o === void 0 ? void 0 : _o.fileName,
+                fileName: (_q = documentData.metadata) === null || _q === void 0 ? void 0 : _q.fileName,
             });
             // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
             const transcriptPath = `transcripts/${userId}/${documentId}.txt`;
@@ -1037,6 +1067,72 @@ async function downloadFileFromStorage(storagePath) {
         firebase_functions_1.logger.error("Error downloading file from storage:", error);
         throw new Error("Failed to download file from storage");
     }
+}
+/** Fetch YouTube transcript using Transcript API; returns transcript text and optional metadata title */
+async function fetchYouTubeTranscript(videoUrl) {
+    var _a, _b;
+    const API_KEY = process.env.TRANSCRIPT_API_KEY || "";
+    const API_BASE = process.env.TRANSCRIPT_API_BASE ||
+        "https://transcriptapi.com/api/v2/youtube/transcript";
+    if (!API_KEY)
+        throw new Error("Missing Transcript API key in environment");
+    const url = `${API_BASE}?video_url=${encodeURIComponent(videoUrl)}&format=json&include_timestamp=true&send_metadata=true`;
+    // small retry loop for transient errors / 429
+    const attempt = async () => {
+        const res = await fetch(url, {
+            method: "GET",
+            headers: {
+                Authorization: `Bearer ${API_KEY}`,
+                Accept: "application/json",
+            },
+        });
+        if (res.status === 402)
+            throw new Error("Transcript API: Payment required (credits or plan inactive)");
+        if (res.status === 429)
+            throw new Error("Transcript API: Rate limit exceeded, try later.");
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`Transcript API Error (${res.status}): ${errText}`);
+        }
+        return (await res.json());
+    };
+    let data;
+    try {
+        data = await attempt();
+    }
+    catch (e1) {
+        // brief backoff retry once
+        await new Promise((r) => setTimeout(r, 800));
+        data = await attempt();
+    }
+    // Expected reference shape: { transcript: [{ text, start?, duration? }], metadata?: { title?: string, ... } }
+    // Also support alternate shapes used by some providers.
+    const segments = Array.isArray(data === null || data === void 0 ? void 0 : data.transcript)
+        ? data.transcript
+        : Array.isArray(data === null || data === void 0 ? void 0 : data.segments)
+            ? data.segments
+            : [];
+    let text = "";
+    if (segments.length) {
+        text = segments
+            .map((s) => String((s === null || s === void 0 ? void 0 : s.text) || (s === null || s === void 0 ? void 0 : s.content) || "").trim())
+            .filter(Boolean)
+            .join(" ");
+    }
+    else if (typeof (data === null || data === void 0 ? void 0 : data.transcript) === "string") {
+        text = data.transcript;
+    }
+    else if (typeof (data === null || data === void 0 ? void 0 : data.text) === "string") {
+        text = data.text;
+    }
+    else if (typeof ((_a = data === null || data === void 0 ? void 0 : data.result) === null || _a === void 0 ? void 0 : _a.transcript) === "string") {
+        text = data.result.transcript;
+    }
+    text = String(text || "").trim();
+    if (!text)
+        throw new Error("Transcript API returned empty transcript");
+    const title = ((_b = data === null || data === void 0 ? void 0 : data.metadata) === null || _b === void 0 ? void 0 : _b.title) || undefined;
+    return { text, title };
 }
 /**
  * Callable function to query documents using RAG

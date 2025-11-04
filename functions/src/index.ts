@@ -311,8 +311,11 @@ export const processDocument = onDocumentWritten(
       // Determine type early for branching
       const docType = String(documentData.type || "").toLowerCase();
 
-      // Only proceed when we have a storage path, unless this is a website URL doc
-      if (docType !== "website" && !documentData.metadata?.storagePath) {
+      // Only proceed when we have a storage path, unless this is a website or youtube URL doc
+      if (
+        !["website", "youtube"].includes(docType) &&
+        !documentData.metadata?.storagePath
+      ) {
         logger.info(
           `Document ${documentId} doesn't have storagePath yet, will process when storage info is updated`
         );
@@ -393,6 +396,42 @@ export const processDocument = onDocumentWritten(
             /* ignore */
           }
         }
+      } else if (docType === "youtube") {
+        // YouTube transcript path: use metadata.url
+        const videoUrl = String(
+          documentData?.metadata?.url || documentData?.content?.raw || ""
+        ).trim();
+        if (!videoUrl) throw new Error("YouTube document missing URL");
+        logger.info("Fetching transcript via Transcript API...");
+
+        const { text: transcriptText, title: apiTitle } =
+          await fetchYouTubeTranscript(videoUrl);
+        // Clean text using TXT pipeline cleaner
+        const buffer = Buffer.from(transcriptText, "utf-8");
+        extractedText = await (
+          createServices().documentProcessor as any
+        ).extractTextFromTXT(buffer);
+        // Optionally update document title if API provided one and current title is generic
+        if (apiTitle) {
+          const currentTitle = String(documentData.title || "");
+          const looksGeneric =
+            /YouTube\s*Video/i.test(currentTitle) || !currentTitle.trim();
+          if (looksGeneric) {
+            try {
+              await db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(documentId)
+                .set(
+                  { title: String(apiTitle).slice(0, 140) },
+                  { merge: true }
+                );
+            } catch {
+              /* ignore */
+            }
+          }
+        }
       } else {
         // File-based extraction path
         logger.info("Downloading file from storage...");
@@ -448,8 +487,10 @@ export const processDocument = onDocumentWritten(
         );
       }
 
-      // All supported types (pdf, docx, pptx, text, website): upload text to OpenAI Vector Store
-      if (["pdf", "docx", "pptx", "text", "website"].includes(docType)) {
+      // All supported types (pdf, docx, pptx, text, website, youtube): upload text to OpenAI Vector Store
+      if (
+        ["pdf", "docx", "pptx", "text", "website", "youtube"].includes(docType)
+      ) {
         const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
         const openaiVS = new OpenAIVectorStoreService(vsId);
         // Update progress early
@@ -1178,6 +1219,79 @@ async function downloadFileFromStorage(storagePath: string): Promise<Buffer> {
     logger.error("Error downloading file from storage:", error);
     throw new Error("Failed to download file from storage");
   }
+}
+
+/** Fetch YouTube transcript using Transcript API; returns transcript text and optional metadata title */
+async function fetchYouTubeTranscript(
+  videoUrl: string
+): Promise<{ text: string; title?: string }> {
+  const API_KEY = process.env.TRANSCRIPT_API_KEY || "";
+  const API_BASE =
+    process.env.TRANSCRIPT_API_BASE ||
+    "https://transcriptapi.com/api/v2/youtube/transcript";
+  if (!API_KEY) throw new Error("Missing Transcript API key in environment");
+
+  const url = `${API_BASE}?video_url=${encodeURIComponent(
+    videoUrl
+  )}&format=json&include_timestamp=true&send_metadata=true`;
+
+  // small retry loop for transient errors / 429
+  const attempt = async () => {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        Accept: "application/json",
+      },
+    });
+    if (res.status === 402)
+      throw new Error(
+        "Transcript API: Payment required (credits or plan inactive)"
+      );
+    if (res.status === 429)
+      throw new Error("Transcript API: Rate limit exceeded, try later.");
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Transcript API Error (${res.status}): ${errText}`);
+    }
+    return (await res.json()) as any;
+  };
+
+  let data: any;
+  try {
+    data = await attempt();
+  } catch (e1) {
+    // brief backoff retry once
+    await new Promise((r) => setTimeout(r, 800));
+    data = await attempt();
+  }
+
+  // Expected reference shape: { transcript: [{ text, start?, duration? }], metadata?: { title?: string, ... } }
+  // Also support alternate shapes used by some providers.
+  const segments: any[] = Array.isArray(data?.transcript)
+    ? data.transcript
+    : Array.isArray(data?.segments)
+    ? data.segments
+    : [];
+  let text = "";
+  if (segments.length) {
+    text = segments
+      .map((s: any) => String(s?.text || s?.content || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  } else if (typeof data?.transcript === "string") {
+    text = data.transcript;
+  } else if (typeof data?.text === "string") {
+    text = data.text;
+  } else if (typeof data?.result?.transcript === "string") {
+    text = data.result.transcript;
+  }
+  text = String(text || "").trim();
+  if (!text) throw new Error("Transcript API returned empty transcript");
+
+  const title: string | undefined =
+    (data?.metadata?.title as string | undefined) || undefined;
+  return { text, title };
 }
 
 /**

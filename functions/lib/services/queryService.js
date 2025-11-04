@@ -371,7 +371,7 @@ Answer:`;
      * Generate a summary of a document
      */
     async generateDocumentSummary(documentId, userId, maxLength = 500) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
         try {
             // If the document was indexed into OpenAI Vector Store (DOCX path), use file_search-based summarization
             try {
@@ -398,7 +398,24 @@ Answer:`;
                         catch (e) {
                             firebase_functions_1.logger.warn("Vector store summarization failed, attempting Firestore raw content fallback", e);
                             // Fallback to Firestore raw content if available
-                            const rawText = String(((_c = data === null || data === void 0 ? void 0 : data.content) === null || _c === void 0 ? void 0 : _c.raw) || ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.processed) || "").slice(0, 24000);
+                            let rawText = String(((_c = data === null || data === void 0 ? void 0 : data.content) === null || _c === void 0 ? void 0 : _c.raw) || ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.processed) || "").slice(0, 24000);
+                            // If no inline content, try transcript from Storage (e.g., YouTube)
+                            if (!rawText || rawText.length < 100) {
+                                const transcriptPath = (_e = data === null || data === void 0 ? void 0 : data.metadata) === null || _e === void 0 ? void 0 : _e.transcriptPath;
+                                if (transcriptPath) {
+                                    try {
+                                        const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
+                                            .getStorage()
+                                            .bucket()
+                                            .file(transcriptPath)
+                                            .download();
+                                        rawText = buf.toString("utf-8").slice(0, 24000);
+                                    }
+                                    catch (trErr) {
+                                        firebase_functions_1.logger.warn("Transcript read failed for summary fallback", trErr);
+                                    }
+                                }
+                            }
                             if (rawText && rawText.length > 100) {
                                 const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
                                 const resp = await this.openai.chat.completions.create({
@@ -413,7 +430,7 @@ Answer:`;
                                     max_tokens: Math.ceil(maxLength * 1.6),
                                     temperature: 0.25,
                                 });
-                                const txt = ((_g = (_f = (_e = resp.choices) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.message) === null || _g === void 0 ? void 0 : _g.content) || "";
+                                const txt = ((_h = (_g = (_f = resp.choices) === null || _f === void 0 ? void 0 : _f[0]) === null || _g === void 0 ? void 0 : _g.message) === null || _h === void 0 ? void 0 : _h.content) || "";
                                 if (txt)
                                     return txt;
                             }
@@ -435,7 +452,22 @@ Answer:`;
             if (!snap.exists)
                 return "No content available for summary.";
             const data = snap.data() || {};
-            let rawText = String(((_h = data === null || data === void 0 ? void 0 : data.content) === null || _h === void 0 ? void 0 : _h.raw) || ((_j = data === null || data === void 0 ? void 0 : data.content) === null || _j === void 0 ? void 0 : _j.processed) || (data === null || data === void 0 ? void 0 : data.summary) || "").slice(0, 24000);
+            let rawText = String(((_j = data === null || data === void 0 ? void 0 : data.content) === null || _j === void 0 ? void 0 : _j.raw) || ((_k = data === null || data === void 0 ? void 0 : data.content) === null || _k === void 0 ? void 0 : _k.processed) || (data === null || data === void 0 ? void 0 : data.summary) || "").slice(0, 24000);
+            // If still no content, try reading transcript stored in Storage (YouTube, audio, etc.)
+            if ((!rawText || rawText.length < 100) &&
+                ((_l = data === null || data === void 0 ? void 0 : data.metadata) === null || _l === void 0 ? void 0 : _l.transcriptPath)) {
+                try {
+                    const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
+                        .getStorage()
+                        .bucket()
+                        .file(String(data.metadata.transcriptPath))
+                        .download();
+                    rawText = buf.toString("utf-8").slice(0, 24000);
+                }
+                catch (e) {
+                    firebase_functions_1.logger.warn("Transcript read failed for main summary fallback", e);
+                }
+            }
             if (!rawText || rawText.length < 80)
                 return "No content available for summary.";
             const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
@@ -451,7 +483,7 @@ Answer:`;
                 max_tokens: Math.ceil(maxLength * 1.6),
                 temperature: 0.25,
             });
-            const txt = ((_m = (_l = (_k = resp.choices) === null || _k === void 0 ? void 0 : _k[0]) === null || _l === void 0 ? void 0 : _l.message) === null || _m === void 0 ? void 0 : _m.content) || "";
+            const txt = ((_p = (_o = (_m = resp.choices) === null || _m === void 0 ? void 0 : _m[0]) === null || _o === void 0 ? void 0 : _o.message) === null || _p === void 0 ? void 0 : _p.content) || "";
             return txt || "Could not generate summary.";
         }
         catch (error) {
