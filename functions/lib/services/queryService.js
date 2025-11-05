@@ -313,7 +313,6 @@ Answer:`;
      * This asks the model to produce a structured markdown summary grounded only on the attached store.
      */
     async summarizeWithOpenAIVectorStore(vectorStoreId, maxLength, title) {
-        var _a;
         try {
             const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the attached document titled "${title}" using only retrieved content.\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.`;
             // Create a temporary assistant with file_search enabled on the vector store
@@ -349,9 +348,21 @@ Answer:`;
             }
             if (runStatus.status === "completed") {
                 const messages = await this.openai.beta.threads.messages.list(thread.id);
-                const assistantMessage = messages.data.find((msg) => msg.role === "assistant");
-                const textContent = assistantMessage === null || assistantMessage === void 0 ? void 0 : assistantMessage.content.find((content) => content.type === "text");
-                const summary = ((_a = textContent === null || textContent === void 0 ? void 0 : textContent.text) === null || _a === void 0 ? void 0 : _a.value) || "";
+                // Find the most recent assistant message that has text content
+                let summary = "";
+                for (const msg of messages.data) {
+                    if (msg.role !== "assistant")
+                        continue;
+                    const parts = (msg.content || []).filter((c) => { var _a; return (c === null || c === void 0 ? void 0 : c.type) === "text" && ((_a = c === null || c === void 0 ? void 0 : c.text) === null || _a === void 0 ? void 0 : _a.value); });
+                    if (parts.length) {
+                        summary = parts
+                            .map((p) => String(p.text.value || ""))
+                            .join("\n")
+                            .trim();
+                        if (summary)
+                            break;
+                    }
+                }
                 // Clean up temporary assistant
                 await this.openai.beta.assistants.del(assistant.id);
                 return summary.trim();
@@ -390,15 +401,23 @@ Answer:`;
                             documentId,
                             vsId,
                         });
-                        try {
-                            const summary = await this.summarizeWithOpenAIVectorStore(vsId, maxLength, String((data === null || data === void 0 ? void 0 : data.title) || "Document"));
-                            if (summary && summary.trim().length)
-                                return summary;
+                        // Small retry loop to allow vector store indexing to settle for large files
+                        let vsErr = null;
+                        for (let attempt = 0; attempt < 2; attempt++) {
+                            try {
+                                const summary = await this.summarizeWithOpenAIVectorStore(vsId, maxLength, String((data === null || data === void 0 ? void 0 : data.title) || "Document"));
+                                if (summary && summary.trim().length)
+                                    return summary;
+                            }
+                            catch (e) {
+                                vsErr = e;
+                                await new Promise((r) => setTimeout(r, 1500));
+                            }
                         }
-                        catch (e) {
-                            firebase_functions_1.logger.warn("Vector store summarization failed, attempting Firestore raw content fallback", e);
+                        if (vsErr) {
+                            firebase_functions_1.logger.warn("Vector store summarization failed, attempting Firestore raw content fallback", vsErr);
                             // Fallback to Firestore raw content if available
-                            let rawText = String(((_c = data === null || data === void 0 ? void 0 : data.content) === null || _c === void 0 ? void 0 : _c.raw) || ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.processed) || "").slice(0, 24000);
+                            let rawText = String(((_c = data === null || data === void 0 ? void 0 : data.content) === null || _c === void 0 ? void 0 : _c.raw) || ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.processed) || "").slice(0, 18000);
                             // If no inline content, try transcript from Storage (e.g., YouTube)
                             if (!rawText || rawText.length < 100) {
                                 const transcriptPath = (_e = data === null || data === void 0 ? void 0 : data.metadata) === null || _e === void 0 ? void 0 : _e.transcriptPath;
@@ -409,7 +428,7 @@ Answer:`;
                                             .bucket()
                                             .file(transcriptPath)
                                             .download();
-                                        rawText = buf.toString("utf-8").slice(0, 24000);
+                                        rawText = buf.toString("utf-8").slice(0, 18000);
                                     }
                                     catch (trErr) {
                                         firebase_functions_1.logger.warn("Transcript read failed for summary fallback", trErr);
@@ -452,7 +471,7 @@ Answer:`;
             if (!snap.exists)
                 return "No content available for summary.";
             const data = snap.data() || {};
-            let rawText = String(((_j = data === null || data === void 0 ? void 0 : data.content) === null || _j === void 0 ? void 0 : _j.raw) || ((_k = data === null || data === void 0 ? void 0 : data.content) === null || _k === void 0 ? void 0 : _k.processed) || (data === null || data === void 0 ? void 0 : data.summary) || "").slice(0, 24000);
+            let rawText = String(((_j = data === null || data === void 0 ? void 0 : data.content) === null || _j === void 0 ? void 0 : _j.raw) || ((_k = data === null || data === void 0 ? void 0 : data.content) === null || _k === void 0 ? void 0 : _k.processed) || (data === null || data === void 0 ? void 0 : data.summary) || "").slice(0, 18000);
             // If still no content, try reading transcript stored in Storage (YouTube, audio, etc.)
             if ((!rawText || rawText.length < 100) &&
                 ((_l = data === null || data === void 0 ? void 0 : data.metadata) === null || _l === void 0 ? void 0 : _l.transcriptPath)) {
@@ -462,7 +481,7 @@ Answer:`;
                         .bucket()
                         .file(String(data.metadata.transcriptPath))
                         .download();
-                    rawText = buf.toString("utf-8").slice(0, 24000);
+                    rawText = buf.toString("utf-8").slice(0, 18000);
                 }
                 catch (e) {
                     firebase_functions_1.logger.warn("Transcript read failed for main summary fallback", e);

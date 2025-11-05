@@ -434,13 +434,21 @@ Answer:`;
         const messages = await this.openai.beta.threads.messages.list(
           thread.id
         );
-        const assistantMessage = messages.data.find(
-          (msg) => msg.role === "assistant"
-        );
-        const textContent = assistantMessage?.content.find(
-          (content) => content.type === "text"
-        );
-        const summary = textContent?.text?.value || "";
+        // Find the most recent assistant message that has text content
+        let summary = "";
+        for (const msg of messages.data) {
+          if (msg.role !== "assistant") continue;
+          const parts = (msg.content || []).filter(
+            (c: any) => c?.type === "text" && c?.text?.value
+          );
+          if (parts.length) {
+            summary = parts
+              .map((p: any) => String(p.text.value || ""))
+              .join("\n")
+              .trim();
+            if (summary) break;
+          }
+        }
 
         // Clean up temporary assistant
         await this.openai.beta.assistants.del(assistant.id);
@@ -486,22 +494,30 @@ Answer:`;
               documentId,
               vsId,
             });
-            try {
-              const summary = await this.summarizeWithOpenAIVectorStore(
-                vsId,
-                maxLength,
-                String(data?.title || "Document")
-              );
-              if (summary && summary.trim().length) return summary;
-            } catch (e) {
+            // Small retry loop to allow vector store indexing to settle for large files
+            let vsErr: any = null;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                const summary = await this.summarizeWithOpenAIVectorStore(
+                  vsId,
+                  maxLength,
+                  String(data?.title || "Document")
+                );
+                if (summary && summary.trim().length) return summary;
+              } catch (e) {
+                vsErr = e;
+                await new Promise((r) => setTimeout(r, 1500));
+              }
+            }
+            if (vsErr) {
               logger.warn(
                 "Vector store summarization failed, attempting Firestore raw content fallback",
-                e as any
+                vsErr as any
               );
               // Fallback to Firestore raw content if available
               let rawText: string = String(
                 data?.content?.raw || data?.content?.processed || ""
-              ).slice(0, 24000);
+              ).slice(0, 18000);
               // If no inline content, try transcript from Storage (e.g., YouTube)
               if (!rawText || rawText.length < 100) {
                 const transcriptPath = data?.metadata?.transcriptPath as
@@ -514,7 +530,7 @@ Answer:`;
                       .bucket()
                       .file(transcriptPath)
                       .download();
-                    rawText = buf.toString("utf-8").slice(0, 24000);
+                    rawText = buf.toString("utf-8").slice(0, 18000);
                   } catch (trErr) {
                     logger.warn(
                       "Transcript read failed for summary fallback",
@@ -563,7 +579,7 @@ Answer:`;
       const data = (snap.data() as any) || {};
       let rawText: string = String(
         data?.content?.raw || data?.content?.processed || data?.summary || ""
-      ).slice(0, 24000);
+      ).slice(0, 18000);
       // If still no content, try reading transcript stored in Storage (YouTube, audio, etc.)
       if (
         (!rawText || rawText.length < 100) &&
@@ -575,7 +591,7 @@ Answer:`;
             .bucket()
             .file(String(data.metadata.transcriptPath))
             .download();
-          rawText = buf.toString("utf-8").slice(0, 24000);
+          rawText = buf.toString("utf-8").slice(0, 18000);
         } catch (e) {
           logger.warn(
             "Transcript read failed for main summary fallback",

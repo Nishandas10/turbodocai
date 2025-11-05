@@ -122,8 +122,9 @@ export async function GET(req: NextRequest) {
         "x-content-type-options": "nosniff",
       },
     });
-  } catch (e: any) {
-    return new NextResponse(`Error: ${e?.message || "unknown"}`, {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "unknown";
+    return new NextResponse(`Error: ${message}`, {
       status: 500,
     });
   }

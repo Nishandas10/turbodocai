@@ -346,8 +346,8 @@ export const generateDocumentSummaryWithRetry = async (
   documentId: string,
   userId: string,
   maxLength: number = 350,
-  attempts: number = 5,
-  initialDelayMs: number = 800
+  attempts: number = 8,
+  initialDelayMs: number = 1600
 ): Promise<string> => {
   let delay = initialDelayMs;
   let last = "";

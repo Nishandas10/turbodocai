@@ -1,17 +1,23 @@
 "use client"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { X, Mic, Upload, ChevronRight, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { uploadAudioFile } from "@/lib/fileUploadService"
+import { waitAndGenerateSummary } from "@/lib/ragService"
 
 export default function AudioModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStatus, setProcessingStatus] = useState<string>("")
+  const [processingProgress, setProcessingProgress] = useState<number | null>(null)
+  const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
+  const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const { user } = useAuth()
@@ -63,10 +69,41 @@ export default function AudioModal(props: any) {
       })
 
       if (result.success) {
-        alert(`Audio uploaded successfully! Document ID: ${result.documentId}`)
-        console.log('Audio upload successful:', result)
-        setAudioFile(null) // Reset file selection
-        onClose()
+        // Begin optimistic processing and wait for summary then redirect
+        if (result.documentId) {
+          setIsProcessing(true)
+          setProcessingStatus('Processing: starting')
+          setOptimisticProgress(0)
+          setOptimisticTimerActive(true)
+          try {
+            await waitAndGenerateSummary(
+              result.documentId,
+              user.uid,
+              (status, progress) => {
+                const pct = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null
+                setProcessingProgress(pct)
+                setProcessingStatus(`Processing: ${status}`)
+              },
+              350
+            )
+            setProcessingProgress(100)
+            setProcessingStatus('Processed! Redirecting...')
+            setTimeout(() => {
+              onClose()
+              router.push(`/notes/${result.documentId}`)
+            }, 900)
+          } catch (e) {
+            console.error('Processing error:', e)
+            setProcessingStatus('Processing failed or timed out')
+            setOptimisticTimerActive(false)
+          } finally {
+            setIsProcessing(false)
+            setOptimisticTimerActive(false)
+          }
+        } else {
+          alert('Audio uploaded but missing document id')
+          onClose()
+        }
       } else {
         alert(`Upload failed: ${result.error}`)
         console.error('Audio upload failed:', result.error)
@@ -78,6 +115,31 @@ export default function AudioModal(props: any) {
       setIsUploading(false)
     }
   }
+
+  // Optimistic progress timer: smoothly advance up to 90%
+  useEffect(() => {
+    if (!optimisticTimerActive) return
+    let raf: number | null = null
+    let start: number | null = null
+    const cap = 90
+    const step = (ts: number) => {
+      if (start === null) start = ts
+      const elapsed = ts - start
+      const duration = 25000
+      const t = Math.min(1, elapsed / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = Math.min(cap, Math.round(eased * cap))
+      setOptimisticProgress((prev) => (next > prev ? next : prev))
+      if (next < cap && optimisticTimerActive) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => { if (raf) cancelAnimationFrame(raf) }
+  }, [optimisticTimerActive])
+
+  const displayProgress = useMemo(() => {
+    if (typeof processingProgress === 'number') return Math.max(0, Math.min(100, processingProgress))
+    return optimisticProgress
+  }, [processingProgress, optimisticProgress])
 
   if (!isOpen) return null
 
@@ -107,7 +169,7 @@ export default function AudioModal(props: any) {
           </Button>
           <div
             className={`border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 transition-colors ${
-              isUploading ? 'pointer-events-none opacity-50' : ''
+              isUploading || isProcessing ? 'pointer-events-none opacity-50' : ''
             }`}
             onClick={handleUploadClick}
             onDragOver={handleDragOver}
@@ -139,6 +201,17 @@ export default function AudioModal(props: any) {
                     </>
                   )}
                 </Button>
+              </div>
+            )}
+            {(isProcessing || processingStatus) && (
+              <div className="mt-3 p-3 rounded-md border border-border bg-muted/40 text-left">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-card-foreground">{processingStatus}</p>
+                  <span className="text-xs text-muted-foreground tabular-nums">{Math.round(displayProgress)}%</span>
+                </div>
+                <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                  <div className="h-full bg-blue-600 transition-[width] duration-300" style={{ width: `${Math.max(0, Math.min(100, displayProgress))}%` }} />
+                </div>
               </div>
             )}
           </div>

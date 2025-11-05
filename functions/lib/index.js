@@ -31,6 +31,45 @@ const app = (0, app_1.initializeApp)();
 const db = (0, firestore_2.getFirestore)(app);
 const storage = (0, storage_1.getStorage)();
 // Secrets: OpenAI API key is accessed via process.env.OPENAI_API_KEY (same as other functions)
+/**
+ * Transcribe an audio buffer using OpenAI. Prefers gpt-4o-mini-transcribe with fallback to whisper-1.
+ */
+async function transcribeAudioBuffer(buffer, fileName, mimeType) {
+    const apiKey = process.env.OPENAI_API_KEY || "";
+    if (!apiKey)
+        throw new Error("OPENAI_API_KEY is not set");
+    const openai = new openai_1.OpenAI({ apiKey });
+    const file = await (0, openai_1.toFile)(buffer, fileName || "audio.webm", {
+        type: mimeType || "audio/webm",
+    });
+    // Try gpt-4o-mini-transcribe first
+    try {
+        const res = await openai.audio.transcriptions.create({
+            file,
+            model: "gpt-4o-mini-transcribe",
+        });
+        const text = String((res === null || res === void 0 ? void 0 : res.text) || "").trim();
+        if (text)
+            return text;
+    }
+    catch (e) {
+        firebase_functions_1.logger.warn("gpt-4o-mini-transcribe failed; attempting whisper-1", e);
+    }
+    // Fallback to whisper-1 if available
+    try {
+        const res2 = await openai.audio.transcriptions.create({
+            file,
+            model: "whisper-1",
+        });
+        const text2 = String((res2 === null || res2 === void 0 ? void 0 : res2.text) || "").trim();
+        if (text2)
+            return text2;
+    }
+    catch (e2) {
+        firebase_functions_1.logger.error("whisper-1 transcription failed", e2);
+    }
+    throw new Error("Audio transcription returned empty result");
+}
 // Initialize services (they will be created when functions are called)
 const createServices = () => {
     return {
@@ -240,7 +279,7 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
  *   (OpenAI handles chunking + embeddings). No Pinecone is used anywhere.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -274,9 +313,14 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
         // Determine type early for branching
         const docType = String(documentData.type || "").toLowerCase();
         // Only proceed when we have a storage path, unless this is a website or youtube URL doc
-        if (!["website", "youtube"].includes(docType) &&
+        if (!["website", "youtube", "audio"].includes(docType) &&
             !((_h = documentData.metadata) === null || _h === void 0 ? void 0 : _h.storagePath)) {
             firebase_functions_1.logger.info(`Document ${documentId} doesn't have storagePath yet, will process when storage info is updated`);
+            return;
+        }
+        // For audio docs specifically, wait until storagePath is populated (creation fires before upload finishes)
+        if (docType === "audio" && !((_j = documentData.metadata) === null || _j === void 0 ? void 0 : _j.storagePath)) {
+            firebase_functions_1.logger.info(`Audio document ${documentId} has no storagePath yet, will retry on storagePath update`);
             return;
         }
         // Skip if already processed
@@ -315,7 +359,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
         let extractedText = "";
         if (docType === "website") {
             // Webpage extraction path: use metadata.url
-            const url = String(((_j = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _j === void 0 ? void 0 : _j.url) || ((_k = documentData === null || documentData === void 0 ? void 0 : documentData.content) === null || _k === void 0 ? void 0 : _k.raw) || "");
+            const url = String(((_k = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _k === void 0 ? void 0 : _k.url) || ((_l = documentData === null || documentData === void 0 ? void 0 : documentData.content) === null || _l === void 0 ? void 0 : _l.raw) || "");
             if (!url)
                 throw new Error("Website document missing URL");
             firebase_functions_1.logger.info("Extracting article from website URL...");
@@ -333,14 +377,14 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                         .doc(documentId)
                         .set({ title: String(result.title).slice(0, 140) }, { merge: true });
                 }
-                catch (_r) {
+                catch (_v) {
                     /* ignore */
                 }
             }
         }
         else if (docType === "youtube") {
             // YouTube transcript path: use metadata.url
-            const videoUrl = String(((_l = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _l === void 0 ? void 0 : _l.url) || ((_m = documentData === null || documentData === void 0 ? void 0 : documentData.content) === null || _m === void 0 ? void 0 : _m.raw) || "").trim();
+            const videoUrl = String(((_m = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _m === void 0 ? void 0 : _m.url) || ((_o = documentData === null || documentData === void 0 ? void 0 : documentData.content) === null || _o === void 0 ? void 0 : _o.raw) || "").trim();
             if (!videoUrl)
                 throw new Error("YouTube document missing URL");
             firebase_functions_1.logger.info("Fetching transcript via Transcript API...");
@@ -361,11 +405,36 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                             .doc(documentId)
                             .set({ title: String(apiTitle).slice(0, 140) }, { merge: true });
                     }
-                    catch (_s) {
+                    catch (_w) {
                         /* ignore */
                     }
                 }
             }
+        }
+        else if (docType === "audio") {
+            // Audio transcription path: download audio and transcribe via OpenAI
+            const storagePath = String(((_p = documentData.metadata) === null || _p === void 0 ? void 0 : _p.storagePath) || "");
+            if (!storagePath)
+                throw new Error("Audio document missing storagePath");
+            firebase_functions_1.logger.info("Downloading audio file from storage for transcription...");
+            const fileBuffer = await downloadFileFromStorage(storagePath);
+            // Update progress early
+            await db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(documentId)
+                .set({ processingStatus: "processing", processingProgress: 10 }, { merge: true });
+            // Determine filename and mime type hints
+            const fileName = String(((_q = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _q === void 0 ? void 0 : _q.fileName) || `${documentId}.webm`);
+            const mimeType = String(((_r = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _r === void 0 ? void 0 : _r.mimeType) || "audio/webm");
+            firebase_functions_1.logger.info("Transcribing audio via OpenAI", {
+                model: "gpt-4o-mini-transcribe",
+            });
+            const rawTranscript = await transcribeAudioBuffer(fileBuffer, fileName, mimeType);
+            // Clean text through TXT cleaner
+            const cleaned = await createServices().documentProcessor.extractTextFromTXT(Buffer.from(rawTranscript || "", "utf-8"));
+            extractedText = cleaned;
         }
         else {
             // File-based extraction path
@@ -386,8 +455,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 extractedText = await createServices().documentProcessor.extractTextFromPPTX(fileBuffer);
             }
             else if (docType === "text" ||
-                String(((_o = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _o === void 0 ? void 0 : _o.mimeType) || "").includes("text") ||
-                /\.txt$/i.test(String(((_p = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _p === void 0 ? void 0 : _p.fileName) || ""))) {
+                String(((_s = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _s === void 0 ? void 0 : _s.mimeType) || "").includes("text") ||
+                /\.txt$/i.test(String(((_t = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _t === void 0 ? void 0 : _t.fileName) || ""))) {
                 firebase_functions_1.logger.info("Extracting text from TXT...");
                 extractedText = await createServices().documentProcessor.extractTextFromTXT(fileBuffer);
             }
@@ -397,7 +466,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             }
         }
         if (!extractedText || extractedText.length < 10) {
-            throw new Error("No meaningful text extracted from PDF");
+            throw new Error("No meaningful text extracted from document");
         }
         // Guard against extremely large documents (hard cap 2.5M chars)
         const MAX_CHARS = 2500000;
@@ -409,7 +478,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.warn(`Document text truncated to ${MAX_CHARS} characters to conserve memory`);
         }
         // All supported types (pdf, docx, pptx, text, website, youtube): upload text to OpenAI Vector Store
-        if (["pdf", "docx", "pptx", "text", "website", "youtube"].includes(docType)) {
+        if (["pdf", "docx", "pptx", "text", "website", "youtube", "audio"].includes(docType)) {
             const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
             const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
             // Update progress early
@@ -420,13 +489,13 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 .doc(documentId)
                 .set({
                 processingStatus: "processing",
-                processingProgress: 20,
+                processingProgress: docType === "audio" ? 40 : 20,
             }, { merge: true });
             const vsUpload = await openaiVS.uploadTextAsDocument(workingText, {
                 userId,
                 documentId,
                 title: documentData.title,
-                fileName: (_q = documentData.metadata) === null || _q === void 0 ? void 0 : _q.fileName,
+                fileName: (_u = documentData.metadata) === null || _u === void 0 ? void 0 : _u.fileName,
             });
             // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
             const transcriptPath = `transcripts/${userId}/${documentId}.txt`;

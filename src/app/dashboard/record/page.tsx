@@ -15,8 +15,14 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import DashboardSidebar from "@/components/DashboardSidebar"
+import { useAuth } from "@/contexts/AuthContext"
+import { uploadRecordingFile } from "@/lib/fileUploadService"
+import { waitAndGenerateSummary } from "@/lib/ragService"
+import { useRouter } from "next/navigation"
 
 export default function RecordPage() {
+  const { user } = useAuth()
+  const router = useRouter()
   const [searchModalOpen, setSearchModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Array<{
@@ -28,11 +34,27 @@ export default function RecordPage() {
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
+  const [recordedDuration, setRecordedDuration] = useState<number | null>(null)
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStatus, setProcessingStatus] = useState<string>("")
+  const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
+  const [processingProgress, setProcessingProgress] = useState<number | null>(null)
+  const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
   const [selectedDevice, setSelectedDevice] = useState('')
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const chunksRef = useRef<BlobPart[]>([])
+
+  // Waveform visualizer refs
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const rafRef = useRef<number | null>(null)
 
   // Mock search results - in real app this would come from API
   const mockDocuments: Array<{
@@ -107,14 +129,90 @@ export default function RecordPage() {
       })
       streamRef.current = stream
       
-      const mediaRecorder = new MediaRecorder(stream)
+      const options: MediaRecorderOptions = {}
+      // Prefer webm/opus when available
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        options.mimeType = 'audio/webm;codecs=opus'
+      } else if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm')) {
+        options.mimeType = 'audio/webm'
+      }
+      const mediaRecorder = new MediaRecorder(stream, options)
       mediaRecorderRef.current = mediaRecorder
+      chunksRef.current = []
+
+      mediaRecorder.ondataavailable = (e: BlobEvent) => {
+        if (e.data && e.data.size > 0) {
+          chunksRef.current.push(e.data)
+        }
+      }
+
+      mediaRecorder.onstop = () => {
+        // Assemble blob
+        const mime = (options.mimeType as string) || 'audio/webm'
+        const blob = new Blob(chunksRef.current, { type: mime })
+        setRecordedBlob(blob)
+        setRecordedDuration(recordingTime) // preserve last duration
+        chunksRef.current = []
+      }
       
       mediaRecorder.start()
       setIsRecording(true)
       setIsPaused(false)
       setRecordingTime(0)
+      setRecordedBlob(null)
+      setRecordedDuration(null)
       
+      // Setup waveform visualizer
+      try {
+        const W = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }
+        const AudioContextClass = W.AudioContext || W.webkitAudioContext
+        if (!AudioContextClass) throw new Error('Web Audio API is not supported in this browser')
+        const audioContext = new AudioContextClass()
+        audioContextRef.current = audioContext
+        const source = audioContext.createMediaStreamSource(stream)
+        sourceRef.current = source
+        const analyser = audioContext.createAnalyser()
+        analyser.fftSize = 2048
+        analyserRef.current = analyser
+        source.connect(analyser)
+
+        const draw = () => {
+          const canvas = canvasRef.current
+          const analyserNode = analyserRef.current
+          if (!canvas || !analyserNode) return
+          const ctx = canvas.getContext('2d')
+          if (!ctx) return
+
+          const WIDTH = canvas.width
+          const HEIGHT = canvas.height
+          ctx.clearRect(0, 0, WIDTH, HEIGHT)
+
+          const bufferLength = analyserNode.fftSize
+          const dataArray = new Uint8Array(bufferLength)
+          analyserNode.getByteTimeDomainData(dataArray)
+
+          ctx.lineWidth = 2
+          ctx.strokeStyle = '#a78bfa' // purple-400
+          ctx.beginPath()
+
+          const sliceWidth = WIDTH / bufferLength
+          let x = 0
+          for (let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0
+            const y = (v * HEIGHT) / 2
+            if (i === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+            x += sliceWidth
+          }
+          ctx.lineTo(WIDTH, HEIGHT / 2)
+          ctx.stroke()
+
+          rafRef.current = requestAnimationFrame(draw)
+        }
+        rafRef.current = requestAnimationFrame(draw)
+      } catch (e) {
+        console.warn('Audio visualizer setup failed:', e)
+      }
       console.log('Recording started')
     } catch (error) {
       console.error('Error starting recording:', error)
@@ -141,7 +239,20 @@ export default function RecordPage() {
       }
       setIsRecording(false)
       setIsPaused(false)
-      setRecordingTime(0)
+      // Do not reset recordingTime immediately; onstop handler will capture it
+      // Cleanup audio context/visualizer
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+      try {
+        sourceRef.current?.disconnect()
+        analyserRef.current?.disconnect()
+        audioContextRef.current?.close()
+      } catch {}
+      sourceRef.current = null
+      analyserRef.current = null
+      audioContextRef.current = null
       console.log('Recording stopped')
     }
   }
@@ -152,6 +263,31 @@ export default function RecordPage() {
     return `${mins}m ${secs}s`
   }
 
+  // Optimistic progress timer similar to DocumentUploadModal
+  useEffect(() => {
+    if (!optimisticTimerActive) return
+    let raf: number | null = null
+    let start: number | null = null
+    const cap = 90
+    const step = (ts: number) => {
+      if (start === null) start = ts
+      const elapsed = ts - start
+      const duration = 25000
+      const t = Math.min(1, elapsed / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = Math.min(cap, Math.round(eased * cap))
+      setOptimisticProgress((prev) => (next > prev ? next : prev))
+      if (next < cap && optimisticTimerActive) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => { if (raf) cancelAnimationFrame(raf) }
+  }, [optimisticTimerActive])
+
+  const displayProgress = (() => {
+    if (typeof processingProgress === 'number') return Math.max(0, Math.min(100, processingProgress))
+    return optimisticProgress
+  })()
+
   return (
     <ProtectedRoute>
       <div className="h-screen bg-background flex overflow-hidden">
@@ -159,8 +295,7 @@ export default function RecordPage() {
   <DashboardSidebar onSearchClick={openSearchModal} />
 
         {/* Main Content */}
-        <div className="flex-1 p-8 overflow-y-auto">
-          {/* Header */}
+  <div className="flex-1 p-8 overflow-y-auto">
           <div className="mb-8">
             <Link 
               href="/dashboard"
@@ -195,18 +330,25 @@ export default function RecordPage() {
 
             {/* Audio Waveform Display */}
             <div className="mb-6">
-              <div className="w-full h-48 bg-muted rounded-lg border border-border flex items-center justify-center">
+              <div className="w-full h-48 bg-muted rounded-lg border border-border flex items-center justify-center overflow-hidden">
                 {isRecording ? (
-                  <div className="text-center">
-                    <div className="w-32 h-16 bg-purple-600/20 rounded-lg flex items-center justify-center mb-2">
-                      <div className="w-1 h-8 bg-purple-500 rounded-full animate-pulse"></div>
-                    </div>
-                    <p className="text-sm text-muted-foreground">Recording in progress...</p>
+                  <div className="relative w-full h-full">
+                    <canvas ref={canvasRef} className="w-full h-full" width={800} height={192} />
+                    <div className="absolute top-2 left-2 text-sm text-muted-foreground bg-background/60 px-2 py-1 rounded">Recording...</div>
                   </div>
                 ) : (
-                  <div className="text-center text-muted-foreground">
-                    <Mic className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>Click Start Recording to begin</p>
+                  <div className="text-center text-muted-foreground w-full">
+                    {recordedBlob ? (
+                      <>
+                        <Mic className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p>Ready to upload {recordedDuration ?? 0}s recording</p>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p>Click Start Recording to begin</p>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -215,13 +357,97 @@ export default function RecordPage() {
             {/* Control Buttons */}
             <div className="flex space-x-4 mb-6">
               {!isRecording ? (
-                <Button 
-                  onClick={startRecording}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-4 text-lg font-medium"
-                >
-                  <Mic className="h-5 w-5 mr-2" />
-                  Start Recording
-                </Button>
+                recordedBlob ? (
+                  <>
+                    <Button
+                      onClick={startRecording}
+                      variant="outline"
+                      className="flex-1 bg-muted border-border text-foreground hover:bg-muted/80 py-4 text-lg font-medium"
+                      disabled={isUploading}
+                    >
+                      <Mic className="h-5 w-5 mr-2" />
+                      Record Again
+                    </Button>
+                    <Button
+                      onClick={async () => {
+                        if (!user) return alert('Please sign in to upload')
+                        if (!recordedBlob) return
+                        const duration = recordedDuration ?? 0
+                        if (duration < 30) {
+                          alert('Minimum audio length is 30 seconds to upload')
+                          return
+                        }
+                        try {
+                          setIsUploading(true)
+                          const uid = user.uid
+                          const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+                          const fileName = `recording-${timestamp}.webm`
+                          const mime = recordedBlob.type || 'audio/webm'
+                          const file = new File([recordedBlob], fileName, { type: mime })
+
+                          // Create Firestore doc and upload recording to storage
+                          const uploadRes = await uploadRecordingFile(file, uid, {
+                            title: fileName.replace(/\.[^/.]+$/, ''),
+                            tags: ['recording', 'audio']
+                          })
+                          if (!uploadRes.success || !uploadRes.documentId) {
+                            throw new Error(uploadRes.error || 'Upload failed')
+                          }
+
+                          // Show optimistic processing and wait for summary, then redirect to notes
+                          setIsProcessing(true)
+                          setProcessingStatus('Processing: starting')
+                          setOptimisticProgress(0)
+                          setOptimisticTimerActive(true)
+                          try {
+                            await waitAndGenerateSummary(
+                              uploadRes.documentId,
+                              uid,
+                              (status, progress) => {
+                                const pct = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null
+                                setProcessingProgress(pct)
+                                setProcessingStatus(`Processing: ${status}`)
+                              },
+                              350
+                            )
+                            setProcessingProgress(100)
+                            setProcessingStatus('Processed! Redirecting...')
+                            setTimeout(() => {
+                              router.push(`/notes/${uploadRes.documentId}`)
+                            }, 800)
+                          } catch (e) {
+                            console.error('Processing failed:', e)
+                            setProcessingStatus('Processing failed or timed out')
+                          } finally {
+                            setIsProcessing(false)
+                            setOptimisticTimerActive(false)
+                          }
+                          // Reset state
+                          setRecordedBlob(null)
+                          setRecordedDuration(null)
+                          setRecordingTime(0)
+                        } catch (e) {
+                          console.error(e)
+                          alert('Upload failed, please try again')
+                        } finally {
+                          setIsUploading(false)
+                        }
+                      }}
+                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-4 text-lg font-medium disabled:opacity-60"
+                      disabled={isUploading || (recordedDuration ?? 0) < 30}
+                    >
+                      {isUploading ? 'Uploading…' : 'Upload Audio'}
+                    </Button>
+                  </>
+                ) : (
+                  <Button 
+                    onClick={startRecording}
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-4 text-lg font-medium"
+                  >
+                    <Mic className="h-5 w-5 mr-2" />
+                    Start Recording
+                  </Button>
+                )
               ) : (
                 <>
                   <Button 
@@ -244,12 +470,31 @@ export default function RecordPage() {
             </div>
 
             {/* Recording Timer */}
-            {isRecording && (
+            {(isRecording || recordedBlob) && (
               <div className="text-center">
                 <p className="text-muted-foreground">
-                  Recording <span className="inline-block w-2 h-2 bg-red-500 rounded-full mx-2"></span>
-                  <span className="text-red-500 font-semibold">{formatTime(recordingTime)}</span>
+                  {isRecording ? (
+                    <>
+                      Recording <span className="inline-block w-2 h-2 bg-red-500 rounded-full mx-2"></span>
+                      <span className="text-red-500 font-semibold">{formatTime(recordingTime)}</span>
+                    </>
+                  ) : (
+                    <>
+                      Last recording: <span className="font-semibold">{formatTime(recordedDuration ?? 0)}</span> · Minimum 30s to upload
+                    </>
+                  )}
                 </p>
+                {(isProcessing || processingStatus) && (
+                  <div className="mt-3 p-3 rounded-md border border-border bg-muted/40 max-w-xl mx-auto text-left">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-card-foreground">{processingStatus}</p>
+                      <span className="text-xs text-muted-foreground tabular-nums">{Math.round(displayProgress)}%</span>
+                    </div>
+                    <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                      <div className="h-full bg-blue-600 transition-[width] duration-300" style={{ width: `${Math.max(0, Math.min(100, displayProgress))}%` }} />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

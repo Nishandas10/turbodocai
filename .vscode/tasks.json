@@ -181,6 +181,17 @@
 				"build"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Install functions deps and build (chunking)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"functions",
+				"install"
+			],
+			"group": "build"
 		}
 	]
 }

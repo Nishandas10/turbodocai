@@ -5,7 +5,7 @@ import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
-import { OpenAI } from "openai";
+import { OpenAI, toFile } from "openai";
 import { randomUUID } from "crypto";
 import {
   DocumentProcessor,
@@ -30,6 +30,48 @@ const db = getFirestore(app);
 const storage = getStorage();
 
 // Secrets: OpenAI API key is accessed via process.env.OPENAI_API_KEY (same as other functions)
+
+/**
+ * Transcribe an audio buffer using OpenAI. Prefers gpt-4o-mini-transcribe with fallback to whisper-1.
+ */
+async function transcribeAudioBuffer(
+  buffer: Buffer,
+  fileName: string,
+  mimeType?: string
+): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY || "";
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
+  const openai = new OpenAI({ apiKey });
+  const file = await toFile(buffer, fileName || "audio.webm", {
+    type: mimeType || "audio/webm",
+  });
+  // Try gpt-4o-mini-transcribe first
+  try {
+    const res: any = await (openai as any).audio.transcriptions.create({
+      file,
+      model: "gpt-4o-mini-transcribe",
+    });
+    const text = String((res?.text as string) || "").trim();
+    if (text) return text;
+  } catch (e) {
+    logger.warn(
+      "gpt-4o-mini-transcribe failed; attempting whisper-1",
+      e as any
+    );
+  }
+  // Fallback to whisper-1 if available
+  try {
+    const res2: any = await (openai as any).audio.transcriptions.create({
+      file,
+      model: "whisper-1",
+    });
+    const text2 = String((res2?.text as string) || "").trim();
+    if (text2) return text2;
+  } catch (e2) {
+    logger.error("whisper-1 transcription failed", e2 as any);
+  }
+  throw new Error("Audio transcription returned empty result");
+}
 
 // Initialize services (they will be created when functions are called)
 const createServices = () => {
@@ -313,11 +355,19 @@ export const processDocument = onDocumentWritten(
 
       // Only proceed when we have a storage path, unless this is a website or youtube URL doc
       if (
-        !["website", "youtube"].includes(docType) &&
+        !["website", "youtube", "audio"].includes(docType) &&
         !documentData.metadata?.storagePath
       ) {
         logger.info(
           `Document ${documentId} doesn't have storagePath yet, will process when storage info is updated`
+        );
+        return;
+      }
+
+      // For audio docs specifically, wait until storagePath is populated (creation fires before upload finishes)
+      if (docType === "audio" && !documentData.metadata?.storagePath) {
+        logger.info(
+          `Audio document ${documentId} has no storagePath yet, will retry on storagePath update`
         );
         return;
       }
@@ -432,6 +482,46 @@ export const processDocument = onDocumentWritten(
             }
           }
         }
+      } else if (docType === "audio") {
+        // Audio transcription path: download audio and transcribe via OpenAI
+        const storagePath = String(documentData.metadata?.storagePath || "");
+        if (!storagePath) throw new Error("Audio document missing storagePath");
+        logger.info("Downloading audio file from storage for transcription...");
+        const fileBuffer = await downloadFileFromStorage(storagePath);
+
+        // Update progress early
+        await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .set(
+            { processingStatus: "processing", processingProgress: 10 },
+            { merge: true }
+          );
+
+        // Determine filename and mime type hints
+        const fileName = String(
+          documentData?.metadata?.fileName || `${documentId}.webm`
+        );
+        const mimeType = String(
+          documentData?.metadata?.mimeType || "audio/webm"
+        );
+
+        logger.info("Transcribing audio via OpenAI", {
+          model: "gpt-4o-mini-transcribe",
+        });
+        const rawTranscript = await transcribeAudioBuffer(
+          fileBuffer,
+          fileName,
+          mimeType
+        );
+
+        // Clean text through TXT cleaner
+        const cleaned = await (
+          createServices().documentProcessor as any
+        ).extractTextFromTXT(Buffer.from(rawTranscript || "", "utf-8"));
+        extractedText = cleaned;
       } else {
         // File-based extraction path
         logger.info("Downloading file from storage...");
@@ -472,7 +562,7 @@ export const processDocument = onDocumentWritten(
       }
 
       if (!extractedText || extractedText.length < 10) {
-        throw new Error("No meaningful text extracted from PDF");
+        throw new Error("No meaningful text extracted from document");
       }
 
       // Guard against extremely large documents (hard cap 2.5M chars)
@@ -489,7 +579,9 @@ export const processDocument = onDocumentWritten(
 
       // All supported types (pdf, docx, pptx, text, website, youtube): upload text to OpenAI Vector Store
       if (
-        ["pdf", "docx", "pptx", "text", "website", "youtube"].includes(docType)
+        ["pdf", "docx", "pptx", "text", "website", "youtube", "audio"].includes(
+          docType
+        )
       ) {
         const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
         const openaiVS = new OpenAIVectorStoreService(vsId);
@@ -502,7 +594,7 @@ export const processDocument = onDocumentWritten(
           .set(
             {
               processingStatus: "processing",
-              processingProgress: 20,
+              processingProgress: docType === "audio" ? 40 : 20,
             },
             { merge: true }
           );
