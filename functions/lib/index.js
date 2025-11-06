@@ -279,7 +279,7 @@ exports.resolveUserByEmail = (0, https_1.onCall)({ enforceAppCheck: false }, asy
  *   (OpenAI handles chunking + embeddings). No Pinecone is used anywhere.
  */
 exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}/userDocuments/{documentId}", async (event) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7;
     const afterSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.after;
     const beforeSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.before;
     const documentData = afterSnap === null || afterSnap === void 0 ? void 0 : afterSnap.data();
@@ -377,7 +377,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                         .doc(documentId)
                         .set({ title: String(result.title).slice(0, 140) }, { merge: true });
                 }
-                catch (_v) {
+                catch (_8) {
                     /* ignore */
                 }
             }
@@ -405,7 +405,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                             .doc(documentId)
                             .set({ title: String(apiTitle).slice(0, 140) }, { merge: true });
                     }
-                    catch (_w) {
+                    catch (_9) {
                         /* ignore */
                     }
                 }
@@ -436,6 +436,83 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             const cleaned = await createServices().documentProcessor.extractTextFromTXT(Buffer.from(rawTranscript || "", "utf-8"));
             extractedText = cleaned;
         }
+        else if (docType === "image") {
+            // OCR path using OpenAI Vision (gpt-4o-mini)
+            const storagePath = String(((_s = documentData.metadata) === null || _s === void 0 ? void 0 : _s.storagePath) || "");
+            if (!storagePath)
+                throw new Error("Image document missing storagePath");
+            firebase_functions_1.logger.info("Downloading image file from storage for OCR...");
+            const fileBuffer = await downloadFileFromStorage(storagePath);
+            // Progress update
+            await db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(documentId)
+                .set({ processingStatus: "processing", processingProgress: 20 }, { merge: true });
+            try {
+                const apiKey = process.env.OPENAI_API_KEY || "";
+                if (!apiKey)
+                    throw new Error("OPENAI_API_KEY is not set");
+                const openai = new openai_1.OpenAI({ apiKey });
+                const mimeType = String(((_t = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _t === void 0 ? void 0 : _t.mimeType) || "image/png");
+                const base64 = fileBuffer.toString("base64");
+                const dataUrl = `data:${mimeType};base64,${base64}`;
+                // Use Responses API for vision input
+                const prompt = "Extract all legible text from the image. Return plain text only, preserving natural reading order where possible.";
+                let ocrText = "";
+                try {
+                    const resp = await openai.responses.create({
+                        model: "gpt-4o-mini",
+                        input: [
+                            {
+                                role: "user",
+                                content: [
+                                    { type: "input_text", text: prompt },
+                                    { type: "input_image", image_url: dataUrl },
+                                ],
+                            },
+                        ],
+                    });
+                    ocrText =
+                        (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
+                            ((_x = (_w = (_v = (_u = resp === null || resp === void 0 ? void 0 : resp.output) === null || _u === void 0 ? void 0 : _u[0]) === null || _v === void 0 ? void 0 : _v.content) === null || _w === void 0 ? void 0 : _w[0]) === null || _x === void 0 ? void 0 : _x.text) ||
+                            ((_1 = (_0 = (_z = (_y = resp === null || resp === void 0 ? void 0 : resp.data) === null || _y === void 0 ? void 0 : _y[0]) === null || _z === void 0 ? void 0 : _z.content) === null || _0 === void 0 ? void 0 : _0[0]) === null || _1 === void 0 ? void 0 : _1.text) ||
+                            "";
+                }
+                catch (respErr) {
+                    firebase_functions_1.logger.warn("Responses vision OCR failed; trying chat fallback", respErr);
+                    try {
+                        const completion = await openai.chat.completions.create({
+                            model: "gpt-4o-mini",
+                            messages: [
+                                {
+                                    role: "user",
+                                    content: [
+                                        { type: "text", text: prompt },
+                                        { type: "image_url", image_url: { url: dataUrl } },
+                                    ],
+                                },
+                            ],
+                            max_tokens: 1200,
+                            temperature: 0.0,
+                        });
+                        ocrText = ((_4 = (_3 = (_2 = completion.choices) === null || _2 === void 0 ? void 0 : _2[0]) === null || _3 === void 0 ? void 0 : _3.message) === null || _4 === void 0 ? void 0 : _4.content) || "";
+                    }
+                    catch (chatErr) {
+                        firebase_functions_1.logger.error("OpenAI vision OCR failed", chatErr);
+                        throw chatErr;
+                    }
+                }
+                // Clean through TXT pipeline for normalization
+                const cleaned = await createServices().documentProcessor.extractTextFromTXT(Buffer.from(String(ocrText || ""), "utf-8"));
+                extractedText = cleaned;
+            }
+            catch (e) {
+                firebase_functions_1.logger.error("Image OCR pipeline failed", e);
+                throw new Error("Failed to extract text from image");
+            }
+        }
         else {
             // File-based extraction path
             firebase_functions_1.logger.info("Downloading file from storage...");
@@ -455,8 +532,8 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 extractedText = await createServices().documentProcessor.extractTextFromPPTX(fileBuffer);
             }
             else if (docType === "text" ||
-                String(((_s = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _s === void 0 ? void 0 : _s.mimeType) || "").includes("text") ||
-                /\.txt$/i.test(String(((_t = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _t === void 0 ? void 0 : _t.fileName) || ""))) {
+                String(((_5 = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _5 === void 0 ? void 0 : _5.mimeType) || "").includes("text") ||
+                /\.txt$/i.test(String(((_6 = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _6 === void 0 ? void 0 : _6.fileName) || ""))) {
                 firebase_functions_1.logger.info("Extracting text from TXT...");
                 extractedText = await createServices().documentProcessor.extractTextFromTXT(fileBuffer);
             }
@@ -478,7 +555,16 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.warn(`Document text truncated to ${MAX_CHARS} characters to conserve memory`);
         }
         // All supported types (pdf, docx, pptx, text, website, youtube): upload text to OpenAI Vector Store
-        if (["pdf", "docx", "pptx", "text", "website", "youtube", "audio"].includes(docType)) {
+        if ([
+            "pdf",
+            "docx",
+            "pptx",
+            "text",
+            "website",
+            "youtube",
+            "audio",
+            "image",
+        ].includes(docType)) {
             const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
             const openaiVS = new services_1.OpenAIVectorStoreService(vsId);
             // Update progress early
@@ -495,7 +581,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 userId,
                 documentId,
                 title: documentData.title,
-                fileName: (_u = documentData.metadata) === null || _u === void 0 ? void 0 : _u.fileName,
+                fileName: (_7 = documentData.metadata) === null || _7 === void 0 ? void 0 : _7.fileName,
             });
             // Persist the full raw transcript to Cloud Storage to avoid Firestore doc size limits
             const transcriptPath = `transcripts/${userId}/${documentId}.txt`;

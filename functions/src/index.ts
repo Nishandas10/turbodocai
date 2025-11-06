@@ -522,6 +522,92 @@ export const processDocument = onDocumentWritten(
           createServices().documentProcessor as any
         ).extractTextFromTXT(Buffer.from(rawTranscript || "", "utf-8"));
         extractedText = cleaned;
+      } else if (docType === "image") {
+        // OCR path using OpenAI Vision (gpt-4o-mini)
+        const storagePath = String(documentData.metadata?.storagePath || "");
+        if (!storagePath) throw new Error("Image document missing storagePath");
+        logger.info("Downloading image file from storage for OCR...");
+        const fileBuffer = await downloadFileFromStorage(storagePath);
+
+        // Progress update
+        await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .set(
+            { processingStatus: "processing", processingProgress: 20 },
+            { merge: true }
+          );
+
+        try {
+          const apiKey = process.env.OPENAI_API_KEY || "";
+          if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
+          const openai = new OpenAI({ apiKey });
+          const mimeType = String(
+            documentData?.metadata?.mimeType || "image/png"
+          );
+          const base64 = fileBuffer.toString("base64");
+          const dataUrl = `data:${mimeType};base64,${base64}`;
+
+          // Use Responses API for vision input
+          const prompt =
+            "Extract all legible text from the image. Return plain text only, preserving natural reading order where possible.";
+          let ocrText = "";
+          try {
+            const resp: any = await (openai as any).responses.create({
+              model: "gpt-4o-mini",
+              input: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "input_text", text: prompt },
+                    { type: "input_image", image_url: dataUrl },
+                  ],
+                },
+              ],
+            });
+            ocrText =
+              resp?.output_text ||
+              resp?.output?.[0]?.content?.[0]?.text ||
+              resp?.data?.[0]?.content?.[0]?.text ||
+              "";
+          } catch (respErr) {
+            logger.warn(
+              "Responses vision OCR failed; trying chat fallback",
+              respErr
+            );
+            try {
+              const completion = await openai.chat.completions.create({
+                model: "gpt-4o-mini" as any,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      { type: "text", text: prompt } as any,
+                      { type: "image_url", image_url: { url: dataUrl } } as any,
+                    ],
+                  } as any,
+                ],
+                max_tokens: 1200,
+                temperature: 0.0,
+              } as any);
+              ocrText = completion.choices?.[0]?.message?.content || "";
+            } catch (chatErr) {
+              logger.error("OpenAI vision OCR failed", chatErr as any);
+              throw chatErr;
+            }
+          }
+
+          // Clean through TXT pipeline for normalization
+          const cleaned = await (
+            createServices().documentProcessor as any
+          ).extractTextFromTXT(Buffer.from(String(ocrText || ""), "utf-8"));
+          extractedText = cleaned;
+        } catch (e) {
+          logger.error("Image OCR pipeline failed", e as any);
+          throw new Error("Failed to extract text from image");
+        }
       } else {
         // File-based extraction path
         logger.info("Downloading file from storage...");
@@ -579,9 +665,16 @@ export const processDocument = onDocumentWritten(
 
       // All supported types (pdf, docx, pptx, text, website, youtube): upload text to OpenAI Vector Store
       if (
-        ["pdf", "docx", "pptx", "text", "website", "youtube", "audio"].includes(
-          docType
-        )
+        [
+          "pdf",
+          "docx",
+          "pptx",
+          "text",
+          "website",
+          "youtube",
+          "audio",
+          "image",
+        ].includes(docType)
       ) {
         const vsId = process.env.OPENAI_VECTOR_STORE_ID || "";
         const openaiVS = new OpenAIVectorStoreService(vsId);

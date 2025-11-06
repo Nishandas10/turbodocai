@@ -1,22 +1,72 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { ChevronLeft, Loader2 } from "lucide-react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { ChevronLeft, Loader2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
-import { uploadCameraSnapshot } from "@/lib/fileUploadService"
+import { uploadCameraSnapshot, uploadImageFile } from "@/lib/fileUploadService"
+import { waitAndGenerateSummary } from "@/lib/ragService"
+import { useRouter } from "next/navigation"
 
 interface CameraModalProps {
   isOpen: boolean
-  onClose: () => void
+  onClose?: () => void
 }
 
 export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStatus, setProcessingStatus] = useState<string>("")
+  const [processingProgress, setProcessingProgress] = useState<number | null>(null)
+  const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
+  const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const onCloseRef = useRef<(() => void) | undefined>(onClose)
   const { user } = useAuth()
+  const router = useRouter()
+
+  // Keep latest onClose without forcing re-renders
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+
+  const openCamera = useCallback(async () => {
+    try {
+      // Prevent reopening if we already have an active stream
+      if (streamRef.current && streamRef.current.active) {
+        return
+      }
+      console.log('Requesting camera access...')
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment', // Use back camera by default
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      })
+      console.log('Camera stream obtained:', stream)
+      streamRef.current = stream
+      setCameraStream(stream)
+    } catch (error) {
+      console.error('Error accessing camera:', error)
+      alert('Unable to access camera. Please check permissions.')
+      try { onCloseRef.current?.() } catch {}
+    }
+  }, [])
+
+  const closeCamera = useCallback(() => {
+    const s = streamRef.current
+    if (s) {
+      s.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+    }
+    setCameraStream(null)
+    setCapturedImage(null)
+  }, [])
 
   useEffect(() => {
     if (isOpen) {
@@ -24,35 +74,22 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
     } else {
       closeCamera()
     }
-  }, [isOpen])
+  }, [isOpen, openCamera, closeCamera])
 
   // Additional effect to ensure video element gets the stream
   useEffect(() => {
-    if (videoRef.current && cameraStream) {
-      console.log('Setting video srcObject and playing...')
-      videoRef.current.srcObject = cameraStream
-      videoRef.current.play().catch(console.error)
+    const video = videoRef.current
+    if (video && cameraStream) {
+      if (video.srcObject !== cameraStream) {
+        console.log('Setting video srcObject and playing...')
+        video.srcObject = cameraStream
+        // Calling play() can throw if another set happens; guard and ignore AbortError
+        video.play().catch((err) => {
+          if (err?.name !== 'AbortError') console.error(err)
+        })
+      }
     }
   }, [cameraStream])
-
-  const openCamera = async () => {
-    try {
-      console.log('Requesting camera access...')
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode: 'environment', // Use back camera by default
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        } 
-      })
-      console.log('Camera stream obtained:', stream)
-      setCameraStream(stream)
-    } catch (error) {
-      console.error('Error accessing camera:', error)
-      alert('Unable to access camera. Please check permissions.')
-      onClose()
-    }
-  }
 
   const captureImage = () => {
     if (cameraStream && videoRef.current) {
@@ -70,17 +107,9 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
     }
   }
 
-  const closeCamera = () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop())
-      setCameraStream(null)
-    }
-    setCapturedImage(null)
-  }
-
   const handleClose = () => {
     closeCamera()
-    onClose()
+    onClose?.()
   }
 
   const retakePhoto = () => {
@@ -98,9 +127,41 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
       })
 
       if (result.success) {
-        alert(`Photo uploaded successfully! Document ID: ${result.documentId}`)
-        console.log('Photo upload successful:', result)
-        handleClose()
+        // Begin optimistic processing and redirect on completion
+        if (result.documentId) {
+          setIsProcessing(true)
+          setProcessingStatus('Processing: starting')
+          setOptimisticProgress(0)
+          setOptimisticTimerActive(true)
+          try {
+            await waitAndGenerateSummary(
+              result.documentId,
+              user.uid,
+              (status, progress) => {
+                const pct = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null
+                setProcessingProgress(pct)
+                setProcessingStatus(`Processing: ${status}`)
+              },
+              350
+            )
+            setProcessingProgress(100)
+            setProcessingStatus('Processed! Redirecting...')
+            setTimeout(() => {
+              handleClose()
+              router.push(`/notes/${result.documentId}`)
+            }, 900)
+          } catch (e) {
+            console.error('Processing error:', e)
+            setProcessingStatus('Processing failed or timed out')
+            setOptimisticTimerActive(false)
+          } finally {
+            setIsProcessing(false)
+            setOptimisticTimerActive(false)
+          }
+        } else {
+          alert('Image uploaded but missing document id')
+          handleClose()
+        }
       } else {
         alert(`Upload failed: ${result.error}`)
         console.error('Photo upload failed:', result.error)
@@ -112,6 +173,98 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
       setIsUploading(false)
     }
   }
+
+  // File upload handlers
+  const handleFileClick = () => {
+    if (!isUploading && !imageFile) fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (f && f.type.startsWith('image/')) {
+      setImageFile(f)
+    }
+  }
+
+  const handleImageUpload = async () => {
+    if (!imageFile || !user?.uid || isUploading) return
+    setIsUploading(true)
+    try {
+      const result = await uploadImageFile(imageFile, user.uid, {
+        title: imageFile.name.replace(/\.[^/.]+$/, ''),
+        tags: ['image', 'uploaded']
+      })
+      if (result.success) {
+        if (result.documentId) {
+          setIsProcessing(true)
+          setProcessingStatus('Processing: starting')
+          setOptimisticProgress(0)
+          setOptimisticTimerActive(true)
+          try {
+            await waitAndGenerateSummary(
+              result.documentId,
+              user.uid,
+              (status, progress) => {
+                const pct = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null
+                setProcessingProgress(pct)
+                setProcessingStatus(`Processing: ${status}`)
+              },
+              350
+            )
+            setProcessingProgress(100)
+            setProcessingStatus('Processed! Redirecting...')
+            setTimeout(() => {
+              handleClose()
+              router.push(`/notes/${result.documentId}`)
+            }, 900)
+          } catch (e) {
+            console.error('Processing error:', e)
+            setProcessingStatus('Processing failed or timed out')
+            setOptimisticTimerActive(false)
+          } finally {
+            setIsProcessing(false)
+            setOptimisticTimerActive(false)
+          }
+        } else {
+          alert('Image uploaded but missing document id')
+          handleClose()
+        }
+      } else {
+        alert(`Upload failed: ${result.error}`)
+        console.error('Image upload failed:', result.error)
+      }
+    } catch (error) {
+      console.error('Image upload error:', error)
+      alert('Image upload failed. Please try again.')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  // Optimistic progress timer: smoothly advance up to 90%
+  useEffect(() => {
+    if (!optimisticTimerActive) return
+    let raf: number | null = null
+    let start: number | null = null
+    const cap = 90
+    const step = (ts: number) => {
+      if (start === null) start = ts
+      const elapsed = ts - start
+      const duration = 25000
+      const t = Math.min(1, elapsed / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = Math.min(cap, Math.round(eased * cap))
+      setOptimisticProgress((prev) => (next > prev ? next : prev))
+      if (next < cap && optimisticTimerActive) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => { if (raf) cancelAnimationFrame(raf) }
+  }, [optimisticTimerActive])
+
+  const displayProgress = useMemo(() => {
+    if (typeof processingProgress === 'number') return Math.max(0, Math.min(100, processingProgress))
+    return optimisticProgress
+  }, [processingProgress, optimisticProgress])
 
   if (!isOpen) return null
 
@@ -165,10 +318,12 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
             </div>
           ) : (
             <div className="text-center">
-              <img 
-                src={capturedImage} 
-                alt="Captured" 
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={capturedImage || ''}
+                alt="Captured"
                 className="w-full h-64 object-cover rounded-lg mb-4"
+                loading="lazy"
               />
               <div className="flex space-x-3 justify-center">
                 <Button 
@@ -193,8 +348,59 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
                   )}
                 </Button>
               </div>
+              {(isProcessing || processingStatus) && (
+                <div className="mt-4 p-3 rounded-md border border-border bg-muted/40 text-left">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-card-foreground">{processingStatus}</p>
+                    <span className="text-xs text-muted-foreground tabular-nums">{Math.round(displayProgress)}%</span>
+                  </div>
+                  <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                    <div className="h-full bg-blue-600 transition-[width] duration-300" style={{ width: `${Math.max(0, Math.min(100, displayProgress))}%` }} />
+                  </div>
+                </div>
+              )}
             </div>
           )}
+          {/* Upload from device */}
+          <div className={`mt-4 border-2 border-dashed border-border rounded-lg p-6 text-center ${isUploading || isProcessing ? 'pointer-events-none opacity-50' : ''}`}>
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+            <Upload className="h-7 w-7 text-muted-foreground mx-auto mb-2" />
+            <p className="text-sm text-card-foreground">Or upload an image from your device</p>
+            {!imageFile ? (
+              <Button onClick={handleFileClick} variant="outline" className="mt-3">
+                Choose Image
+              </Button>
+            ) : (
+              <div className="mt-3">
+                <p className="text-blue-500 text-sm">Selected: {imageFile.name}</p>
+                <p className="text-xs text-muted-foreground mt-1">Size: {(imageFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                <Button onClick={handleImageUpload} disabled={isUploading} className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed">
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Image
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+            {(isProcessing || processingStatus) && (
+              <div className="mt-3 p-3 rounded-md border border-border bg-muted/40 text-left">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-card-foreground">{processingStatus}</p>
+                  <span className="text-xs text-muted-foreground tabular-nums">{Math.round(displayProgress)}%</span>
+                </div>
+                <div className="mt-2 h-2 rounded bg-muted overflow-hidden">
+                  <div className="h-full bg-blue-600 transition-[width] duration-300" style={{ width: `${Math.max(0, Math.min(100, displayProgress))}%` }} />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -54,3 +54,30 @@ TRANSCRIPT_API_KEY=... # required
 # Optional override (defaults to https://api.transcriptapi.com/v1/youtube/transcript)
 TRANSCRIPT_API_BASE=https://your-transcript-api-base
 ```
+
+## Image OCR + RAG Pipeline
+
+You can upload images or take camera snapshots. These are stored under:
+
+```
+users/{userId}/images/{documentId}.{ext}
+users/{userId}/images/snapshots/{documentId}.jpg (camera snapshots)
+```
+
+Flow:
+
+1. Client creates Firestore doc with `type: "image"` via `uploadImageFile` or `uploadCameraSnapshot` (see `src/lib/fileUploadService.ts`).
+2. After upload, `metadata.storagePath` is set; the `processDocument` Cloud Function detects a new image document.
+3. The function downloads the image and performs OCR using OpenAI `gpt-4o-mini` vision (Responses API with chat completion fallback).
+4. Extracted text is cleaned and saved:
+
+- Full text stored at `transcripts/{userId}/{documentId}.txt` in Firebase Storage.
+- A preview (first 200k chars) stored inline in Firestore `content.raw`.
+- Vector indexing: the entire OCR text is uploaded as a single file to the configured OpenAI Vector Store. Metadata stored at `metadata.openaiVector`.
+
+5. Once processing completes (`processingStatus: "completed"`), you can:
+
+- Chat with the image text (`sendChatMessage` with the documentId in `contextDocIds`).
+- Generate a summary, flashcards, quiz, or a podcast using existing callable functions.
+
+No separate OCR service or dependency is required; OpenAI vision handles extraction. If OCR fails, the document is marked `processingStatus: failed` with `processingError` for user feedback.

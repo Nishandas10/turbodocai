@@ -264,12 +264,64 @@ export default function Dashboard() {
       return ''
     }
   }
+  // Extract a YouTube video ID from common URL formats
+  const getYouTubeId = (input?: string | null): string | null => {
+    if (!input) return null
+    try {
+      // Handle bare IDs passed by mistake
+      if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input
+
+      const url = new URL(input)
+      const host = url.hostname.replace(/^www\./, '')
+
+      // youtu.be/<id>
+      if (host === 'youtu.be') {
+        const id = url.pathname.split('/').filter(Boolean)[0]
+        return id && /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null
+      }
+
+      if (host.endsWith('youtube.com')) {
+        // youtube.com/watch?v=<id>
+        const v = url.searchParams.get('v')
+        if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v
+        // youtube.com/embed/<id>, /shorts/<id>, /live/<id>
+        const parts = url.pathname.split('/').filter(Boolean)
+        const idx = parts.findIndex(p => ['embed', 'shorts', 'live', 'v'].includes(p))
+        if (idx !== -1 && parts[idx + 1] && /^[a-zA-Z0-9_-]{11}$/.test(parts[idx + 1])) {
+          return parts[idx + 1]
+        }
+        // Sometimes path directly is the id
+        const last = parts[parts.length - 1]
+        if (last && /^[a-zA-Z0-9_-]{11}$/.test(last)) return last
+      }
+    } catch {}
+    return null
+  }
   const renderPublicDocPreview = (doc: PublicDocumentMeta) => {
     const url = doc.masterUrl || doc.metadata?.downloadURL
     const mime = doc.metadata?.mimeType || ''
     const override = explorePreviewMap[doc.id]
     const text = (override || doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
     const iconCls = "h-8 w-8 text-muted-foreground"
+
+    if (doc.type === 'youtube') {
+      const videoId = getYouTubeId(typeof url === 'string' ? url : undefined)
+      if (videoId) {
+        const thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+        return (
+          <div className="absolute inset-0 w-full h-full">
+            <Image
+              src={thumb}
+              alt={doc.title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, 33vw"
+            />
+          </div>
+        )
+      }
+      return <Play className={iconCls} />
+    }
 
     if (url && typeof url === 'string' && mime.startsWith('image/')) {
       return (
@@ -284,7 +336,7 @@ export default function Dashboard() {
         </div>
       )
     }
-    if (doc.type === 'youtube') return <Play className={iconCls} />
+  if (doc.type === 'youtube') return <Play className={iconCls} />
     if (doc.type === 'website') return <Globe className={iconCls} />
     if (doc.type === 'audio') return <Mic className={iconCls} />
 
@@ -305,6 +357,25 @@ export default function Dashboard() {
     const text = (doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
     const iconCls = "h-8 w-8 text-muted-foreground"
 
+    if (doc.type === 'youtube') {
+      const videoId = getYouTubeId(doc?.metadata?.url || null)
+      if (videoId) {
+        const thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+        return (
+          <div className="absolute inset-0 w-full h-full">
+            <Image
+              src={thumb}
+              alt={doc.title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, 33vw"
+            />
+          </div>
+        )
+      }
+      return <Play className={iconCls} />
+    }
+
     if (url && mime.startsWith('image/')) {
       return (
         <div className="absolute inset-0 w-full h-full">
@@ -318,7 +389,6 @@ export default function Dashboard() {
         </div>
       )
     }
-    if (doc.type === 'youtube') return <Play className={iconCls} />
     if (doc.type === 'website') return <Globe className={iconCls} />
     if (doc.type === 'audio') return <Mic className={iconCls} />
 
