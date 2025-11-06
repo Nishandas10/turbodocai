@@ -1,12 +1,12 @@
 "use client"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useEffect, useMemo, useState, useRef } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { X, Play, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import { createYouTubeDocument } from "@/lib/firestore"
-import { waitAndGenerateSummary, getDocumentText } from "@/lib/ragService"
+import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
 
 export default function YouTubeVideoModal(props: any) {
@@ -17,9 +17,8 @@ export default function YouTubeVideoModal(props: any) {
   const [processingProgress, setProcessingProgress] = useState<number | null>(null)
   const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
   const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
-  const [generatedSummary, setGeneratedSummary] = useState<string>("")
-  const [transcriptPreview, setTranscriptPreview] = useState<string>("")
-  const transcriptTimerRef = useRef<NodeJS.Timeout | null>(null)
+  // Removed transcript & summary previews per new requirement
+  const [isFinished, setIsFinished] = useState<boolean>(false)
   const router = useRouter()
   const { user } = useAuth()
 
@@ -37,16 +36,14 @@ export default function YouTubeVideoModal(props: any) {
     }
 
     setIsProcessing(true)
+    setIsFinished(false)
     try {
-  const documentId = await createYouTubeDocument(user.uid, youtubeLink, undefined, spaceId)
-      // Begin processing monitor like DocumentUploadModal
+      const documentId = await createYouTubeDocument(user.uid, youtubeLink, undefined, spaceId)
       setProcessingStatus("Processing video...")
       setOptimisticProgress(0)
       setOptimisticTimerActive(true)
-  startTranscriptPolling(documentId, user.uid)
-
       try {
-        const summary = await waitAndGenerateSummary(
+        await waitAndGenerateSummary(
           documentId,
           user.uid,
           (status, progress) => {
@@ -56,14 +53,13 @@ export default function YouTubeVideoModal(props: any) {
           },
           350
         )
-        setGeneratedSummary(summary)
-        setProcessingProgress(100)
-        setProcessingStatus("Processed! Redirecting...")
-        setYoutubeLink("")
+        // Mark finished, show 100%, then redirect after a short delay
+        setIsFinished(true)
+        setProcessingStatus('Processed! Redirecting...')
         setTimeout(() => {
           onClose()
           router.push(`/notes/${documentId}`)
-        }, 1200)
+        }, 750)
       } catch (e) {
         console.error('YouTube processing error:', e)
         setProcessingStatus("Processing failed or timed out")
@@ -75,27 +71,10 @@ export default function YouTubeVideoModal(props: any) {
     } catch (error) {
       console.error('Error saving YouTube video:', error)
       setProcessingStatus('Failed to save YouTube video. Please try again.')
-    } finally {
-      // keep spinner states controlled by processing monitor
     }
   }
 
-  // Start transcript polling after doc creation to show transcript as soon as it's available
-  const startTranscriptPolling = (docId: string, userId: string) => {
-    if (transcriptTimerRef.current) clearInterval(transcriptTimerRef.current as any)
-    transcriptTimerRef.current = setInterval(async () => {
-      try {
-        const res = await getDocumentText({ documentId: docId, userId, limitChars: 8000 })
-        const text = (res?.text || "").trim()
-        if (text && text.length > 40) {
-          setTranscriptPreview(text)
-          // if we have a long transcript already, we can slow down polling
-        }
-      } catch {
-        // ignore until available
-      }
-    }, 2500)
-  }
+  // Removed transcript polling
 
   // Cleanup when modal closes: reset progress state
   useEffect(() => {
@@ -104,13 +83,8 @@ export default function YouTubeVideoModal(props: any) {
       setOptimisticProgress(0)
       setProcessingProgress(null)
       setProcessingStatus("")
-      setGeneratedSummary("")
-      setTranscriptPreview("")
-      if (transcriptTimerRef.current) {
-        clearInterval(transcriptTimerRef.current as any)
-        transcriptTimerRef.current = null
-      }
       setYoutubeLink("")
+      setIsFinished(false)
     }
   }, [isOpen])
 
@@ -136,10 +110,12 @@ export default function YouTubeVideoModal(props: any) {
     return () => { if (raf) cancelAnimationFrame(raf) }
   }, [optimisticTimerActive])
 
+  // Display logic: smoothly advance (optimistic or backend) but cap at 90 until finished
   const displayProgress = useMemo(() => {
-    if (typeof processingProgress === 'number') return Math.max(0, Math.min(100, processingProgress))
-    return optimisticProgress
-  }, [processingProgress, optimisticProgress])
+    if (isFinished) return 100
+    const raw = typeof processingProgress === 'number' ? processingProgress : optimisticProgress
+    return Math.min(90, Math.max(0, raw))
+  }, [processingProgress, optimisticProgress, isFinished])
 
   if (!isOpen) return null
 
@@ -217,19 +193,7 @@ export default function YouTubeVideoModal(props: any) {
                   style={{ width: `${Math.max(0, Math.min(100, displayProgress))}%` }}
                 />
               </div>
-              {transcriptPreview && (
-                <div className="mt-3">
-                  <p className="text-xs font-medium text-card-foreground mb-1">Transcript (live)</p>
-                  <div className="max-h-40 overflow-y-auto text-xs text-muted-foreground whitespace-pre-wrap border border-border rounded p-2 bg-background/60">
-                    {transcriptPreview}
-                  </div>
-                </div>
-              )}
-              {generatedSummary && (
-                <div className="mt-2 max-h-36 overflow-y-auto text-xs text-muted-foreground whitespace-pre-wrap">
-                  {generatedSummary}
-                </div>
-              )}
+              {/* Transcript & summary previews removed */}
             </div>
           )}
         </div>

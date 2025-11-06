@@ -48,6 +48,9 @@ export default function RecordPage() {
   const streamRef = useRef<MediaStream | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const chunksRef = useRef<BlobPart[]>([])
+  // High-accuracy duration tracking
+  const activeStartRef = useRef<number | null>(null) // performance.now() when actively recording
+  const totalMsRef = useRef<number>(0) // accumulated active ms across pause/resume
 
   // Waveform visualizer refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -84,22 +87,22 @@ export default function RecordPage() {
       .catch(console.error)
   }, [])
 
-  // Timer effect
+  // Timer effect - compute from wall clock for accuracy (handles long recordings and background tabs)
   useEffect(() => {
     if (isRecording && !isPaused) {
+      // Update UI more frequently for responsiveness
       intervalRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1)
-      }, 1000)
+        const now = performance.now()
+        let total = totalMsRef.current
+        if (activeStartRef.current !== null) total += now - activeStartRef.current
+        setRecordingTime(Math.floor(total / 1000))
+      }, 250)
     } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
+      if (intervalRef.current) clearInterval(intervalRef.current)
     }
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
+      if (intervalRef.current) clearInterval(intervalRef.current)
     }
   }, [isRecording, isPaused])
 
@@ -151,24 +154,29 @@ export default function RecordPage() {
         const mime = (options.mimeType as string) || 'audio/webm'
         const blob = new Blob(chunksRef.current, { type: mime })
         setRecordedBlob(blob)
-        setRecordedDuration(recordingTime) // preserve last duration
+        // duration is finalized in stopRecording, avoid overriding here
         chunksRef.current = []
       }
       
       mediaRecorder.start()
       setIsRecording(true)
       setIsPaused(false)
-      setRecordingTime(0)
+  setRecordingTime(0)
       setRecordedBlob(null)
       setRecordedDuration(null)
+  // initialize accurate duration tracking
+  totalMsRef.current = 0
+  activeStartRef.current = performance.now()
       
       // Setup waveform visualizer
       try {
         const W = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }
         const AudioContextClass = W.AudioContext || W.webkitAudioContext
         if (!AudioContextClass) throw new Error('Web Audio API is not supported in this browser')
-        const audioContext = new AudioContextClass()
+  const audioContext = new AudioContextClass()
         audioContextRef.current = audioContext
+  // ensure context is running on first user gesture
+  try { await audioContext.resume() } catch {}
         const source = audioContext.createMediaStreamSource(stream)
         sourceRef.current = source
         const analyser = audioContext.createAnalyser()
@@ -224,15 +232,32 @@ export default function RecordPage() {
       if (isPaused) {
         mediaRecorderRef.current.resume()
         setIsPaused(false)
+        // resume timing
+        activeStartRef.current = performance.now()
       } else {
         mediaRecorderRef.current.pause()
         setIsPaused(true)
+        // accumulate elapsed up to this pause
+        if (activeStartRef.current !== null) {
+          totalMsRef.current += performance.now() - activeStartRef.current
+          activeStartRef.current = null
+        }
       }
     }
   }
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      // finalize accurate duration before stopping recorder
+      if (activeStartRef.current !== null) {
+        totalMsRef.current += performance.now() - activeStartRef.current
+        activeStartRef.current = null
+      }
+      const finalSeconds = Math.max(0, Math.round(totalMsRef.current / 1000))
+      setRecordedDuration(finalSeconds)
+      // reset accumulator for next run
+      totalMsRef.current = 0
+
       mediaRecorderRef.current.stop()
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop())
