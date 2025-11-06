@@ -468,6 +468,66 @@ Answer:`;
   }
 
   /**
+   * Wait up to maxWaitMs for usable raw text to be available either inline (content.raw/processed)
+   * or via a transcript saved to Cloud Storage (metadata.transcriptPath).
+   */
+  private async waitForRawText(
+    userId: string,
+    documentId: string,
+    maxWaitMs: number = 60000
+  ): Promise<string> {
+    const db = getFirestore();
+    const started = Date.now();
+    let delay = 800;
+
+    while (Date.now() - started < maxWaitMs) {
+      try {
+        const snap = await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .get();
+        if (snap.exists) {
+          const data = (snap.data() as any) || {};
+          let rawText: string = String(
+            data?.content?.raw || data?.content?.processed || ""
+          );
+          if (rawText && rawText.trim().length >= 120) {
+            return rawText.slice(0, 18000);
+          }
+          const transcriptPath: string | undefined =
+            data?.metadata?.transcriptPath;
+          if (transcriptPath) {
+            try {
+              const [buf] = await (await import("firebase-admin/storage"))
+                .getStorage()
+                .bucket()
+                .file(transcriptPath)
+                .download();
+              const txt = buf.toString("utf-8");
+              if (txt && txt.trim().length >= 120) {
+                return txt.slice(0, 18000);
+              }
+            } catch (e) {
+              // transcript might not be visible yet; continue retry loop
+              logger.debug(
+                "waitForRawText: transcript read not ready, retrying",
+                e as any
+              );
+            }
+          }
+        }
+      } catch (e) {
+        logger.debug("waitForRawText polling failed (continuing)", e as any);
+      }
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(3000, Math.floor(delay * 1.5));
+    }
+    return ""; // caller will handle empty string
+  }
+
+  /**
    * Generate a summary of a document
    */
   async generateDocumentSummary(
@@ -515,30 +575,12 @@ Answer:`;
                 vsErr as any
               );
               // Fallback to Firestore raw content if available
-              let rawText: string = String(
-                data?.content?.raw || data?.content?.processed || ""
-              ).slice(0, 18000);
-              // If no inline content, try transcript from Storage (e.g., YouTube)
-              if (!rawText || rawText.length < 100) {
-                const transcriptPath = data?.metadata?.transcriptPath as
-                  | string
-                  | undefined;
-                if (transcriptPath) {
-                  try {
-                    const [buf] = await (await import("firebase-admin/storage"))
-                      .getStorage()
-                      .bucket()
-                      .file(transcriptPath)
-                      .download();
-                    rawText = buf.toString("utf-8").slice(0, 18000);
-                  } catch (trErr) {
-                    logger.warn(
-                      "Transcript read failed for summary fallback",
-                      trErr as any
-                    );
-                  }
-                }
-              }
+              // Wait briefly for transcript/inline content to become available
+              let rawText: string = await this.waitForRawText(
+                userId,
+                documentId,
+                30000
+              );
               if (rawText && rawText.length > 100) {
                 const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
                 const resp = await this.openai.chat.completions.create({
@@ -567,38 +609,8 @@ Answer:`;
         );
       }
 
-      // Content fallback for summary
-      const db = getFirestore();
-      const snap = await db
-        .collection("documents")
-        .doc(userId)
-        .collection("userDocuments")
-        .doc(documentId)
-        .get();
-      if (!snap.exists) return "No content available for summary.";
-      const data = (snap.data() as any) || {};
-      let rawText: string = String(
-        data?.content?.raw || data?.content?.processed || data?.summary || ""
-      ).slice(0, 18000);
-      // If still no content, try reading transcript stored in Storage (YouTube, audio, etc.)
-      if (
-        (!rawText || rawText.length < 100) &&
-        data?.metadata?.transcriptPath
-      ) {
-        try {
-          const [buf] = await (await import("firebase-admin/storage"))
-            .getStorage()
-            .bucket()
-            .file(String(data.metadata.transcriptPath))
-            .download();
-          rawText = buf.toString("utf-8").slice(0, 18000);
-        } catch (e) {
-          logger.warn(
-            "Transcript read failed for main summary fallback",
-            e as any
-          );
-        }
-      }
+      // Content fallback for summary (with wait):
+      const rawText = await this.waitForRawText(userId, documentId, 30000);
       if (!rawText || rawText.length < 80)
         return "No content available for summary.";
       const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;

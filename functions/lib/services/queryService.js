@@ -379,10 +379,61 @@ Answer:`;
         }
     }
     /**
+     * Wait up to maxWaitMs for usable raw text to be available either inline (content.raw/processed)
+     * or via a transcript saved to Cloud Storage (metadata.transcriptPath).
+     */
+    async waitForRawText(userId, documentId, maxWaitMs = 60000) {
+        var _a, _b, _c;
+        const db = (0, firestore_1.getFirestore)();
+        const started = Date.now();
+        let delay = 800;
+        while (Date.now() - started < maxWaitMs) {
+            try {
+                const snap = await db
+                    .collection("documents")
+                    .doc(userId)
+                    .collection("userDocuments")
+                    .doc(documentId)
+                    .get();
+                if (snap.exists) {
+                    const data = snap.data() || {};
+                    let rawText = String(((_a = data === null || data === void 0 ? void 0 : data.content) === null || _a === void 0 ? void 0 : _a.raw) || ((_b = data === null || data === void 0 ? void 0 : data.content) === null || _b === void 0 ? void 0 : _b.processed) || "");
+                    if (rawText && rawText.trim().length >= 120) {
+                        return rawText.slice(0, 18000);
+                    }
+                    const transcriptPath = (_c = data === null || data === void 0 ? void 0 : data.metadata) === null || _c === void 0 ? void 0 : _c.transcriptPath;
+                    if (transcriptPath) {
+                        try {
+                            const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
+                                .getStorage()
+                                .bucket()
+                                .file(transcriptPath)
+                                .download();
+                            const txt = buf.toString("utf-8");
+                            if (txt && txt.trim().length >= 120) {
+                                return txt.slice(0, 18000);
+                            }
+                        }
+                        catch (e) {
+                            // transcript might not be visible yet; continue retry loop
+                            firebase_functions_1.logger.debug("waitForRawText: transcript read not ready, retrying", e);
+                        }
+                    }
+                }
+            }
+            catch (e) {
+                firebase_functions_1.logger.debug("waitForRawText polling failed (continuing)", e);
+            }
+            await new Promise((r) => setTimeout(r, delay));
+            delay = Math.min(3000, Math.floor(delay * 1.5));
+        }
+        return ""; // caller will handle empty string
+    }
+    /**
      * Generate a summary of a document
      */
     async generateDocumentSummary(documentId, userId, maxLength = 500) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         try {
             // If the document was indexed into OpenAI Vector Store (DOCX path), use file_search-based summarization
             try {
@@ -417,24 +468,8 @@ Answer:`;
                         if (vsErr) {
                             firebase_functions_1.logger.warn("Vector store summarization failed, attempting Firestore raw content fallback", vsErr);
                             // Fallback to Firestore raw content if available
-                            let rawText = String(((_c = data === null || data === void 0 ? void 0 : data.content) === null || _c === void 0 ? void 0 : _c.raw) || ((_d = data === null || data === void 0 ? void 0 : data.content) === null || _d === void 0 ? void 0 : _d.processed) || "").slice(0, 18000);
-                            // If no inline content, try transcript from Storage (e.g., YouTube)
-                            if (!rawText || rawText.length < 100) {
-                                const transcriptPath = (_e = data === null || data === void 0 ? void 0 : data.metadata) === null || _e === void 0 ? void 0 : _e.transcriptPath;
-                                if (transcriptPath) {
-                                    try {
-                                        const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
-                                            .getStorage()
-                                            .bucket()
-                                            .file(transcriptPath)
-                                            .download();
-                                        rawText = buf.toString("utf-8").slice(0, 18000);
-                                    }
-                                    catch (trErr) {
-                                        firebase_functions_1.logger.warn("Transcript read failed for summary fallback", trErr);
-                                    }
-                                }
-                            }
+                            // Wait briefly for transcript/inline content to become available
+                            let rawText = await this.waitForRawText(userId, documentId, 30000);
                             if (rawText && rawText.length > 100) {
                                 const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
                                 const resp = await this.openai.chat.completions.create({
@@ -449,7 +484,7 @@ Answer:`;
                                     max_tokens: Math.ceil(maxLength * 1.6),
                                     temperature: 0.25,
                                 });
-                                const txt = ((_h = (_g = (_f = resp.choices) === null || _f === void 0 ? void 0 : _f[0]) === null || _g === void 0 ? void 0 : _g.message) === null || _h === void 0 ? void 0 : _h.content) || "";
+                                const txt = ((_e = (_d = (_c = resp.choices) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.message) === null || _e === void 0 ? void 0 : _e.content) || "";
                                 if (txt)
                                     return txt;
                             }
@@ -460,33 +495,8 @@ Answer:`;
             catch (vsCheckErr) {
                 firebase_functions_1.logger.warn("Vector store check failed; attempting content fallback", vsCheckErr);
             }
-            // Content fallback for summary
-            const db = (0, firestore_1.getFirestore)();
-            const snap = await db
-                .collection("documents")
-                .doc(userId)
-                .collection("userDocuments")
-                .doc(documentId)
-                .get();
-            if (!snap.exists)
-                return "No content available for summary.";
-            const data = snap.data() || {};
-            let rawText = String(((_j = data === null || data === void 0 ? void 0 : data.content) === null || _j === void 0 ? void 0 : _j.raw) || ((_k = data === null || data === void 0 ? void 0 : data.content) === null || _k === void 0 ? void 0 : _k.processed) || (data === null || data === void 0 ? void 0 : data.summary) || "").slice(0, 18000);
-            // If still no content, try reading transcript stored in Storage (YouTube, audio, etc.)
-            if ((!rawText || rawText.length < 100) &&
-                ((_l = data === null || data === void 0 ? void 0 : data.metadata) === null || _l === void 0 ? void 0 : _l.transcriptPath)) {
-                try {
-                    const [buf] = await (await Promise.resolve().then(() => __importStar(require("firebase-admin/storage"))))
-                        .getStorage()
-                        .bucket()
-                        .file(String(data.metadata.transcriptPath))
-                        .download();
-                    rawText = buf.toString("utf-8").slice(0, 18000);
-                }
-                catch (e) {
-                    firebase_functions_1.logger.warn("Transcript read failed for main summary fallback", e);
-                }
-            }
+            // Content fallback for summary (with wait):
+            const rawText = await this.waitForRawText(userId, documentId, 30000);
             if (!rawText || rawText.length < 80)
                 return "No content available for summary.";
             const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
@@ -502,7 +512,7 @@ Answer:`;
                 max_tokens: Math.ceil(maxLength * 1.6),
                 temperature: 0.25,
             });
-            const txt = ((_p = (_o = (_m = resp.choices) === null || _m === void 0 ? void 0 : _m[0]) === null || _o === void 0 ? void 0 : _o.message) === null || _p === void 0 ? void 0 : _p.content) || "";
+            const txt = ((_h = (_g = (_f = resp.choices) === null || _f === void 0 ? void 0 : _f[0]) === null || _g === void 0 ? void 0 : _g.message) === null || _h === void 0 ? void 0 : _h.content) || "";
             return txt || "Could not generate summary.";
         }
         catch (error) {
