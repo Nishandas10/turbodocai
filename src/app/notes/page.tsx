@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { FileText, MoreVertical, Mic, Play, Lock, Unlock, Box } from "lucide-react"
+import { FileText, MoreVertical, Mic, Play, Lock, Unlock, Box, Globe } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import DashboardSidebar from "@/components/DashboardSidebar"
@@ -19,7 +19,7 @@ export default function NotesPage() {
 
   type CombinedItem = { id: string; kind: 'document' | 'mindmap' | 'chat'; createdAtMs: number; ref: UserDoc | MindMap | Chat }
 
-  const [filter, setFilter] = useState<'all' | 'document' | 'mindmap' | 'chat'>('all')
+  const [filter, setFilter] = useState<'all' | 'document' | 'mindmap' | 'chat' | 'audio' | 'image' | 'website' | 'youtube'>('all')
 
     const combinedItems = useMemo<CombinedItem[]>(() => {
       // Accept unknown timestamp-like values (Firestore Timestamp, Date, number, string)
@@ -39,7 +39,12 @@ export default function NotesPage() {
 
     const filteredItems = useMemo(() => {
       if (filter === 'all') return combinedItems
-      return combinedItems.filter(i => i.kind === filter)
+      // top-level kinds
+      if (['document','mindmap','chat'].includes(filter)) {
+        return combinedItems.filter(i => i.kind === filter)
+      }
+      // document subtypes
+      return combinedItems.filter(i => i.kind === 'document' && (i.ref as UserDoc).type === filter)
     }, [combinedItems, filter])
 
     // listeners
@@ -103,11 +108,73 @@ export default function NotesPage() {
     }
 
     const renderPreview = (doc: UserDoc) => {
+      const subtype = doc.type
       const mime = doc.metadata?.mimeType || ''
-      const url = doc.metadata?.downloadURL
-      if (mime.startsWith('image/') && url) {
+      const url = doc.metadata?.downloadURL || null
+      // IMAGE
+      if (subtype === 'image' && url) {
         return <Image src={url} alt={doc.title || 'image'} fill className="object-cover" />
       }
+      // AUDIO
+      if (subtype === 'audio' && url) {
+        return (
+          <div className="flex flex-col items-center justify-center w-full px-2">
+            <Mic className="h-6 w-6 text-muted-foreground mb-2" />
+            <audio controls preload="metadata" src={url} className="w-full h-8" />
+          </div>
+        )
+      }
+      // YOUTUBE
+      if (subtype === 'youtube') {
+  const ytUrl = doc.metadata?.url || ''
+        const extractId = (u: string): string | null => {
+          try {
+            const m = u.match(/[?&]v=([a-zA-Z0-9_-]{11})/) || u.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/) || u.match(/embed\/([a-zA-Z0-9_-]{11})/)
+            return m ? (m[1] || m[0]) : null
+          } catch { return null }
+        }
+        const vid = extractId(ytUrl)
+        const thumb = vid ? `https://img.youtube.com/vi/${vid}/hqdefault.jpg` : null
+        return thumb ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Image src={thumb} alt={doc.title || 'YouTube'} fill className="object-cover" />
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+              <Play className="h-10 w-10 text-white drop-shadow" />
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center w-full h-full">
+            <Play className="h-8 w-8 text-muted-foreground" />
+            <p className="text-[10px] mt-1 opacity-70 px-2 text-center">YouTube video</p>
+          </div>
+        )
+      }
+      // WEBSITE
+      if (subtype === 'website') {
+  const rawUrl = doc.metadata?.url || ''
+        let host = ''
+        try { host = new URL(rawUrl).hostname.replace(/^www\./,'') } catch {}
+        const snippet = (doc.summary || doc.content?.raw || '').slice(0, 120)
+        return (
+          <div className="flex flex-col items-center justify-center w-full h-full p-3 text-center">
+            <Globe className="h-7 w-7 text-muted-foreground mb-1" />
+            <p className="text-[10px] font-medium truncate w-full">{host || 'Website'}</p>
+            {snippet && <p className="text-[10px] opacity-70 line-clamp-2">{snippet}</p>}
+          </div>
+        )
+      }
+      // Generic textual document
+      if ((doc.summary || doc.content?.processed || doc.content?.raw)) {
+        return (
+          <div className="absolute inset-0 bg-background flex items-center justify-center p-3">
+            <p className="text-xs text-foreground line-clamp-4 text-center leading-relaxed">
+              {(doc.summary || doc.content?.processed || doc.content?.raw || '').substring(0, 200)}...
+            </p>
+          </div>
+        )
+      }
+      // Fallback icon based on mime
+      if (mime.startsWith('image/') && url) return <Image src={url} alt={doc.title || 'image'} fill className="object-cover" />
       if (mime.startsWith('audio/')) return <Mic className="h-8 w-8 text-muted-foreground" />
       if (mime.startsWith('video/')) return <Play className="h-8 w-8 text-muted-foreground" />
       if (mime.includes('pdf')) return <FileText className="h-8 w-8 text-muted-foreground" />
@@ -130,13 +197,19 @@ export default function NotesPage() {
                   <span className="text-xs text-muted-foreground">{filteredItems.length} shown • {combinedItems.length} total</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {(['all','document','mindmap','chat'] as const).map(f => (
+                  {(['all','document','mindmap','chat','audio','image','website','youtube'] as const).map(f => (
                     <button
                       key={f}
                       onClick={()=> setFilter(f)}
                       className={`px-3 py-1 text-xs rounded-full border transition-colors ${filter===f ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted border-border'}`}
                     >
-                      {f === 'document' ? 'Docs' : f === 'mindmap' ? 'Maps' : f === 'chat' ? 'Chats' : 'All'}
+                      {f === 'document' ? 'Docs' :
+                       f === 'mindmap' ? 'Maps' :
+                       f === 'chat' ? 'Chats' :
+                       f === 'audio' ? 'Audio' :
+                       f === 'image' ? 'Images' :
+                       f === 'website' ? 'Web' :
+                       f === 'youtube' ? 'YouTube' : 'All'}
                     </button>
                   ))}
                 </div>
@@ -145,23 +218,17 @@ export default function NotesPage() {
                 {filteredItems.map(item => {
                   if (item.kind === 'document') {
                     const note = item.ref as UserDoc
+                    const subtype = note.type
+                    const badgeLabel = subtype === 'audio' ? 'Audio' : subtype === 'image' ? 'Image' : subtype === 'website' ? 'Web' : subtype === 'youtube' ? 'YouTube' : 'Doc'
+                    const badgeColor = subtype === 'audio' ? 'bg-rose-600' : subtype === 'image' ? 'bg-teal-600' : subtype === 'website' ? 'bg-indigo-600' : subtype === 'youtube' ? 'bg-red-600' : 'bg-blue-600'
                     return (
                       <div key={`doc-${note.id}`} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative">
                         <div className="relative h-32 bg-background flex items-center justify-center overflow-hidden" onClick={() => window.location.href = `/notes/${note.id}`}>        
-                          {/* Show content preview by default, fallback to icon if no content */}
-                          {(note.summary || note.content?.processed || note.content?.raw) ? (
-                            <div className="absolute inset-0 bg-background flex items-center justify-center p-3">
-                              <p className="text-xs text-foreground line-clamp-4 text-center leading-relaxed">
-                                {(note.summary || note.content?.processed || note.content?.raw || '').substring(0, 200)}...
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="absolute inset-0 bg-muted flex items-center justify-center">
-                              {renderPreview(note)}
-                            </div>
-                          )}
+                          <div className="absolute inset-0 bg-muted flex items-center justify-center">
+                            {renderPreview(note)}
+                          </div>
                           <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5 max-w-[60%] truncate">{(note.spaceId && spaces.find(s=>s.id===note.spaceId)?.name) || 'No Space'}</span>
-                          <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-blue-600 text-white font-medium">Doc</span>
+                          <span className={`absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full ${badgeColor} text-white font-medium`}>{badgeLabel}</span>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
