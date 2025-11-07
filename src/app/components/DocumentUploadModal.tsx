@@ -23,7 +23,7 @@ export default function DocumentUploadModal(props: any) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { user } = useAuth()
   const router = useRouter()
-  const [generatedSummary, setGeneratedSummary] = useState<string>("")
+  // Removed generated summary preview per user request
   const [showDocAlert, setShowDocAlert] = useState<boolean>(false)
   const [blockedDocName, setBlockedDocName] = useState<string>("")
 
@@ -53,7 +53,7 @@ export default function DocumentUploadModal(props: any) {
       setOptimisticProgress(0)
       setOptimisticTimerActive(false)
       setProcessingStatus("")
-      setGeneratedSummary("")
+  // summary preview removed
     }
   }
 
@@ -78,7 +78,7 @@ export default function DocumentUploadModal(props: any) {
       setOptimisticProgress(0)
       setOptimisticTimerActive(false)
       setProcessingStatus("")
-      setGeneratedSummary("")
+  // summary preview removed
     }
   }
 
@@ -110,18 +110,16 @@ export default function DocumentUploadModal(props: any) {
           setOptimisticTimerActive(true)
           
           try {
-            const summary = await waitAndGenerateSummary(
+            await waitAndGenerateSummary(
               result.documentId!,
               user.uid,
               (status, progress) => {
                 const pct = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null
                 setProcessingProgress(pct)
-                // Show clean status text without inline percentage; percentage is displayed separately on the right
                 setProcessingStatus(`Processing: ${status}`)
               },
               350
             )
-            setGeneratedSummary(summary)
             setProcessingProgress(100)
             setProcessingStatus("Processed! Redirecting...")
             setTimeout(() => {
@@ -359,11 +357,7 @@ export default function DocumentUploadModal(props: any) {
                         style={{ width: `${Math.max(0, Math.min(100, displayProgress))}%` }}
                       />
                     </div>
-                    {generatedSummary && (
-                      <div className="mt-2 max-h-40 overflow-y-auto text-xs text-muted-foreground whitespace-pre-wrap">
-                        {generatedSummary}
-                      </div>
-                    )}
+                    {/* Summary preview removed */}
                   </div>
                 )}
               </div>

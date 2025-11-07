@@ -11,6 +11,7 @@ import PDFViewer from "@/components/PdfViewer";
 import DocxViewer from "@/components/DocxViewer";
 import PptxViewer from "@/components/PptxViewer";
 import TxtViewer from "@/components/TxtViewer";
+import AudioViewer from "@/components/AudioViewer";
 // import { getFileDownloadURL, getUserDocumentsPath } from "@/lib/storage";
 import { db } from "@/lib/firebase";
 import { doc as fsDoc, onSnapshot, Timestamp } from "firebase/firestore";
@@ -76,6 +77,7 @@ export default function ChatPage() {
   type FileInfo =
     | { kind: 'website'; websiteUrl: string | null }
     | { kind: 'youtube'; youtubeUrl: string | null }
+    | { kind: 'audio'; storagePath: string | null; downloadURL: string | null }
     | { kind: 'file'; url: string | null; isPdf: boolean; isDocx: boolean; isPptx: boolean; isTxt: boolean };
 
   const fileInfo: FileInfo | null = useMemo(() => {
@@ -84,18 +86,22 @@ export default function ChatPage() {
     const lowerName = (doc.metadata?.fileName || "").toLowerCase();
     const isWebsite = doc.type === "website";
     const isYouTube = doc.type === "youtube";
-    const websiteUrl = isWebsite ? (doc.metadata as { url?: string } | undefined)?.url || null : null;
-    const youtubeUrl = isYouTube ? (doc.metadata as { url?: string } | undefined)?.url || null : null;
+  const websiteUrl = isWebsite ? (doc.metadata as { url?: string } | undefined)?.url || null : null;
+  const youtubeUrl = isYouTube ? (doc.metadata as { url?: string } | undefined)?.url || null : null;
+  const isAudio = doc.type === 'audio';
     const isPdf = doc.type === "pdf" || mime.includes("pdf") || lowerName.endsWith(".pdf");
     const isDocx = doc.type === "docx" || mime.includes("word") || lowerName.endsWith(".docx");
     const isPptx = doc.type === "pptx" || mime.includes("presentation") || lowerName.endsWith(".pptx");
     const isTxt = doc.type === "text" || mime.includes("text/plain") || lowerName.endsWith(".txt");
     const baseUrl = doc.metadata?.downloadURL || null;
-    if (isWebsite) {
-      return { kind: 'website', websiteUrl };
-    }
-    if (isYouTube) {
-      return { kind: 'youtube', youtubeUrl };
+    if (isWebsite) return { kind: 'website', websiteUrl };
+    if (isYouTube) return { kind: 'youtube', youtubeUrl };
+    if (isAudio) {
+      return {
+        kind: 'audio',
+        storagePath: doc.metadata?.storagePath || null,
+        downloadURL: doc.metadata?.downloadURL || null,
+      };
     }
     if (!baseUrl && !isTxt) return null; // no preview for non-text without URL
     // Add cache-busting so newly uploaded PDFs don't show stale cached content
@@ -427,6 +433,13 @@ export default function ChatPage() {
                 </div>
               );
             })()
+          ) : fileInfo.kind === 'audio' ? (
+            <AudioViewer
+              storagePath={fileInfo.storagePath}
+              fallbackUrl={fileInfo.downloadURL}
+              fileName={doc?.metadata?.fileName || doc?.title || 'Audio'}
+              className="h-full w-full"
+            />
           ) : fileInfo.kind === 'file' ? (
           fileInfo.isDocx ? (
             <DocxViewer fileUrl={fileInfo.url!} className="h-full w-full" />
