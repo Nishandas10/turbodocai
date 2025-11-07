@@ -6,6 +6,11 @@ import { getStorage } from "firebase-admin/storage";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { OpenAI, toFile } from "openai";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static";
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
 import { randomUUID } from "crypto";
 import {
   DocumentProcessor,
@@ -37,40 +42,121 @@ const storage = getStorage();
 async function transcribeAudioBuffer(
   buffer: Buffer,
   fileName: string,
-  mimeType?: string
+  mimeType?: string,
+  onProgress?: (p: number) => void | Promise<void>
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY || "";
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
   const openai = new OpenAI({ apiKey });
-  const file = await toFile(buffer, fileName || "audio.webm", {
-    type: mimeType || "audio/webm",
-  });
-  // Try gpt-4o-mini-transcribe first
-  try {
-    const res: any = await (openai as any).audio.transcriptions.create({
-      file,
-      model: "gpt-4o-mini-transcribe",
+  const MAX_BYTES = 24 * 1024 * 1024; // keep under server limit (~25MB)
+
+  // Helper to transcribe a single small buffer (<= limit)
+  const transcribeSmall = async (buf: Buffer, name: string, mt?: string) => {
+    const file = await toFile(buf, name || "audio.webm", {
+      type: mt || "audio/webm",
     });
-    const text = String((res?.text as string) || "").trim();
-    if (text) return text;
+    // Try gpt-4o-mini-transcribe first
+    try {
+      const res: any = await (openai as any).audio.transcriptions.create({
+        file,
+        model: "gpt-4o-mini-transcribe",
+      });
+      const text = String((res?.text as string) || "").trim();
+      if (text) return text;
+    } catch (e) {
+      logger.warn(
+        "gpt-4o-mini-transcribe failed; attempting whisper-1",
+        e as any
+      );
+    }
+    // Fallback to whisper-1
+    try {
+      const res2: any = await (openai as any).audio.transcriptions.create({
+        file,
+        model: "whisper-1",
+      });
+      const text2 = String((res2?.text as string) || "").trim();
+      if (text2) return text2;
+    } catch (e2) {
+      logger.error("whisper-1 transcription failed", e2 as any);
+    }
+    throw new Error("Audio transcription returned empty result");
+  };
+
+  // If small enough, transcribe directly
+  if (buffer.byteLength <= MAX_BYTES) {
+    return transcribeSmall(buffer, fileName, mimeType);
+  }
+
+  // Large file: chunk with ffmpeg and transcribe sequentially
+  // Ensure ffmpeg binary path set
+  try {
+    if (ffmpegStatic) (ffmpeg as any).setFfmpegPath(ffmpegStatic as string);
   } catch (e) {
-    logger.warn(
-      "gpt-4o-mini-transcribe failed; attempting whisper-1",
-      e as any
-    );
+    logger.warn("Failed to set ffmpeg path; proceeding with default PATH", e);
   }
-  // Fallback to whisper-1 if available
+
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "audio-chunks-"));
+  const inPath = path.join(tmpDir, fileName || `input_${randomUUID()}`);
+  const outDir = path.join(tmpDir, "parts");
+  await fsp.mkdir(outDir, { recursive: true });
+  await fsp.writeFile(inPath, buffer);
+
+  // Segment to ~15 minute parts, transcode down to 16k mono 32kbps for safety.
+  // Rationale: Lower bitrate + mono drastically reduces size while preserving speech clarity for Whisper.
+  // 15 min chosen to keep typical spoken segments < 10MB. Adjust -segment_time if future limits change.
+  const outPattern = path.join(outDir, "part_%03d.mp3");
+  await new Promise<void>((resolve, reject) => {
+    try {
+      (ffmpeg as any)(inPath)
+        .audioChannels(1)
+        .audioBitrate("32k")
+        .audioFrequency(16000)
+        .format("segment")
+        .outputOptions(["-segment_time 900", "-reset_timestamps 1"])
+        .output(outPattern)
+        .on("error", (err: any) => reject(err))
+        .on("end", () => resolve())
+        .run();
+    } catch (err) {
+      reject(err);
+    }
+  });
+
+  // Read generated parts
+  const files = (await fsp.readdir(outDir))
+    .filter((f) => /^part_\d{3}\.mp3$/i.test(f))
+    .sort();
+  if (!files.length) {
+    // Fallback: if segmentation failed, try compressing whole file and split again with shorter duration
+    logger.error("ffmpeg segmentation produced no parts");
+    throw new Error("Failed to segment audio for transcription");
+  }
+
+  let combined = "";
+  for (let i = 0; i < files.length; i++) {
+    const p = files[i];
+    const full = path.join(outDir, p);
+    const buf = await fsp.readFile(full);
+    const partText = await transcribeSmall(buf, p, "audio/mpeg");
+    combined += (combined ? "\n\n" : "") + partText;
+    // Report progress (from 0..100)
+    const pct = Math.round(((i + 1) / files.length) * 100);
+    try {
+      if (onProgress) await onProgress(pct);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Cleanup best-effort
   try {
-    const res2: any = await (openai as any).audio.transcriptions.create({
-      file,
-      model: "whisper-1",
-    });
-    const text2 = String((res2?.text as string) || "").trim();
-    if (text2) return text2;
-  } catch (e2) {
-    logger.error("whisper-1 transcription failed", e2 as any);
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
   }
-  throw new Error("Audio transcription returned empty result");
+
+  return combined.trim();
 }
 
 // Initialize services (they will be created when functions are called)
@@ -514,7 +600,21 @@ export const processDocument = onDocumentWritten(
         const rawTranscript = await transcribeAudioBuffer(
           fileBuffer,
           fileName,
-          mimeType
+          mimeType,
+          async (pct) => {
+            // Map chunking progress (0-100) into overall doc processing progress window 10-40
+            const mapped = 10 + Math.round((pct / 100) * 30);
+            try {
+              await db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(documentId)
+                .set({ processingProgress: mapped }, { merge: true });
+            } catch (e) {
+              logger.warn("Failed to update chunk transcription progress", e);
+            }
+          }
         );
 
         // Clean text through TXT cleaner

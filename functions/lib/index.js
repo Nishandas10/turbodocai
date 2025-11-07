@@ -1,10 +1,46 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __asyncValues = (this && this.__asyncValues) || function (o) {
     if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
     var m = o[Symbol.asyncIterator], i;
     return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
     function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateMindMap = exports.generatePodcast = exports.getDocumentText = exports.evaluateLongAnswer = exports.generateQuiz = exports.generateFlashcards = exports.generateSummary = exports.recommendPublicDocs = exports.queryDocuments = exports.sendChatMessage = exports.syncAllDocuments = exports.syncNotebookEmbeddings = exports.processDocument = exports.resolveUserByEmail = exports.createChat = void 0;
@@ -16,6 +52,11 @@ const storage_1 = require("firebase-admin/storage");
 const firestore_2 = require("firebase-admin/firestore");
 const firebase_functions_1 = require("firebase-functions");
 const openai_1 = require("openai");
+const fluent_ffmpeg_1 = __importDefault(require("fluent-ffmpeg"));
+const ffmpeg_static_1 = __importDefault(require("ffmpeg-static"));
+const fsp = __importStar(require("node:fs/promises"));
+const path = __importStar(require("node:path"));
+const os = __importStar(require("node:os"));
 const crypto_1 = require("crypto");
 const services_1 = require("./services");
 // Initialize Firebase Admin
@@ -34,41 +75,118 @@ const storage = (0, storage_1.getStorage)();
 /**
  * Transcribe an audio buffer using OpenAI. Prefers gpt-4o-mini-transcribe with fallback to whisper-1.
  */
-async function transcribeAudioBuffer(buffer, fileName, mimeType) {
+async function transcribeAudioBuffer(buffer, fileName, mimeType, onProgress) {
     const apiKey = process.env.OPENAI_API_KEY || "";
     if (!apiKey)
         throw new Error("OPENAI_API_KEY is not set");
     const openai = new openai_1.OpenAI({ apiKey });
-    const file = await (0, openai_1.toFile)(buffer, fileName || "audio.webm", {
-        type: mimeType || "audio/webm",
-    });
-    // Try gpt-4o-mini-transcribe first
-    try {
-        const res = await openai.audio.transcriptions.create({
-            file,
-            model: "gpt-4o-mini-transcribe",
+    const MAX_BYTES = 24 * 1024 * 1024; // keep under server limit (~25MB)
+    // Helper to transcribe a single small buffer (<= limit)
+    const transcribeSmall = async (buf, name, mt) => {
+        const file = await (0, openai_1.toFile)(buf, name || "audio.webm", {
+            type: mt || "audio/webm",
         });
-        const text = String((res === null || res === void 0 ? void 0 : res.text) || "").trim();
-        if (text)
-            return text;
+        // Try gpt-4o-mini-transcribe first
+        try {
+            const res = await openai.audio.transcriptions.create({
+                file,
+                model: "gpt-4o-mini-transcribe",
+            });
+            const text = String((res === null || res === void 0 ? void 0 : res.text) || "").trim();
+            if (text)
+                return text;
+        }
+        catch (e) {
+            firebase_functions_1.logger.warn("gpt-4o-mini-transcribe failed; attempting whisper-1", e);
+        }
+        // Fallback to whisper-1
+        try {
+            const res2 = await openai.audio.transcriptions.create({
+                file,
+                model: "whisper-1",
+            });
+            const text2 = String((res2 === null || res2 === void 0 ? void 0 : res2.text) || "").trim();
+            if (text2)
+                return text2;
+        }
+        catch (e2) {
+            firebase_functions_1.logger.error("whisper-1 transcription failed", e2);
+        }
+        throw new Error("Audio transcription returned empty result");
+    };
+    // If small enough, transcribe directly
+    if (buffer.byteLength <= MAX_BYTES) {
+        return transcribeSmall(buffer, fileName, mimeType);
+    }
+    // Large file: chunk with ffmpeg and transcribe sequentially
+    // Ensure ffmpeg binary path set
+    try {
+        if (ffmpeg_static_1.default)
+            fluent_ffmpeg_1.default.setFfmpegPath(ffmpeg_static_1.default);
     }
     catch (e) {
-        firebase_functions_1.logger.warn("gpt-4o-mini-transcribe failed; attempting whisper-1", e);
+        firebase_functions_1.logger.warn("Failed to set ffmpeg path; proceeding with default PATH", e);
     }
-    // Fallback to whisper-1 if available
+    const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "audio-chunks-"));
+    const inPath = path.join(tmpDir, fileName || `input_${(0, crypto_1.randomUUID)()}`);
+    const outDir = path.join(tmpDir, "parts");
+    await fsp.mkdir(outDir, { recursive: true });
+    await fsp.writeFile(inPath, buffer);
+    // Segment to ~15 minute parts, transcode down to 16k mono 32kbps for safety.
+    // Rationale: Lower bitrate + mono drastically reduces size while preserving speech clarity for Whisper.
+    // 15 min chosen to keep typical spoken segments < 10MB. Adjust -segment_time if future limits change.
+    const outPattern = path.join(outDir, "part_%03d.mp3");
+    await new Promise((resolve, reject) => {
+        try {
+            fluent_ffmpeg_1.default(inPath)
+                .audioChannels(1)
+                .audioBitrate("32k")
+                .audioFrequency(16000)
+                .format("segment")
+                .outputOptions(["-segment_time 900", "-reset_timestamps 1"])
+                .output(outPattern)
+                .on("error", (err) => reject(err))
+                .on("end", () => resolve())
+                .run();
+        }
+        catch (err) {
+            reject(err);
+        }
+    });
+    // Read generated parts
+    const files = (await fsp.readdir(outDir))
+        .filter((f) => /^part_\d{3}\.mp3$/i.test(f))
+        .sort();
+    if (!files.length) {
+        // Fallback: if segmentation failed, try compressing whole file and split again with shorter duration
+        firebase_functions_1.logger.error("ffmpeg segmentation produced no parts");
+        throw new Error("Failed to segment audio for transcription");
+    }
+    let combined = "";
+    for (let i = 0; i < files.length; i++) {
+        const p = files[i];
+        const full = path.join(outDir, p);
+        const buf = await fsp.readFile(full);
+        const partText = await transcribeSmall(buf, p, "audio/mpeg");
+        combined += (combined ? "\n\n" : "") + partText;
+        // Report progress (from 0..100)
+        const pct = Math.round(((i + 1) / files.length) * 100);
+        try {
+            if (onProgress)
+                await onProgress(pct);
+        }
+        catch (_a) {
+            /* ignore */
+        }
+    }
+    // Cleanup best-effort
     try {
-        const res2 = await openai.audio.transcriptions.create({
-            file,
-            model: "whisper-1",
-        });
-        const text2 = String((res2 === null || res2 === void 0 ? void 0 : res2.text) || "").trim();
-        if (text2)
-            return text2;
+        await fsp.rm(tmpDir, { recursive: true, force: true });
     }
-    catch (e2) {
-        firebase_functions_1.logger.error("whisper-1 transcription failed", e2);
+    catch (_b) {
+        /* ignore */
     }
-    throw new Error("Audio transcription returned empty result");
+    return combined.trim();
 }
 // Initialize services (they will be created when functions are called)
 const createServices = () => {
@@ -431,7 +549,21 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             firebase_functions_1.logger.info("Transcribing audio via OpenAI", {
                 model: "gpt-4o-mini-transcribe",
             });
-            const rawTranscript = await transcribeAudioBuffer(fileBuffer, fileName, mimeType);
+            const rawTranscript = await transcribeAudioBuffer(fileBuffer, fileName, mimeType, async (pct) => {
+                // Map chunking progress (0-100) into overall doc processing progress window 10-40
+                const mapped = 10 + Math.round((pct / 100) * 30);
+                try {
+                    await db
+                        .collection("documents")
+                        .doc(userId)
+                        .collection("userDocuments")
+                        .doc(documentId)
+                        .set({ processingProgress: mapped }, { merge: true });
+                }
+                catch (e) {
+                    firebase_functions_1.logger.warn("Failed to update chunk transcription progress", e);
+                }
+            });
             // Clean text through TXT cleaner
             const cleaned = await createServices().documentProcessor.extractTextFromTXT(Buffer.from(rawTranscript || "", "utf-8"));
             extractedText = cleaned;
