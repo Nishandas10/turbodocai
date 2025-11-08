@@ -12,6 +12,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { randomUUID } from "crypto";
+import { spawn } from "node:child_process";
 import {
   DocumentProcessor,
   EmbeddingService,
@@ -37,7 +38,10 @@ const storage = getStorage();
 // Secrets: OpenAI API key is accessed via process.env.OPENAI_API_KEY (same as other functions)
 
 /**
- * Transcribe an audio buffer using OpenAI. Prefers gpt-4o-mini-transcribe with fallback to whisper-1.
+ * Transcribe an audio buffer using OpenAI using only gpt-4o-mini-transcribe.
+ * If the audio duration is >= 1400 seconds OR the raw size exceeds ~24MB, the audio
+ * is chunked via ffmpeg and each segment is transcribed sequentially. This removes
+ * the previous whisper-1 fallback to avoid long delay switching models.
  */
 async function transcribeAudioBuffer(
   buffer: Buffer,
@@ -49,46 +53,108 @@ async function transcribeAudioBuffer(
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
   const openai = new OpenAI({ apiKey });
   const MAX_BYTES = 24 * 1024 * 1024; // keep under server limit (~25MB)
+  const MAX_DIRECT_DURATION_SEC = 1400; // >= 1400s triggers chunking
 
-  // Helper to transcribe a single small buffer (<= limit)
+  // Probe duration using ffmpeg. Returns seconds or null if probe fails.
+  const getAudioDurationSeconds = async (
+    buf: Buffer,
+    nameHint: string
+  ): Promise<number | null> => {
+    let tmpDir: string | null = null;
+    try {
+      tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "probe-"));
+      const inPath = path.join(
+        tmpDir,
+        nameHint || `probe_${randomUUID()}`.replace(/[^a-zA-Z0-9_.-]/g, "")
+      );
+      await fsp.writeFile(inPath, buf);
+      // Ensure ffmpeg path set (ffprobe often not bundled; we parse ffmpeg output)
+      try {
+        if (ffmpegStatic) (ffmpeg as any).setFfmpegPath(ffmpegStatic as string);
+      } catch {
+        /* ignore */
+      }
+      // Run ffmpeg -i <file> (no output encode) to get stderr with Duration line
+      const args = ["-hide_banner", "-i", inPath, "-f", "null", "-"];
+      const ff = spawn(ffmpegStatic as string, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderr = "";
+      ff.stderr.on("data", (d) => (stderr += d.toString()));
+      await new Promise<void>((resolve) => ff.on("close", () => resolve()));
+      const m = stderr.match(/Duration:\s+(\d+):(\d+):(\d+\.\d+)/);
+      if (!m) return null;
+      const [_, hh, mm, ss] = m;
+      const seconds =
+        parseInt(hh, 10) * 3600 + parseInt(mm, 10) * 60 + parseFloat(ss);
+      if (!Number.isFinite(seconds)) return null;
+      return seconds;
+    } catch {
+      return null;
+    } finally {
+      if (tmpDir) {
+        try {
+          await fsp.rm(tmpDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  };
+
+  // Helper to transcribe a single small buffer (<= limit) with simple retry
   const transcribeSmall = async (buf: Buffer, name: string, mt?: string) => {
     const file = await toFile(buf, name || "audio.webm", {
       type: mt || "audio/webm",
     });
-    // Try gpt-4o-mini-transcribe first
-    try {
-      const res: any = await (openai as any).audio.transcriptions.create({
-        file,
-        model: "gpt-4o-mini-transcribe",
-      });
-      const text = String((res?.text as string) || "").trim();
-      if (text) return text;
-    } catch (e) {
-      logger.warn(
-        "gpt-4o-mini-transcribe failed; attempting whisper-1",
-        e as any
-      );
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const res: any = await (openai as any).audio.transcriptions.create({
+          file,
+          model: "gpt-4o-mini-transcribe",
+        });
+        const text = String((res?.text as string) || "").trim();
+        if (text) return text;
+        throw new Error("Empty transcription text");
+      } catch (err) {
+        logger.warn(
+          `gpt-4o-mini-transcribe attempt ${attempt} failed`,
+          err as any
+        );
+        if (attempt === MAX_ATTEMPTS) {
+          throw new Error("Audio transcription failed after retries");
+        }
+        // brief jitter (non-blocking setTimeout wrapped in promise)
+        await new Promise((r) => setTimeout(r, 500 + attempt * 250));
+      }
     }
-    // Fallback to whisper-1
-    try {
-      const res2: any = await (openai as any).audio.transcriptions.create({
-        file,
-        model: "whisper-1",
-      });
-      const text2 = String((res2?.text as string) || "").trim();
-      if (text2) return text2;
-    } catch (e2) {
-      logger.error("whisper-1 transcription failed", e2 as any);
-    }
-    throw new Error("Audio transcription returned empty result");
+    throw new Error("Unreachable");
   };
 
-  // If small enough, transcribe directly
-  if (buffer.byteLength <= MAX_BYTES) {
+  // Decide if we need chunking based on size OR probed duration
+  let needsChunking = buffer.byteLength > MAX_BYTES;
+  let durationSec: number | null = null;
+  if (!needsChunking) {
+    durationSec = await getAudioDurationSeconds(buffer, fileName);
+    if (durationSec && durationSec >= MAX_DIRECT_DURATION_SEC) {
+      needsChunking = true;
+      logger.info("Duration exceeds threshold; using chunked transcription", {
+        durationSec,
+      });
+    }
+  } else {
+    logger.info("Size exceeds threshold; using chunked transcription", {
+      bytes: buffer.byteLength,
+    });
+  }
+
+  // If direct path allowed
+  if (!needsChunking) {
     return transcribeSmall(buffer, fileName, mimeType);
   }
 
-  // Large file: chunk with ffmpeg and transcribe sequentially
+  // Chunk with ffmpeg and transcribe sequentially
   // Ensure ffmpeg binary path set
   try {
     if (ffmpegStatic) (ffmpeg as any).setFfmpegPath(ffmpegStatic as string);
@@ -103,7 +169,7 @@ async function transcribeAudioBuffer(
   await fsp.writeFile(inPath, buffer);
 
   // Segment to ~15 minute parts, transcode down to 16k mono 32kbps for safety.
-  // Rationale: Lower bitrate + mono drastically reduces size while preserving speech clarity for Whisper.
+  // Rationale: Lower bitrate + mono drastically reduces size while preserving speech clarity for transcription.
   // 15 min chosen to keep typical spoken segments < 10MB. Adjust -segment_time if future limits change.
   const outPattern = path.join(outDir, "part_%03d.mp3");
   await new Promise<void>((resolve, reject) => {

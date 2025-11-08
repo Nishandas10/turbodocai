@@ -58,6 +58,7 @@ const fsp = __importStar(require("node:fs/promises"));
 const path = __importStar(require("node:path"));
 const os = __importStar(require("node:os"));
 const crypto_1 = require("crypto");
+const node_child_process_1 = require("node:child_process");
 const services_1 = require("./services");
 // Initialize Firebase Admin
 const app = (0, app_1.initializeApp)();
@@ -73,7 +74,10 @@ const db = (0, firestore_2.getFirestore)(app);
 const storage = (0, storage_1.getStorage)();
 // Secrets: OpenAI API key is accessed via process.env.OPENAI_API_KEY (same as other functions)
 /**
- * Transcribe an audio buffer using OpenAI. Prefers gpt-4o-mini-transcribe with fallback to whisper-1.
+ * Transcribe an audio buffer using OpenAI using only gpt-4o-mini-transcribe.
+ * If the audio duration is >= 1400 seconds OR the raw size exceeds ~24MB, the audio
+ * is chunked via ffmpeg and each segment is transcribed sequentially. This removes
+ * the previous whisper-1 fallback to avoid long delay switching models.
  */
 async function transcribeAudioBuffer(buffer, fileName, mimeType, onProgress) {
     const apiKey = process.env.OPENAI_API_KEY || "";
@@ -81,44 +85,103 @@ async function transcribeAudioBuffer(buffer, fileName, mimeType, onProgress) {
         throw new Error("OPENAI_API_KEY is not set");
     const openai = new openai_1.OpenAI({ apiKey });
     const MAX_BYTES = 24 * 1024 * 1024; // keep under server limit (~25MB)
-    // Helper to transcribe a single small buffer (<= limit)
+    const MAX_DIRECT_DURATION_SEC = 1400; // >= 1400s triggers chunking
+    // Probe duration using ffmpeg. Returns seconds or null if probe fails.
+    const getAudioDurationSeconds = async (buf, nameHint) => {
+        let tmpDir = null;
+        try {
+            tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "probe-"));
+            const inPath = path.join(tmpDir, nameHint || `probe_${(0, crypto_1.randomUUID)()}`.replace(/[^a-zA-Z0-9_.-]/g, ""));
+            await fsp.writeFile(inPath, buf);
+            // Ensure ffmpeg path set (ffprobe often not bundled; we parse ffmpeg output)
+            try {
+                if (ffmpeg_static_1.default)
+                    fluent_ffmpeg_1.default.setFfmpegPath(ffmpeg_static_1.default);
+            }
+            catch (_a) {
+                /* ignore */
+            }
+            // Run ffmpeg -i <file> (no output encode) to get stderr with Duration line
+            const args = ["-hide_banner", "-i", inPath, "-f", "null", "-"];
+            const ff = (0, node_child_process_1.spawn)(ffmpeg_static_1.default, args, {
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            let stderr = "";
+            ff.stderr.on("data", (d) => (stderr += d.toString()));
+            await new Promise((resolve) => ff.on("close", () => resolve()));
+            const m = stderr.match(/Duration:\s+(\d+):(\d+):(\d+\.\d+)/);
+            if (!m)
+                return null;
+            const [_, hh, mm, ss] = m;
+            const seconds = parseInt(hh, 10) * 3600 + parseInt(mm, 10) * 60 + parseFloat(ss);
+            if (!Number.isFinite(seconds))
+                return null;
+            return seconds;
+        }
+        catch (_b) {
+            return null;
+        }
+        finally {
+            if (tmpDir) {
+                try {
+                    await fsp.rm(tmpDir, { recursive: true, force: true });
+                }
+                catch (_c) {
+                    /* ignore */
+                }
+            }
+        }
+    };
+    // Helper to transcribe a single small buffer (<= limit) with simple retry
     const transcribeSmall = async (buf, name, mt) => {
         const file = await (0, openai_1.toFile)(buf, name || "audio.webm", {
             type: mt || "audio/webm",
         });
-        // Try gpt-4o-mini-transcribe first
-        try {
-            const res = await openai.audio.transcriptions.create({
-                file,
-                model: "gpt-4o-mini-transcribe",
-            });
-            const text = String((res === null || res === void 0 ? void 0 : res.text) || "").trim();
-            if (text)
-                return text;
+        const MAX_ATTEMPTS = 2;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                const res = await openai.audio.transcriptions.create({
+                    file,
+                    model: "gpt-4o-mini-transcribe",
+                });
+                const text = String((res === null || res === void 0 ? void 0 : res.text) || "").trim();
+                if (text)
+                    return text;
+                throw new Error("Empty transcription text");
+            }
+            catch (err) {
+                firebase_functions_1.logger.warn(`gpt-4o-mini-transcribe attempt ${attempt} failed`, err);
+                if (attempt === MAX_ATTEMPTS) {
+                    throw new Error("Audio transcription failed after retries");
+                }
+                // brief jitter (non-blocking setTimeout wrapped in promise)
+                await new Promise((r) => setTimeout(r, 500 + attempt * 250));
+            }
         }
-        catch (e) {
-            firebase_functions_1.logger.warn("gpt-4o-mini-transcribe failed; attempting whisper-1", e);
-        }
-        // Fallback to whisper-1
-        try {
-            const res2 = await openai.audio.transcriptions.create({
-                file,
-                model: "whisper-1",
-            });
-            const text2 = String((res2 === null || res2 === void 0 ? void 0 : res2.text) || "").trim();
-            if (text2)
-                return text2;
-        }
-        catch (e2) {
-            firebase_functions_1.logger.error("whisper-1 transcription failed", e2);
-        }
-        throw new Error("Audio transcription returned empty result");
+        throw new Error("Unreachable");
     };
-    // If small enough, transcribe directly
-    if (buffer.byteLength <= MAX_BYTES) {
+    // Decide if we need chunking based on size OR probed duration
+    let needsChunking = buffer.byteLength > MAX_BYTES;
+    let durationSec = null;
+    if (!needsChunking) {
+        durationSec = await getAudioDurationSeconds(buffer, fileName);
+        if (durationSec && durationSec >= MAX_DIRECT_DURATION_SEC) {
+            needsChunking = true;
+            firebase_functions_1.logger.info("Duration exceeds threshold; using chunked transcription", {
+                durationSec,
+            });
+        }
+    }
+    else {
+        firebase_functions_1.logger.info("Size exceeds threshold; using chunked transcription", {
+            bytes: buffer.byteLength,
+        });
+    }
+    // If direct path allowed
+    if (!needsChunking) {
         return transcribeSmall(buffer, fileName, mimeType);
     }
-    // Large file: chunk with ffmpeg and transcribe sequentially
+    // Chunk with ffmpeg and transcribe sequentially
     // Ensure ffmpeg binary path set
     try {
         if (ffmpeg_static_1.default)

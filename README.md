@@ -81,3 +81,17 @@ Flow:
 - Generate a summary, flashcards, quiz, or a podcast using existing callable functions.
 
 No separate OCR service or dependency is required; OpenAI vision handles extraction. If OCR fails, the document is marked `processingStatus: failed` with `processingError` for user feedback.
+
+## Audio transcription pipeline
+
+You can upload audio files. These are stored under user document storage paths and picked up by the `processDocument` Cloud Function with `type: "audio"`.
+
+Behavior:
+
+- Uses OpenAI `gpt-4o-mini-transcribe` exclusively. The prior fallback to `whisper-1` has been removed to avoid minute-long delays when switching models.
+- Duration-aware chunking: if the input is longer than 1400 seconds (~23m 20s) or the raw upload exceeds ~24MB, the function transparently chunks the audio with ffmpeg (mono, 16kHz, 32kbps; ~15-minute segments) and transcribes sequentially. Progress updates are reflected in Firestore `processingProgress`.
+- The concatenated transcript is cleaned via the TXT pipeline and persisted the same way as other text sources.
+
+Notes:
+
+- ffmpeg is bundled via `ffmpeg-static`. If probing or segmentation fails, the function surfaces an error and marks the document as failed.
