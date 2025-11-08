@@ -9,6 +9,7 @@ import { listenToUserDocuments, listenToUserSpaces, updateDocument, deleteDocume
 import type { Document as UserDoc, Space as SpaceType, MindMap, Chat } from "@/lib/types"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import Image from 'next/image'
+import Favicon from '@/components/Favicon'
 
 export default function NotesPage() {
     const { user } = useAuth()
@@ -157,7 +158,7 @@ export default function NotesPage() {
         const snippet = (doc.summary || doc.content?.raw || '').slice(0, 120)
         return (
           <div className="flex flex-col items-center justify-center w-full h-full p-3 text-center">
-            <Globe className="h-7 w-7 text-muted-foreground mb-1" />
+            {host ? <Favicon host={host} className="h-7 w-7 mb-1 rounded" /> : <Globe className="h-7 w-7 text-muted-foreground mb-1" />}
             <p className="text-[10px] font-medium truncate w-full">{host || 'Website'}</p>
             {snippet && <p className="text-[10px] opacity-70 line-clamp-2">{snippet}</p>}
           </div>

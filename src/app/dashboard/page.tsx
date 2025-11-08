@@ -38,6 +38,7 @@ import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
 import type { PublicDocumentMeta } from "@/lib/firestore"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { functions } from "@/lib/firebase"
+import Favicon from "@/components/Favicon"
 import { httpsCallable } from "firebase/functions"
 
 export default function Dashboard() {
@@ -337,7 +338,21 @@ export default function Dashboard() {
       )
     }
   if (doc.type === 'youtube') return <Play className={iconCls} />
-    if (doc.type === 'website') return <Globe className={iconCls} />
+    if (doc.type === 'website') {
+      // PublicDocumentMeta.metadata may not declare `url`; prefer masterUrl, then try metadata.url if present
+      const rawUrl = (typeof doc.masterUrl === 'string' && doc.masterUrl)
+        ? doc.masterUrl
+        : ((doc.metadata as unknown as { url?: string })?.url || '')
+      const host = (() => {
+        try { return new URL(rawUrl).hostname.replace(/^www\./,'') } catch { return '' }
+      })()
+      return (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
+          {host ? <Favicon host={host} className="h-8 w-8 mb-1 rounded" /> : <Globe className={iconCls} />}
+          <p className="text-[10px] font-medium truncate w-full">{host || 'Website'}</p>
+        </div>
+      )
+    }
     if (doc.type === 'audio') return <Mic className={iconCls} />
 
     if (text) {
@@ -389,7 +404,18 @@ export default function Dashboard() {
         </div>
       )
     }
-    if (doc.type === 'website') return <Globe className={iconCls} />
+    if (doc.type === 'website') {
+      const rawUrl = (doc.metadata?.url || '') as string
+      const host = (() => {
+        try { return new URL(rawUrl).hostname.replace(/^www\./,'') } catch { return '' }
+      })()
+      return (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
+          {host ? <Favicon host={host} className="h-8 w-8 mb-1 rounded" /> : <Globe className={iconCls} />}
+          <p className="text-[10px] font-medium truncate w-full">{host || 'Website'}</p>
+        </div>
+      )
+    }
     if (doc.type === 'audio') return <Mic className={iconCls} />
 
     // Default: show text excerpt if available

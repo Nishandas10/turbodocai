@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react'
-import { Plus, ChevronDown, Grid3X3, List, Quote, Code, Image, Minus, ChevronRight } from 'lucide-react'
+import { Plus, ChevronDown, Grid3X3, List, Quote, Code, ImagePlus, Minus, ChevronRight } from 'lucide-react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { INSERT_TABLE_COMMAND } from '@lexical/table'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
@@ -364,7 +364,7 @@ export default function InsertTools() {
             )}
           </div>
           <button onClick={() => handleInsert('image')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
-            <Image className="h-4 w-4" />
+            <ImagePlus aria-hidden="true" focusable="false" className="h-4 w-4" />
             <span>Image</span>
           </button>
           <button onClick={() => handleInsert('horizontal-rule')} className="w-full flex items-center space-x-3 px-3 py-2 text-foreground hover:bg-muted text-sm">
