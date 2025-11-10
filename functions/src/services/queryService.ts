@@ -46,6 +46,11 @@ export class QueryService {
     });
   }
 
+  // Shared instruction to align Notes assistant behavior with Chat page assistant
+  private baseInstruction(): string {
+    return "You are a helpful AI assistant. When a vector store is attached, you MUST ground answers strictly on retrieved files via the file_search tool. When only plain context blocks are provided, prefer grounded answers using those. If context is insufficient, say so and optionally ask for more info. Keep responses concise and clear. Use markdown when helpful.";
+  }
+
   /**
    * Query the RAG system with a question
    */
@@ -250,8 +255,7 @@ export class QueryService {
       // Create a temporary assistant with file_search enabled on the vector store
       const assistant = await this.openai.beta.assistants.create({
         model: "gpt-4o-mini",
-        instructions:
-          "You are a helpful assistant that answers questions based strictly on the provided documents. Use the file_search tool to find relevant information and ground your answers only on retrieved content. If you cannot find the information in the documents, say so clearly.",
+        instructions: this.baseInstruction(),
         tools: [{ type: "file_search" }],
         tool_resources: {
           file_search: {
@@ -329,25 +333,17 @@ export class QueryService {
     context: string
   ): Promise<string> {
     try {
-      const prompt = this.buildPrompt(question, context);
+      // Align with chat assistant: put grounding instruction in system + attach context block
+      const systemContent = `${this.baseInstruction()}\n\nContext (use this to answer):\n${context}`;
 
       const response = await this.openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          {
-            role: "system",
-            content: `You are a helpful AI assistant that answers questions based on provided document context. 
-            Always base your answers on the given context and cite sources when possible. 
-            If the context doesn't contain enough information to answer the question, say so clearly.
-            Keep your answers concise but comprehensive.`,
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
+          { role: "system", content: systemContent },
+          { role: "user", content: question },
         ],
         max_tokens: 1000,
-        temperature: 0.1,
+        temperature: 0.2,
       });
 
       return (
@@ -363,16 +359,7 @@ export class QueryService {
   /**
    * Build the prompt for the LLM
    */
-  private buildPrompt(question: string, context: string): string {
-    return `Please answer the following question using only the provided context. If the context doesn't contain enough information to answer the question, please say so.
-
-Context:
-${context}
-
-Question: ${question}
-
-Answer:`;
-  }
+  // buildPrompt removed; generateAnswer now constructs messages directly with system + context.
 
   /**
    * Summarize a document using OpenAI Assistants API with file_search over a vector store.
