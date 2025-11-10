@@ -90,7 +90,7 @@ export interface MarkdownMessageProps {
 export default function MarkdownMessage({ content }: MarkdownMessageProps) {
   usePrismHighlight(content);
   return (
-    <div className="prose prose-invert max-w-none prose-headings:mt-6 prose-headings:mb-4 prose-p:my-4 prose-p:leading-7 prose-ul:my-4 prose-ol:my-4 prose-li:my-2 prose-pre:rounded-xl prose-pre:bg-[#111]/80 prose-code:text-blue-300 prose-code:before:hidden prose-code:after:hidden prose-table:mt-6 prose-table:mb-8 prose-blockquote:my-6" style={{ fontSize: '15px' }}>
+    <div className="prose dark:prose-invert max-w-none text-foreground prose-headings:text-foreground prose-headings:mt-6 prose-headings:mb-4 prose-p:my-4 prose-p:leading-7 prose-ul:my-4 prose-ol:my-4 prose-li:my-2 prose-pre:rounded-xl prose-pre:bg-[#111]/80 prose-code:text-blue-300 prose-code:before:hidden prose-code:after:hidden prose-table:mt-6 prose-table:mb-8 prose-blockquote:my-6" style={{ fontSize: '15px' }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
@@ -99,7 +99,7 @@ export default function MarkdownMessage({ content }: MarkdownMessageProps) {
             const content = String(p.children);
             const emoji = getEmojiForHeading(content, 1);
             return (
-              <h1 className="text-2xl font-semibold tracking-tight mb-4 mt-8 border-b border-border/30 pb-2 text-white" {...p}>
+              <h1 className="text-2xl font-semibold tracking-tight mb-4 mt-8 border-b border-border/30 pb-2 text-foreground" {...p}>
                 {emoji && <span className="mr-2">{emoji}</span>}
                 {p.children}
               </h1>
@@ -109,7 +109,7 @@ export default function MarkdownMessage({ content }: MarkdownMessageProps) {
             const content = String(p.children);
             const emoji = getEmojiForHeading(content, 2);
             return (
-              <h2 className="text-xl font-semibold tracking-tight border-b border-border/50 pb-2 mb-4 mt-8 text-white" {...p}>
+              <h2 className="text-xl font-semibold tracking-tight border-b border-border/50 pb-2 mb-4 mt-8 text-foreground" {...p}>
                 {emoji && <span className="mr-2">{emoji}</span>}
                 {p.children}
               </h2>
@@ -119,7 +119,7 @@ export default function MarkdownMessage({ content }: MarkdownMessageProps) {
             const content = String(p.children);
             const emoji = getEmojiForHeading(content, 3);
             return (
-              <h3 className="text-lg font-semibold tracking-tight mb-3 mt-6 text-white" {...p}>
+              <h3 className="text-lg font-semibold tracking-tight mb-3 mt-6 text-foreground" {...p}>
                 {emoji && <span className="mr-2">{emoji}</span>}
                 {p.children}
               </h3>
@@ -129,7 +129,7 @@ export default function MarkdownMessage({ content }: MarkdownMessageProps) {
             const content = String(p.children);
             const emoji = getEmojiForHeading(content, 4);
             return (
-              <h4 className="text-base font-semibold tracking-tight mb-2 mt-4 text-white" {...p}>
+              <h4 className="text-base font-semibold tracking-tight mb-2 mt-4 text-foreground" {...p}>
                 {emoji && <span className="mr-2">{emoji}</span>}
                 {p.children}
               </h4>
@@ -169,7 +169,7 @@ export default function MarkdownMessage({ content }: MarkdownMessageProps) {
           th: (p) => <th className="bg-muted/60 px-4 py-3 text-left font-medium border-b border-r border-border/40 last:border-r-0" {...p} />,
           td: (p) => <td className="px-4 py-3 align-top border-b border-r border-border/30 last:border-r-0" {...p} />,
           blockquote: (p) => <blockquote className="border-l-4 border-blue-500/50 pl-6 my-6 italic text-foreground/90 bg-muted/20 py-2 rounded-r-lg" {...p} />,
-          a: (p) => <a className="text-blue-400 hover:underline hover:text-blue-300 transition-colors" target="_blank" rel="noopener noreferrer" {...p} />,
+          a: (p) => <a className="text-blue-600 dark:text-blue-300 hover:underline hover:text-blue-700 dark:hover:text-blue-200 transition-colors" target="_blank" rel="noopener noreferrer" {...p} />,
           hr: () => <hr className="my-8 border-border/60" />,
           strong: (p) => <strong className="font-semibold text-foreground" {...p} />,
           em: (p) => <em className="italic text-foreground/90" {...p} />

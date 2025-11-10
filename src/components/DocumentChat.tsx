@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Loader2, Brain } from "lucide-react";
+import { Send, Loader2, Brain, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { queryDocuments, QueryResult } from "@/lib/ragService";
 import MarkdownMessage from "@/components/MarkdownMessage";
+import { useSpeechToText } from "@/hooks/useSpeechToText";
 
 interface ChatMessage {
   id: string;
@@ -28,6 +29,15 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
+  const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
+    lang: 'en-US',
+    fallbackLangs: ['en-US'],
+    continuous: false,
+    interimResults: true,
+    onSegment: (seg) => {
+      setInputValue((prev) => (prev ? prev + ' ' : '') + seg);
+    }
+  });
 
   // Dynamic follow-up detection (length/semantic-light heuristics) and context-aware expansion
   const STOPWORDS = new Set([
@@ -308,15 +318,38 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
 
       {/* Input */}
       <div className="p-4 border-t border-border bg-card">
-        <div className="flex gap-2">
-          <textarea
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask a question about your documents..."
-            className="flex-1 min-h-[40px] max-h-[120px] p-3 bg-background border border-border rounded-lg resize-none text-card-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
-            disabled={isLoading}
-          />
+        <div className="flex gap-2 items-stretch">
+          <div className="flex-1 relative">
+            <textarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask a question about your documents..."
+              className="w-full min-h-[40px] max-h-[120px] p-3 bg-background border border-border rounded-lg resize-none text-card-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 pr-10"
+              disabled={isLoading}
+            />
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (isLoading) return;
+                  if (listening) {
+                    stopSpeech();
+                  } else {
+                    resetSpeech();
+                    startSpeech();
+                  }
+                }}
+                title={listening ? 'Stop voice input' : 'Start voice input'}
+                aria-pressed={listening}
+                aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+                className={`absolute right-2 bottom-2 p-2 rounded-md transition-colors ${listening ? 'text-red-500' : 'text-muted-foreground hover:text-foreground'}`}
+                disabled={isLoading}
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <Button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading}
@@ -325,9 +358,14 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
             <Send className="h-4 w-4" />
           </Button>
         </div>
-        
-        <div className="text-xs text-muted-foreground mt-2">
-          Press Enter to send, Shift+Enter for new line
+
+        <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+          <span>Press Enter to send, Shift+Enter for new line</span>
+          {speechSupported && (
+            <span className="truncate max-w-[60%]" aria-live="polite">
+              {listening ? (interimTranscript || 'Listening…') : ''}
+            </span>
+          )}
         </div>
       </div>
     </div>

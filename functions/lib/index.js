@@ -196,7 +196,7 @@ async function transcribeAudioBuffer(buffer, fileName, mimeType, onProgress) {
     await fsp.mkdir(outDir, { recursive: true });
     await fsp.writeFile(inPath, buffer);
     // Segment to ~15 minute parts, transcode down to 16k mono 32kbps for safety.
-    // Rationale: Lower bitrate + mono drastically reduces size while preserving speech clarity for Whisper.
+    // Rationale: Lower bitrate + mono drastically reduces size while preserving speech clarity for transcription.
     // 15 min chosen to keep typical spoken segments < 10MB. Adjust -segment_time if future limits change.
     const outPattern = path.join(outDir, "part_%03d.mp3");
     await new Promise((resolve, reject) => {
