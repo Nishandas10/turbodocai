@@ -15,6 +15,9 @@ import { useSpeechToText } from '@/hooks/useSpeechToText'
 import { useAuth } from '@/contexts/AuthContext'
 import { queryDocuments } from '@/lib/ragService'
 import MarkdownMessage from '@/components/MarkdownMessage'
+import { db, functions } from '@/lib/firebase'
+import { collection, onSnapshot, orderBy, query, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore'
+import { httpsCallable } from 'firebase/functions'
 
 interface ChatMsg {
   id: string
@@ -41,6 +44,9 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   const [mode, setMode] = useState<'chat' | 'write' | 'comment'>('chat')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
+  // Firestore-backed chat state for streaming (chat mode)
+  const [chatId, setChatId] = useState<string | null>(null)
+  const [chatMessages, setChatMessages] = useState<Array<{ id?: string; role: 'user'|'assistant'|'system'; content: string; streaming?: boolean }>>([])
   const [sending, setSending] = useState(false)
   // Removed stream-to-doc toggle; chat mode will not write to the editor
   const [pendingContent, setPendingContent] = useState('')
@@ -87,12 +93,12 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     }
   })
 
-  // Auto-scroll
+  // Auto-scroll (both local write messages and Firestore chat messages)
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages])
+  }, [messages, chatMessages])
 
-  // Load persisted messages on mount or when documentId changes
+  // Load persisted messages on mount or when documentId changes (write mode history)
   useEffect(() => {
     try {
       const raw = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null
@@ -107,6 +113,31 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       // ignore malformed storage
     }
   }, [storageKey])
+
+  // Restore existing per-document chatId (shared with DocumentChat) if present
+  useEffect(() => {
+    if (!user?.uid || !documentId) return
+    try {
+      const key = `doc_chat_${user.uid}_${documentId}`
+      const existing = localStorage.getItem(key)
+      if (existing) setChatId(existing)
+    } catch { /* ignore */ }
+  }, [user?.uid, documentId])
+
+  // Subscribe to Firestore chat messages when chat mode and chatId available
+  useEffect(() => {
+    if (mode !== 'chat' || !chatId) return
+    const col = collection(db, 'chats', chatId, 'messages')
+    const qy = query(col, orderBy('createdAt', 'asc'))
+    const unsub = onSnapshot(qy, snap => {
+      const msgs = snap.docs.map(d => {
+        const data = d.data() as any
+        return { id: d.id, role: data.role, content: data.content, streaming: !!data.streaming }
+      })
+      setChatMessages(msgs)
+    })
+    return () => unsub()
+  }, [mode, chatId])
 
   // Persist messages whenever they change
   useEffect(() => {
@@ -251,65 +282,70 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       return
     }
 
-    // Chat mode: call RAG with document context and stream answer
-    if (!user?.uid) {
-      const warn: ChatMsg = { id: `${Date.now()}-noauth`, role: 'assistant', text: 'Please sign in to chat with your documents.', ts: Date.now() }
-      setMessages(prev => [...prev, warn])
+    // Chat mode -> use sendChatMessage + Firestore streaming (shared logic with DocumentChat)
+    if (mode === 'chat') {
+      if (!user?.uid) {
+        setMessages(prev => [...prev, { id: `${Date.now()}-noauth`, role: 'assistant', text: 'Please sign in to chat with your documents.', ts: Date.now() }])
+        return
+      }
+      setSending(true)
+      try {
+        let cid = chatId
+        if (!cid) {
+          const call = httpsCallable(functions, 'sendChatMessage')
+          const resp = await call({ userId: user.uid, prompt: text, language: 'en', docIds: documentId ? [documentId] : [] })
+          const data = resp.data as { success: boolean; data?: { chatId: string }; error?: string }
+          if (!data.success || !data.data?.chatId) throw new Error(data.error || 'Failed to start chat')
+          cid = data.data.chatId
+          setChatId(cid)
+          try { localStorage.setItem(`doc_chat_${user.uid}_${documentId}`, cid) } catch {}
+        } else {
+          // Optimistic user message commit to Firestore (server will stream the assistant reply)
+          await addDoc(collection(db, 'chats', cid, 'messages'), { role: 'user', content: text, userId: user.uid, createdAt: serverTimestamp() })
+          await setDoc(doc(db, 'chats', cid), { updatedAt: serverTimestamp() }, { merge: true })
+          const call = httpsCallable(functions, 'sendChatMessage')
+          void call({ userId: user.uid, prompt: text, chatId: cid, language: 'en', docIds: documentId ? [documentId] : [] })
+        }
+        resetSpeech()
+      } catch (e) {
+        console.error('Chat send failed', e)
+        setMessages(prev => [...prev, { id: `${Date.now()}-err`, role: 'assistant', text: 'Failed to send message.', ts: Date.now() }])
+      } finally {
+        setSending(false)
+      }
       return
     }
 
+    // Write mode (retain previous RAG + placement behavior)
+    if (!user?.uid) {
+      setMessages(prev => [...prev, { id: `${Date.now()}-noauth`, role: 'assistant', text: 'Please sign in to generate content.', ts: Date.now() }])
+      return
+    }
     setSending(true)
-    // Placeholder assistant message to be updated
     const asstId = `${Date.now()}-asst`
     setMessages(prev => [...prev, { id: asstId, role: 'assistant', text: '', ts: Date.now() }])
-    
     try {
-      // Get current document structure for context
       const docStructure = getCurrentDocumentStructure()
-      
-      // Enhanced query with document context and explicit Markdown formatting directive
       const formattingDirective = `\n\nFormat your answer in rich Markdown with:\n- Clear headings (##, ###) and short sections\n- Bulleted/numbered lists when helpful\n- Occasional emojis for scannability\n- Tables or code blocks if relevant\nAvoid citing sources inline; keep the tone concise.`
-      const contextualQuery =
-        text +
-        (docStructure.headings.length > 0
-          ? `\n\nCurrent document structure: ${docStructure.headings
-              .map(h => `H${h.level}: ${h.text}`)
-              .join(', ')}`
-          : '') +
-        formattingDirective
-      
-  // Query with document ID for better context from OpenAI Vector Store
-      const res = await queryDocuments({ 
-        question: contextualQuery, 
-        userId: effOwner || user.uid,
-        documentId: documentId // Include current document for context
-      })
+      const contextualQuery = text + (docStructure.headings.length > 0 ? `\n\nCurrent document structure: ${docStructure.headings.map(h => `H${h.level}: ${h.text}`).join(', ')}` : '') + formattingDirective
+      const res = await queryDocuments({ question: contextualQuery, userId: effOwner || user.uid, documentId })
       const answer = res.answer || 'I could not find an answer.'
-
-      // Check if this is a content generation request
       const intent = parseContentIntent(text)
       let finalAnswer = answer
-
       if (intent.isContentRequest && !intent.placement) {
         finalAnswer += '\n\nWhere would you like me to add this content? (beginning, end, after heading, etc.)'
-        // Set up for placement selection
         setPendingContent(answer)
         setPendingMessageId(asstId)
       }
-
-      // Stream into sidebar UI
-      await streamOutput(finalAnswer, (partial) => {
+      await streamOutput(finalAnswer, partial => {
         setMessages(prev => prev.map(m => m.id === asstId ? { ...m, text: partial } : m))
       })
-
-      // Chat mode: never write assistant responses into the editor
-      
     } catch {
       setMessages(prev => prev.map(m => m.id === asstId ? { ...m, text: 'Error fetching answer. Try again.' } : m))
     } finally {
       setSending(false)
     }
-  }, [input, sending, mode, user?.uid, documentId, parseContentIntent, getCurrentDocumentStructure, streamOutput, effOwner])
+  }, [input, sending, mode, user?.uid, documentId, chatId, effOwner, resetSpeech, getCurrentDocumentStructure, parseContentIntent, streamOutput])
 
   // Handle placement selection
   const handlePlacementSelection = useCallback(async (placement: string) => {
@@ -365,58 +401,58 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       </div>
 
   {/* Messages list */}
-  <div ref={listRef} className={`flex-1 overflow-y-auto px-4 space-y-3 ${messages.length > 0 ? 'pt-3' : ''}`}>
-        {messages.length === 0 && (
-          <div className="h-full flex items-center justify-center px-6 py-8">
-            <div className="text-center">
-              <h1 className="text-2xl md:text-3xl font-bold text-foreground">Hey, I&apos;m Blume AI</h1>
-              <p className="text-muted-foreground text-sm md:text-base mt-1">Ask questions or tell me what to write — I can type into your doc with a live cursor.</p>
+  <div ref={listRef} className={`flex-1 overflow-y-auto px-4 space-y-3 ${mode==='chat' ? (chatMessages.length>0 ? 'pt-3' : '') : (messages.length>0 ? 'pt-3' : '')}`}>
+        {mode === 'chat' ? (
+          chatMessages.length === 0 ? (
+            <div className="h-full flex items-center justify-center px-6 py-8">
+              <div className="text-center">
+                <h1 className="text-2xl md:text-3xl font-bold text-foreground">Ask about this note</h1>
+                <p className="text-muted-foreground text-sm md:text-base mt-1">Answers will be grounded in the document's indexed content.</p>
+              </div>
             </div>
-          </div>
-        )}
-        {messages.map(m => (
-          <div key={m.id} className={`w-full text-left`}>
-            <div className={`inline-block rounded-lg ${m.role === 'user' ? 'bg-blue-500 text-white px-3 py-2' : 'bg-muted/40 px-0 py-0'}`}>
-              {m.role === 'assistant' ? (
-                <div className="p-3">
-                  <MarkdownMessage content={m.text} />
+          ) : (
+            chatMessages.map(m => (
+              <div key={m.id} className={`w-full ${m.role==='user' ? 'text-right' : 'text-left'}`}>
+                <div className={`inline-block rounded-lg ${m.role==='user' ? 'bg-blue-500 text-white px-3 py-2' : 'bg-muted/40 px-0 py-0'}`}>
+                  {m.role==='assistant' ? (
+                    <div className="p-3"><MarkdownMessage content={m.content} />{m.streaming ? <span className="animate-pulse ml-1">█</span> : null}</div>
+                  ) : (
+                    <div className="px-3 py-2 whitespace-pre-wrap">{m.content}</div>
+                  )}
                 </div>
-              ) : (
-                <div className="px-3 py-2 whitespace-pre-wrap">{m.text}</div>
-              )}
-
-              {/* Placement options for content requests */}
-              {m.awaitingPlacement && (
-                <div className="mt-2 mb-2 px-3 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => handlePlacementSelection('beginning')}
-                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                  >
-                    <MapPin className="h-3 w-3 inline mr-1" />
-                    Beginning
-                  </button>
-                  <button
-                    onClick={() => handlePlacementSelection('end')}
-                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                  >
-                    <MapPin className="h-3 w-3 inline mr-1" />
-                    End
-                  </button>
-                  <button
-                    onClick={() => handlePlacementSelection('after-heading')}
-                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                  >
-                    <MapPin className="h-3 w-3 inline mr-1" />
-                    After Heading
-                  </button>
-                </div>
-              )}
+              </div>
+            ))
+          )
+        ) : (
+          messages.length === 0 ? (
+            <div className="h-full flex items-center justify-center px-6 py-8">
+              <div className="text-center">
+                <h1 className="text-2xl md:text-3xl font-bold text-foreground">Hey, I&apos;m Blume AI</h1>
+                <p className="text-muted-foreground text-sm md:text-base mt-1">Ask questions or tell me what to write — I can type into your doc with a live cursor.</p>
+              </div>
             </div>
-          </div>
-        ))}
-        {sending && (
-          <div className="text-muted-foreground text-sm">Thinking…</div>
+          ) : (
+            messages.map(m => (
+              <div key={m.id} className={`w-full text-left`}>
+                <div className={`inline-block rounded-lg ${m.role === 'user' ? 'bg-blue-500 text-white px-3 py-2' : 'bg-muted/40 px-0 py-0'}`}>
+                  {m.role === 'assistant' ? (
+                    <div className="p-3"><MarkdownMessage content={m.text} /></div>
+                  ) : (
+                    <div className="px-3 py-2 whitespace-pre-wrap">{m.text}</div>
+                  )}
+                  {m.awaitingPlacement && (
+                    <div className="mt-2 mb-2 px-3 flex flex-wrap gap-2">
+                      <button onClick={() => handlePlacementSelection('beginning')} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"><MapPin className="h-3 w-3 inline mr-1" />Beginning</button>
+                      <button onClick={() => handlePlacementSelection('end')} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"><MapPin className="h-3 w-3 inline mr-1" />End</button>
+                      <button onClick={() => handlePlacementSelection('after-heading')} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"><MapPin className="h-3 w-3 inline mr-1" />After Heading</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          )
         )}
+        {sending && <div className="text-muted-foreground text-sm">Thinking…</div>}
       </div>
 
       {/* Input Field */}
