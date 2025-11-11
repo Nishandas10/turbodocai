@@ -131,7 +131,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     const qy = query(col, orderBy('createdAt', 'asc'))
     const unsub = onSnapshot(qy, snap => {
       const msgs = snap.docs.map(d => {
-        const data = d.data() as any
+        const data = d.data() as { role: 'user'|'assistant'|'system'; content: string; streaming?: boolean }
         return { id: d.id, role: data.role, content: data.content, streaming: !!data.streaming }
       })
       setChatMessages(msgs)
@@ -407,7 +407,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
             <div className="h-full flex items-center justify-center px-6 py-8">
               <div className="text-center">
                 <h1 className="text-2xl md:text-3xl font-bold text-foreground">Ask about this note</h1>
-                <p className="text-muted-foreground text-sm md:text-base mt-1">Answers will be grounded in the document's indexed content.</p>
+                <p className="text-muted-foreground text-sm md:text-base mt-1">Answers will be grounded in the document&apos;s indexed content.</p>
               </div>
             </div>
           ) : (
