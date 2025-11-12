@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useMemo } from "react"
 import useSpeechToText from "@/hooks/useSpeechToText"
 import Image from "next/image"
 import { 
@@ -31,10 +31,10 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
-import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument, createWebsiteDocument, getDocument as getUserDoc } from "@/lib/firestore"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument, createWebsiteDocument, getDocument as getUserDoc, listenToUserChats } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
-import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
+import type { Document as UserDoc, Space as SpaceType, Chat } from "@/lib/types"
 import type { PublicDocumentMeta } from "@/lib/firestore"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { functions } from "@/lib/firebase"
@@ -60,6 +60,7 @@ export default function Dashboard() {
   const [youtubeVideoModalOpen, setYoutubeVideoModalOpen] = useState(false)
   const [websiteLinkModalOpen, setWebsiteLinkModalOpen] = useState(false)
   const [recentDocs, setRecentDocs] = useState<UserDoc[]>([])
+  const [recentChats, setRecentChats] = useState<Chat[]>([])
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const [spaceCounts, setSpaceCounts] = useState<Record<string, number>>({})
   const [exploreDocs, setExploreDocs] = useState<PublicDocumentMeta[]>([])
@@ -163,6 +164,20 @@ export default function Dashboard() {
     }
     const unsubscribe = listenToUserDocuments(user.uid, (docs) => {
       setRecentDocs(docs.slice(0, 8))
+    })
+    return () => {
+      try { unsubscribe() } catch {}
+    }
+  }, [user?.uid])
+
+  // Listen to user's recent chats
+  useEffect(() => {
+    if (!user?.uid) {
+      setRecentChats([])
+      return
+    }
+    const unsubscribe = listenToUserChats(user.uid, (chats) => {
+      setRecentChats(chats.slice(0, 8))
     })
     return () => {
       try { unsubscribe() } catch {}
@@ -364,6 +379,11 @@ export default function Dashboard() {
       )
     }
     return <FileText className={iconCls} />
+  }
+
+  const renderChatPreview = () => {
+    const iconCls = "h-8 w-8 text-muted-foreground"
+    return <Brain className={iconCls} />
   }
 
   const renderDocPreview = (doc: UserDoc) => {
@@ -647,6 +667,39 @@ export default function Dashboard() {
   const openRecentDoc = (doc: UserDoc) => {
     router.push(`/notes/${doc.id}`)
   }
+
+  // Open a recent chat
+  const openRecentChat = (chat: Chat) => {
+    router.push(`/chat/${chat.id}`)
+  }
+
+  // Combine and sort recent documents and chats
+  const combinedRecentItems = useMemo(() => {
+    type RecentItem = { type: 'document'; item: UserDoc } | { type: 'chat'; item: Chat }
+    
+    const docItems: RecentItem[] = recentDocs.map(doc => ({ type: 'document' as const, item: doc }))
+    const chatItems: RecentItem[] = recentChats.map(chat => ({ type: 'chat' as const, item: chat }))
+    
+    const allItems = [...docItems, ...chatItems]
+    
+    // Sort by updatedAt/lastAccessed (most recent first)
+    allItems.sort((a, b) => {
+      const aTime = a.type === 'document' 
+        ? (a.item.lastAccessed || a.item.updatedAt)
+        : (a.item.lastAccessed || a.item.updatedAt)
+      const bTime = b.type === 'document'
+        ? (b.item.lastAccessed || b.item.updatedAt)
+        : (b.item.lastAccessed || b.item.updatedAt)
+        
+      // Convert Timestamp to number for comparison
+      const aTimestamp = aTime instanceof Date ? aTime.getTime() : aTime.toMillis()
+      const bTimestamp = bTime instanceof Date ? bTime.getTime() : bTime.toMillis()
+      
+      return bTimestamp - aTimestamp
+    })
+    
+    return allItems.slice(0, 8) // Limit to 8 total items
+  }, [recentDocs, recentChats])
 
   // Parse mirror id of public docs: `${ownerId}_${documentId}`
   const parseMirrorId = (mirrorId: string) => {
@@ -1031,62 +1084,86 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {recentDocs.length === 0 ? (
-              <div className="text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">No recent documents yet.</div>
+            {combinedRecentItems.length === 0 ? (
+              <div className="text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">No recent documents or chats yet.</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {recentDocs.map((d) => (
-                  <div
-                    key={d.id}
-                    className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative"
-                    onClick={() => openRecentDoc(d)}
-                  >
-                    <div className="relative h-32 bg-muted flex items-center justify-center">
-                      {renderDocPreview(d)}
-                      <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">{username}&apos;s Space</span>
-                      {/* Three dots menu */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label="Document menu"
-                          >
-                            <MoreHorizontal className="h-4 w-4 text-black" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
-                          <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); toggleVisibility(d) }} className="flex items-center gap-2">
-                            {d.isPublic ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                            <span>{d.isPublic ? 'Make private' : 'Make public'}</span>
-                          </DropdownMenuItem>
-                          <div className="my-1 h-px bg-border" />
-                          {spaces.length === 0 ? (
-                            <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
-                          ) : (
-                            <>
-                              <DropdownMenuItem disabled className="opacity-70">Add to space</DropdownMenuItem>
-                              {spaces.slice(0,6).map(sp => (
-                                <DropdownMenuItem key={sp.id} onSelect={(e)=>{ e.preventDefault(); addDocToSpace(d, sp.id) }}>
-                                  {sp.name || 'Untitled'}
-                                </DropdownMenuItem>
-                              ))}
-                              {d.spaceId ? (
-                                <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); removeDocFromSpace(d) }}>Remove from space</DropdownMenuItem>
-                              ) : null}
-                            </>
-                          )}
-                          <div className="my-1 h-px bg-border" />
-                          <DropdownMenuItem className="text-destructive" onSelect={(e)=>{ e.preventDefault(); deleteDocPermanently(d) }}>Delete</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    <div className="p-4">
-                      <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
-                      <p className="text-xs text-muted-foreground">{relativeTime(d.createdAt || d.updatedAt)}</p>
-                    </div>
-                  </div>
-                ))}
+                {combinedRecentItems.map((item) => {
+                  if (item.type === 'document') {
+                    const d = item.item
+                    return (
+                      <div
+                        key={`doc-${d.id}`}
+                        className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative"
+                        onClick={() => openRecentDoc(d)}
+                      >
+                        <div className="relative h-32 bg-muted flex items-center justify-center">
+                          {renderDocPreview(d)}
+                          <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">{username}&apos;s Space</span>
+                          {/* Three dots menu */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label="Document menu"
+                              >
+                                <MoreHorizontal className="h-4 w-4 text-black" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
+                              <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); toggleVisibility(d) }} className="flex items-center gap-2">
+                                {d.isPublic ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                                <span>{d.isPublic ? 'Make private' : 'Make public'}</span>
+                              </DropdownMenuItem>
+                              <div className="my-1 h-px bg-border" />
+                              {spaces.length === 0 ? (
+                                <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
+                              ) : (
+                                <>
+                                  <DropdownMenuItem disabled className="opacity-70">Add to space</DropdownMenuItem>
+                                  {spaces.slice(0,6).map(sp => (
+                                    <DropdownMenuItem key={sp.id} onSelect={(e)=>{ e.preventDefault(); addDocToSpace(d, sp.id) }}>
+                                      {sp.name || 'Untitled'}
+                                    </DropdownMenuItem>
+                                  ))}
+                                  {d.spaceId ? (
+                                    <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); removeDocFromSpace(d) }}>Remove from space</DropdownMenuItem>
+                                  ) : null}
+                                </>
+                              )}
+                              <div className="my-1 h-px bg-border" />
+                              <DropdownMenuItem className="text-destructive" onSelect={(e)=>{ e.preventDefault(); deleteDocPermanently(d) }}>Delete</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        <div className="p-4">
+                          <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
+                          <p className="text-xs text-muted-foreground">{relativeTime(d.createdAt || d.updatedAt)}</p>
+                        </div>
+                      </div>
+                    )
+                  } else {
+                    // Chat item
+                    const c = item.item
+                    return (
+                      <div
+                        key={`chat-${c.id}`}
+                        className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative"
+                        onClick={() => openRecentChat(c)}
+                      >
+                        <div className="relative h-32 bg-muted flex items-center justify-center">
+                          {renderChatPreview()}
+                          <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">Chat</span>
+                        </div>
+                        <div className="p-4">
+                          <p className="font-medium text-card-foreground truncate" title={c.title}>{c.title || 'Untitled Chat'}</p>
+                          <p className="text-xs text-muted-foreground">{relativeTime(c.updatedAt || c.createdAt)}</p>
+                        </div>
+                      </div>
+                    )
+                  }
+                })}
               </div>
             )}
           </div>
