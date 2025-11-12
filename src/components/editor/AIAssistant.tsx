@@ -332,9 +332,15 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     setMessages(prev => [...prev, { id: asstId, role: 'assistant', text: '', ts: Date.now() }])
     try {
       const docStructure = getCurrentDocumentStructure()
-      //const formattingDirective = `\n\nFormat your answer in rich Markdown with:\n- Clear headings (##, ###) and short sections\n- Bulleted/numbered lists when helpful\n- Occasional emojis for scannability\n- Tables or code blocks if relevant\nAvoid citing sources inline; keep the tone concise.`
-      const contextualQuery = text + (docStructure.headings.length > 0 ? `\n\nCurrent document structure: ${docStructure.headings.map(h => `H${h.level}: ${h.text}`).join(', ')}` : '')
-  const res = await queryDocuments({ question: contextualQuery, userId: effOwner || user.uid, documentId, strictDoc: !!documentId })
+      
+      // Get recent conversation context for better continuity (last 3 exchanges)
+      const recentMessages = messages.slice(-6).filter(m => m.role !== 'assistant' || !m.awaitingPlacement)
+      const contextText = recentMessages.length > 0 
+        ? `\n\nRecent conversation context:\n${recentMessages.map(m => `${m.role}: ${m.text}`).join('\n')}`
+        : ''
+      
+      const contextualQuery = text + contextText + (docStructure.headings.length > 0 ? `\n\nCurrent document structure: ${docStructure.headings.map(h => `H${h.level}: ${h.text}`).join(', ')}` : '') + `\n\nImportant: When responding to follow-up instructions like "write it in short" or "write in short points", focus on the most recent topic discussed in the conversation context.`
+      const res = await queryDocuments({ question: contextualQuery, userId: effOwner || user.uid, documentId, strictDoc: !!documentId })
       const answer = res.answer || 'I could not find an answer.'
       const intent = parseContentIntent(text)
       let finalAnswer = answer
@@ -351,7 +357,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     } finally {
       setSending(false)
     }
-  }, [input, sending, mode, user?.uid, documentId, chatId, effOwner, resetSpeech, getCurrentDocumentStructure, parseContentIntent, streamOutput])
+  }, [input, sending, mode, user?.uid, documentId, chatId, effOwner, resetSpeech, getCurrentDocumentStructure, parseContentIntent, streamOutput, messages])
 
   // Handle placement selection
   const handlePlacementSelection = useCallback(async (placement: string) => {
@@ -368,8 +374,15 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     setMessages(prev => prev.map(m => m.id === pendingMessageId ? { ...m, text: 'Generating…', awaitingPlacement: false } : m))
     try {
       const docStructure = getCurrentDocumentStructure()
-  const generationPrompt = `Write a clear, concise section based on this instruction: "${pendingContent}".\n\nDocument structure context: ${docStructure.headings.map(h => `H${h.level}:${h.text}`).join(', ') || 'none'}`
-  const res = await queryDocuments({ question: generationPrompt, userId: effOwner || user.uid, documentId, strictDoc: !!documentId })
+      
+      // Get recent conversation context for better continuity (last 3 exchanges)
+      const recentMessages = messages.slice(-6).filter(m => m.role !== 'assistant' || !m.awaitingPlacement)
+      const contextText = recentMessages.length > 0 
+        ? `\n\nRecent conversation context:\n${recentMessages.map(m => `${m.role}: ${m.text}`).join('\n')}`
+        : ''
+      
+      const generationPrompt = `Write a clear, concise section based on this instruction: "${pendingContent}".${contextText}\n\nDocument structure context: ${docStructure.headings.map(h => `H${h.level}:${h.text}`).join(', ') || 'none'}\n\nImportant: Focus on the most recent topic discussed in the conversation context when responding to instructions like "write it in short" or "write in short points".`
+      const res = await queryDocuments({ question: generationPrompt, userId: effOwner || user.uid, documentId, strictDoc: !!documentId })
       const generated = (res.answer || '').trim() || 'Unable to generate content for that request.'
       placeContentAtLocation(generated, placement)
       setMessages(prev => prev.map(m => m.id === pendingMessageId ? { ...m, text: `Added generated content to the document (${placement}).` } : m))
@@ -379,7 +392,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       setPendingContent('')
       setPendingMessageId('')
     }
-  }, [pendingContent, pendingMessageId, user?.uid, getCurrentDocumentStructure, documentId, placeContentAtLocation, effOwner])
+  }, [pendingContent, pendingMessageId, user?.uid, getCurrentDocumentStructure, documentId, placeContentAtLocation, effOwner, messages])
 
   return (
     <div className={`w-full h-full bg-card text-card-foreground flex flex-col relative overflow-hidden ${isCollapsed ? 'min-w-0' : ''}`}>
