@@ -98,7 +98,6 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
         },
       ]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showLocalGreeting, documentId, documentTitle]);
 
   const send = async () => {
