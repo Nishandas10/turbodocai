@@ -21,6 +21,7 @@ export interface QueryDocumentsParams {
   userId: string;
   documentId?: string;
   topK?: number;
+  strictDoc?: boolean; // limit retrieval strictly to the single provided document
 }
 
 export interface GenerateSummaryParams {

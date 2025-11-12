@@ -24,6 +24,28 @@ service cloud.firestore {
       // Writes allowed for owner, editors, or if publicCanEdit is true for any authenticated user
       allow create: if isOwner();
       allow update, delete: if isEditor() || (request.auth != null && resource.data.publicCanEdit == true);
+
+      // Document-based chats subcollection: documents/{userId}/userDocuments/{documentId}/chats/{chatId}
+      match /chats/{chatId} {
+        // Allow document owner/collaborators to create/read/update chat documents
+        allow create: if isOwner();
+        allow read: if isViewer();
+        allow update: if isEditor();
+        allow delete: if isOwner();
+
+        // Messages within document-based chats: documents/{userId}/userDocuments/{documentId}/chats/{chatId}/messages/{messageId}
+        match /messages/{messageId} {
+          // Read: document viewers can read messages
+          allow read: if isViewer();
+          // Allow client to create ONLY their own user role messages; assistant/system messages must come from server
+          allow create: if request.auth != null
+            && isViewer()
+            && request.resource.data.role == 'user'
+            && (request.resource.data.userId == request.auth.uid || request.resource.data.userId == null);
+          // Prevent client updates/deletes to existing messages (immutable history from client perspective)
+          allow update, delete: if false;
+        }
+      }
     }
     
     // Processing queue - users can only access their own tasks

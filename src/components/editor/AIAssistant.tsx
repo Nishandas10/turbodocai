@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { useSpeechToText } from '@/hooks/useSpeechToText'
 import { useAuth } from '@/contexts/AuthContext'
+// queryDocuments only used in legacy write fallback; remove import if not needed
 import { queryDocuments } from '@/lib/ragService'
 import MarkdownMessage from '@/components/MarkdownMessage'
 import { db, functions } from '@/lib/firebase'
@@ -44,11 +45,11 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   const [mode, setMode] = useState<'chat' | 'write' | 'comment'>('chat')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
-  // Firestore-backed chat state for streaming (chat mode)
+  // Firestore-backed chat state (shared for chat & write modes)
   const [chatId, setChatId] = useState<string | null>(null)
   const [chatMessages, setChatMessages] = useState<Array<{ id?: string; role: 'user'|'assistant'|'system'; content: string; streaming?: boolean }>>([])
   const [sending, setSending] = useState(false)
-  // Removed stream-to-doc toggle; chat mode will not write to the editor
+  // Legacy write mode state retained for RAG fallback only
   const [pendingContent, setPendingContent] = useState('')
   const [pendingMessageId, setPendingMessageId] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -113,8 +114,6 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       // ignore malformed storage
     }
   }, [storageKey])
-
-  // Restore existing per-document chatId (shared with DocumentChat) if present
   useEffect(() => {
     if (!user?.uid || !documentId) return
     try {
@@ -126,8 +125,8 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
 
   // Subscribe to Firestore chat messages when chat mode and chatId available
   useEffect(() => {
-    if (mode !== 'chat' || !chatId) return
-    const col = collection(db, 'chats', chatId, 'messages')
+    if (mode !== 'chat' || !chatId || !user?.uid || !documentId) return
+    const col = collection(db, 'documents', user.uid, 'userDocuments', documentId, 'chats', chatId, 'messages')
     const qy = query(col, orderBy('createdAt', 'asc'))
     const unsub = onSnapshot(qy, snap => {
       const msgs = snap.docs.map(d => {
@@ -137,7 +136,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       setChatMessages(msgs)
     })
     return () => unsub()
-  }, [mode, chatId])
+  }, [mode, chatId, user?.uid, documentId])
 
   // Persist messages whenever they change
   useEffect(() => {
@@ -290,10 +289,14 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       }
       setSending(true)
       try {
+        if (!documentId) {
+          setMessages(prev => [...prev, { id: `${Date.now()}-nodoc`, role: 'assistant', text: 'Chat mode requires an active document. Please open a document to start chatting.', ts: Date.now() }])
+          return
+        }
         let cid = chatId
         if (!cid) {
           const call = httpsCallable(functions, 'sendChatMessage')
-          const resp = await call({ userId: user.uid, prompt: text, language: 'en', docIds: documentId ? [documentId] : [] })
+          const resp = await call({ userId: user.uid, prompt: text, language: 'en', docIds: [documentId] })
           const data = resp.data as { success: boolean; data?: { chatId: string }; error?: string }
           if (!data.success || !data.data?.chatId) throw new Error(data.error || 'Failed to start chat')
           cid = data.data.chatId
@@ -301,10 +304,13 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
           try { localStorage.setItem(`doc_chat_${user.uid}_${documentId}`, cid) } catch {}
         } else {
           // Optimistic user message commit to Firestore (server will stream the assistant reply)
-          await addDoc(collection(db, 'chats', cid, 'messages'), { role: 'user', content: text, userId: user.uid, createdAt: serverTimestamp() })
-          await setDoc(doc(db, 'chats', cid), { updatedAt: serverTimestamp() }, { merge: true })
+          if (!documentId) {
+            throw new Error('Document ID is required for chat')
+          }
+          await addDoc(collection(db, 'documents', user.uid, 'userDocuments', documentId, 'chats', cid, 'messages'), { role: 'user', content: text, userId: user.uid, createdAt: serverTimestamp() })
+          await setDoc(doc(db, 'documents', user.uid, 'userDocuments', documentId, 'chats', cid), { updatedAt: serverTimestamp() }, { merge: true })
           const call = httpsCallable(functions, 'sendChatMessage')
-          void call({ userId: user.uid, prompt: text, chatId: cid, language: 'en', docIds: documentId ? [documentId] : [] })
+          void call({ userId: user.uid, prompt: text, chatId: cid, language: 'en', docIds: [documentId] })
         }
         resetSpeech()
       } catch (e) {
@@ -326,9 +332,9 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     setMessages(prev => [...prev, { id: asstId, role: 'assistant', text: '', ts: Date.now() }])
     try {
       const docStructure = getCurrentDocumentStructure()
-      const formattingDirective = `\n\nFormat your answer in rich Markdown with:\n- Clear headings (##, ###) and short sections\n- Bulleted/numbered lists when helpful\n- Occasional emojis for scannability\n- Tables or code blocks if relevant\nAvoid citing sources inline; keep the tone concise.`
-      const contextualQuery = text + (docStructure.headings.length > 0 ? `\n\nCurrent document structure: ${docStructure.headings.map(h => `H${h.level}: ${h.text}`).join(', ')}` : '') + formattingDirective
-      const res = await queryDocuments({ question: contextualQuery, userId: effOwner || user.uid, documentId })
+      //const formattingDirective = `\n\nFormat your answer in rich Markdown with:\n- Clear headings (##, ###) and short sections\n- Bulleted/numbered lists when helpful\n- Occasional emojis for scannability\n- Tables or code blocks if relevant\nAvoid citing sources inline; keep the tone concise.`
+      const contextualQuery = text + (docStructure.headings.length > 0 ? `\n\nCurrent document structure: ${docStructure.headings.map(h => `H${h.level}: ${h.text}`).join(', ')}` : '')
+  const res = await queryDocuments({ question: contextualQuery, userId: effOwner || user.uid, documentId, strictDoc: !!documentId })
       const answer = res.answer || 'I could not find an answer.'
       const intent = parseContentIntent(text)
       let finalAnswer = answer
@@ -362,8 +368,8 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
     setMessages(prev => prev.map(m => m.id === pendingMessageId ? { ...m, text: 'Generating…', awaitingPlacement: false } : m))
     try {
       const docStructure = getCurrentDocumentStructure()
-  const generationPrompt = `Write a clear, concise section based on this instruction: "${pendingContent}".\n\nGuidelines:\n- Follow the document's tone and be factual.\n- Prefer Markdown with headings (##, ###), bullets, and numbered steps.\n- Use short paragraphs and whitespace for readability.\n- Avoid prefacing like "as requested".\n- If a topic is specified (e.g., a field like metabolomics), give a brief overview, key concepts, and why it matters.\n\nDocument structure context: ${docStructure.headings.map(h => `H${h.level}:${h.text}`).join(', ') || 'none'}`
-  const res = await queryDocuments({ question: generationPrompt, userId: effOwner || user.uid, documentId })
+  const generationPrompt = `Write a clear, concise section based on this instruction: "${pendingContent}".\n\nDocument structure context: ${docStructure.headings.map(h => `H${h.level}:${h.text}`).join(', ') || 'none'}`
+  const res = await queryDocuments({ question: generationPrompt, userId: effOwner || user.uid, documentId, strictDoc: !!documentId })
       const generated = (res.answer || '').trim() || 'Unable to generate content for that request.'
       placeContentAtLocation(generated, placement)
       setMessages(prev => prev.map(m => m.id === pendingMessageId ? { ...m, text: `Added generated content to the document (${placement}).` } : m))

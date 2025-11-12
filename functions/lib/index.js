@@ -1071,11 +1071,27 @@ exports.sendChatMessage = (0, https_1.onCall)({
             : thinkMode
                 ? "o3-mini"
                 : "gpt-4o-mini";
-        // Create or fetch chat document
+        // Determine if this is a document-based chat or standalone chat
+        const isDocumentBasedChat = Array.isArray(docIds) && docIds.length > 0;
         let chatDocId = chatId;
+        let chatCollection;
+        if (isDocumentBasedChat) {
+            // Document-based chat: create under documents/{userId}/userDocuments/{documentId}/chats
+            const primaryDocId = docIds[0];
+            chatCollection = db
+                .collection("documents")
+                .doc(userId)
+                .collection("userDocuments")
+                .doc(primaryDocId)
+                .collection("chats");
+        }
+        else {
+            // Standalone chat: use top-level chats collection
+            chatCollection = db.collection("chats");
+        }
         if (!chatDocId) {
             const title = prompt.trim().slice(0, 60);
-            const chatRef = await db.collection("chats").add({
+            const chatRef = await chatCollection.add({
                 userId,
                 title: title || "New Chat",
                 language: language || "en",
@@ -1087,17 +1103,11 @@ exports.sendChatMessage = (0, https_1.onCall)({
             chatDocId = chatRef.id;
         }
         else {
-            await db
-                .collection("chats")
-                .doc(chatDocId)
-                .set(Object.assign({ updatedAt: new Date(), language: language || "en", model }, (Array.isArray(docIds) && docIds.length
+            await chatCollection.doc(chatDocId).set(Object.assign({ updatedAt: new Date(), language: language || "en", model }, (Array.isArray(docIds) && docIds.length
                 ? { contextDocIds: docIds.slice(0, 8) }
                 : {})), { merge: true });
         }
-        const messagesCol = db
-            .collection("chats")
-            .doc(chatDocId)
-            .collection("messages");
+        const messagesCol = chatCollection.doc(chatDocId).collection("messages");
         // Add user's message if not already last
         try {
             const lastSnap = await messagesCol
@@ -1131,7 +1141,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 activeDocIds = docIds.slice(0, 8);
             }
             else {
-                const chatSnap = await db.collection("chats").doc(chatDocId).get();
+                const chatSnap = await chatCollection.doc(chatDocId).get();
                 const data = chatSnap.data();
                 if (Array.isArray(data === null || data === void 0 ? void 0 : data.contextDocIds))
                     activeDocIds = data.contextDocIds.slice(0, 8);
@@ -1236,8 +1246,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     streaming: final ? false : true,
                     updatedAt: new Date(),
                 }, { merge: true });
-                await db
-                    .collection("chats")
+                await chatCollection
                     .doc(chatDocId)
                     .set({ updatedAt: new Date() }, { merge: true });
             }
@@ -1387,8 +1396,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
         }
         if (!chatId) {
             const title = prompt.trim().slice(0, 60);
-            await db
-                .collection("chats")
+            await chatCollection
                 .doc(chatDocId)
                 .set({ title: title || "New Chat" }, { merge: true });
         }
