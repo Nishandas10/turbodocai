@@ -1191,8 +1191,16 @@ export const sendChatMessage = onCall(
   },
   async (request) => {
     try {
-      const { userId, prompt, language, chatId, docIds, webSearch, thinkMode } =
-        request.data || {};
+      const {
+        userId,
+        prompt,
+        language,
+        chatId,
+        docIds,
+        webSearch,
+        thinkMode,
+        docOwnerId,
+      } = request.data || {};
 
       if (!userId || !prompt || typeof prompt !== "string") {
         throw new Error("Missing required parameters: userId and prompt");
@@ -1215,11 +1223,12 @@ export const sendChatMessage = onCall(
       let chatCollection: any;
 
       if (isDocumentBasedChat) {
-        // Document-based chat: create under documents/{userId}/userDocuments/{documentId}/chats
+        // Document-based chat: create under documents/{docOwnerId}/userDocuments/{documentId}/chats
         const primaryDocId = docIds[0];
+        const documentOwnerId = docOwnerId || userId; // Fall back to userId if docOwnerId not provided
         chatCollection = db
           .collection("documents")
-          .doc(userId)
+          .doc(documentOwnerId)
           .collection("userDocuments")
           .doc(primaryDocId)
           .collection("chats");
@@ -1281,7 +1290,7 @@ export const sendChatMessage = onCall(
         .orderBy("createdAt", "asc")
         .limit(20)
         .get();
-      const convo = recentSnap.docs.map((d: any) => d.data() as any);
+      const convo = recentSnap.docs.map((d: any) => d.data());
 
       // Active context documents
       let activeDocIds: string[] = [];
@@ -1305,11 +1314,12 @@ export const sendChatMessage = onCall(
       if (activeDocIds.length) {
         // Inspect whether any of the context docs were indexed in OpenAI Vector Store
         try {
+          const documentOwnerId = docOwnerId || userId; // Use docOwnerId if provided, otherwise fall back to userId
           metaSnaps = await Promise.all(
             activeDocIds.map((id) =>
               db
                 .collection("documents")
-                .doc(userId)
+                .doc(documentOwnerId)
                 .collection("userDocuments")
                 .doc(id)
                 .get()

@@ -296,7 +296,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         let cid = chatId
         if (!cid) {
           const call = httpsCallable(functions, 'sendChatMessage')
-          const resp = await call({ userId: user.uid, prompt: text, language: 'en', docIds: [documentId] })
+          const resp = await call({ userId: user.uid, prompt: text, language: 'en', docIds: [documentId], docOwnerId: effOwner || user.uid })
           const data = resp.data as { success: boolean; data?: { chatId: string }; error?: string }
           if (!data.success || !data.data?.chatId) throw new Error(data.error || 'Failed to start chat')
           cid = data.data.chatId
@@ -310,7 +310,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
           await addDoc(collection(db, 'documents', user.uid, 'userDocuments', documentId, 'chats', cid, 'messages'), { role: 'user', content: text, userId: user.uid, createdAt: serverTimestamp() })
           await setDoc(doc(db, 'documents', user.uid, 'userDocuments', documentId, 'chats', cid), { updatedAt: serverTimestamp() }, { merge: true })
           const call = httpsCallable(functions, 'sendChatMessage')
-          void call({ userId: user.uid, prompt: text, chatId: cid, language: 'en', docIds: [documentId] })
+          void call({ userId: user.uid, prompt: text, chatId: cid, language: 'en', docIds: [documentId], docOwnerId: effOwner || user.uid })
         }
         resetSpeech()
       } catch (e) {

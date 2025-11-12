@@ -7,14 +7,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
 import { db, functions } from "@/lib/firebase";
-import { collection, onSnapshot, orderBy, query, addDoc, serverTimestamp, doc, setDoc } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, addDoc, serverTimestamp, doc, setDoc, type Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
 interface FirestoreChatMessage {
   id?: string;
   role: "user" | "assistant" | "system";
   content: string;
-  createdAt?: any;
+  createdAt?: Timestamp | null;
   streaming?: boolean;
 }
 
@@ -53,12 +53,17 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
 
   // Subscribe to Firestore messages when chatId available
   useEffect(() => {
-    if (!chatId) return;
-    const col = collection(db, "chats", chatId, "messages");
+    if (!chatId || !user?.uid) return;
+    
+    // Use document-based path if documentId is provided, otherwise use standalone path
+    const col = documentId 
+      ? collection(db, "documents", ownerId || user.uid, "userDocuments", documentId, "chats", chatId, "messages")
+      : collection(db, "chats", chatId, "messages");
+    
     const qy = query(col, orderBy("createdAt", "asc"));
     const unsub = onSnapshot(qy, (snap) => {
       const msgs: FirestoreChatMessage[] = snap.docs.map(d => {
-        const data = d.data() as any;
+        const data = d.data() as Omit<FirestoreChatMessage, 'id'>;
         return {
           id: d.id,
           role: data.role,
@@ -71,7 +76,7 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
       setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 40);
     });
     return () => unsub();
-  }, [chatId]);
+  }, [chatId, user?.uid, documentId, ownerId]);
 
   // Initial local greeting if no chat yet
   const showLocalGreeting = !chatId && messages.length === 0;
@@ -109,6 +114,7 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
           prompt: text,
           language: 'en',
           docIds: documentId ? [documentId] : [],
+          docOwnerId: ownerId || user.uid,
         });
         const data = result.data as { success: boolean; data?: { chatId: string }; error?: string };
         if (!data.success || !data.data?.chatId) throw new Error(data.error || 'chat creation failed');
@@ -127,13 +133,25 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
     // Existing chat: add user message & invoke sendChatMessage (which will stream assistant reply)
     setSending(true);
     try {
-      await addDoc(collection(db, "chats", chatId, "messages"), {
-        role: "user",
-        content: text,
-        userId: user.uid,
-        createdAt: serverTimestamp(),
-      });
-      await setDoc(doc(db, "chats", chatId), { updatedAt: serverTimestamp() }, { merge: true });
+      // Use document-based path if documentId is provided, otherwise use standalone path
+      if (documentId) {
+        await addDoc(collection(db, "documents", ownerId || user.uid, "userDocuments", documentId, "chats", chatId, "messages"), {
+          role: "user",
+          content: text,
+          userId: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        await setDoc(doc(db, "documents", ownerId || user.uid, "userDocuments", documentId, "chats", chatId), { updatedAt: serverTimestamp() }, { merge: true });
+      } else {
+        await addDoc(collection(db, "chats", chatId, "messages"), {
+          role: "user",
+          content: text,
+          userId: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        await setDoc(doc(db, "chats", chatId), { updatedAt: serverTimestamp() }, { merge: true });
+      }
+      
       const call = httpsCallable(functions, "sendChatMessage");
       void call({
         userId: user.uid,
@@ -141,6 +159,7 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
         chatId,
         language: 'en',
         docIds: documentId ? [documentId] : [],
+        docOwnerId: ownerId || user.uid,
       });
       setInputValue("");
       resetSpeech();

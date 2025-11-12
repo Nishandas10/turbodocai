@@ -1058,7 +1058,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
     var _a, e_1, _b, _c;
     var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13;
     try {
-        const { userId, prompt, language, chatId, docIds, webSearch, thinkMode } = request.data || {};
+        const { userId, prompt, language, chatId, docIds, webSearch, thinkMode, docOwnerId } = request.data || {};
         if (!userId || !prompt || typeof prompt !== "string") {
             throw new Error("Missing required parameters: userId and prompt");
         }
@@ -1076,11 +1076,12 @@ exports.sendChatMessage = (0, https_1.onCall)({
         let chatDocId = chatId;
         let chatCollection;
         if (isDocumentBasedChat) {
-            // Document-based chat: create under documents/{userId}/userDocuments/{documentId}/chats
+            // Document-based chat: create under documents/{docOwnerId}/userDocuments/{documentId}/chats
             const primaryDocId = docIds[0];
+            const documentOwnerId = docOwnerId || userId; // Fall back to userId if docOwnerId not provided
             chatCollection = db
                 .collection("documents")
-                .doc(userId)
+                .doc(documentOwnerId)
                 .collection("userDocuments")
                 .doc(primaryDocId)
                 .collection("chats");
@@ -1157,9 +1158,10 @@ exports.sendChatMessage = (0, https_1.onCall)({
         if (activeDocIds.length) {
             // Inspect whether any of the context docs were indexed in OpenAI Vector Store
             try {
+                const documentOwnerId = docOwnerId || userId; // Use docOwnerId if provided, otherwise fall back to userId
                 metaSnaps = await Promise.all(activeDocIds.map((id) => db
                     .collection("documents")
-                    .doc(userId)
+                    .doc(documentOwnerId)
                     .collection("userDocuments")
                     .doc(id)
                     .get()));
