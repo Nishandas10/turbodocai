@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { FileText, MoreVertical, Mic, Play, Lock, Unlock, Box, Globe } from "lucide-react"
+import { FileText, MoreVertical, Mic, Play, Box, Globe } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import DashboardSidebar from "@/components/DashboardSidebar"
@@ -90,10 +90,6 @@ export default function NotesPage() {
     }
 
     // helper actions
-    const toggleVisibility = async (doc: UserDoc) => {
-      if (!user?.uid) return
-      try { await updateDocument(doc.id, user.uid, { isPublic: !doc.isPublic }) } catch(e) { console.error(e) }
-    }
     const addDocToSpace = async (doc: UserDoc, spaceId: string) => {
       if (!user?.uid) return
       try { await updateDocument(doc.id, user.uid, { spaceId }) } catch(e) { console.error(e) }
@@ -228,7 +224,11 @@ export default function NotesPage() {
                           <div className="absolute inset-0 bg-muted flex items-center justify-center">
                             {renderPreview(note)}
                           </div>
-                          <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5 max-w-[60%] truncate">{(note.spaceId && spaces.find(s=>s.id===note.spaceId)?.name) || 'No Space'}</span>
+                          {note.spaceId ? (
+                            <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5 max-w-[60%] truncate">
+                              {spaces.find(s=>s.id===note.spaceId)?.name || 'Space'}
+                            </span>
+                          ) : null}
                           <span className={`absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full ${badgeColor} text-white font-medium`}>{badgeLabel}</span>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -241,11 +241,6 @@ export default function NotesPage() {
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
-                              <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); toggleVisibility(note) }} className="flex items-center gap-2">
-                                {note.isPublic ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                                <span>{note.isPublic ? 'Make private' : 'Make public'}</span>
-                              </DropdownMenuItem>
-                              <div className="my-1 h-px bg-border" />
                               {spaces.length === 0 ? (
                                 <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
                               ) : (
