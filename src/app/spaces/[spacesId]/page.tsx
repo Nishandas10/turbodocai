@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react"
 import Image from "next/image"
-import { useParams } from "next/navigation"
-import { ArrowRight, Camera, ChevronRight, FileText, Globe, Mic, Play, Pencil, BarChart3 } from "lucide-react"
+import { useParams, useRouter } from "next/navigation"
+import { ArrowRight, Camera, ChevronRight, FileText, Globe, Mic, Play, Pencil, BarChart3, MoreHorizontal } from "lucide-react"
 import ProtectedRoute from "@/components/ProtectedRoute"
 import DashboardSidebar from "@/components/DashboardSidebar"
 import AudioModal from "@/app/components/AudioModal"
@@ -13,14 +13,23 @@ import WebsiteLinkModal from "@/app/components/WebsiteLinkModal"
 import CameraModal from "@/app/components/CameraModal"
 import CreateTestModal from "@/app/components/CreateTestModal"
 import { useAuth } from "@/contexts/AuthContext"
-import { listenToSpace, listenToSpaceDocuments, updateSpace } from "@/lib/firestore"
+import { listenToSpace, listenToSpaceDocuments, updateSpace, listenToUserSpaces, updateDocument, deleteDocument } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType } from "@/lib/types"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import PdfThumbnail from "@/components/PdfThumbnail"
+import DocxThumbnail from "@/components/DocxThumbnail"
+import PptxThumbnail from "@/components/PptxThumbnail"
+import WebsiteThumbnail from "@/components/WebsiteThumbnail"
+import AudioThumbnail from "@/components/AudioThumbnail"
+import Favicon from "@/components/Favicon"
 
 export default function SpacePage() {
   const params = useParams<{ spacesId: string }>()
+  const router = useRouter()
   const { user } = useAuth()
   const [space, setSpace] = useState<SpaceType | null>(null)
   const [docs, setDocs] = useState<UserDoc[]>([])
+  const [spaces, setSpaces] = useState<SpaceType[]>([])
   const [cameraModalOpen, setCameraModalOpen] = useState(false)
   const [audioModalOpen, setAudioModalOpen] = useState(false)
   const [documentUploadModalOpen, setDocumentUploadModalOpen] = useState(false)
@@ -36,6 +45,7 @@ export default function SpacePage() {
   useEffect(() => {
     let unsubDocs: (() => void) | undefined
     let unsubSpace: (() => void) | undefined
+    let unsubUserSpaces: (() => void) | undefined
     ;(async () => {
       if (!spaceId) return
       // Live space info
@@ -46,11 +56,14 @@ export default function SpacePage() {
       // Space-scoped documents
       if (user?.uid) {
         unsubDocs = listenToSpaceDocuments(user.uid, spaceId, (d) => setDocs(d.slice(0, 9)))
+        // All spaces for dropdown menu actions
+        unsubUserSpaces = listenToUserSpaces(user.uid, (sps) => setSpaces(sps))
       }
     })()
     return () => {
       try { if (unsubDocs) unsubDocs() } catch {}
       try { if (unsubSpace) unsubSpace() } catch {}
+      try { if (unsubUserSpaces) unsubUserSpaces() } catch {}
     }
   }, [spaceId, user?.uid, editing])
 
@@ -78,11 +91,51 @@ export default function SpacePage() {
 
   const username = (user?.displayName?.split(' ')[0]) || (user?.email?.split('@')[0]) || 'User'
 
+  // Extract a YouTube video ID from common URL formats (same logic as dashboard)
+  const getYouTubeId = (input?: string | null): string | null => {
+    if (!input) return null
+    try {
+      if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input
+      const url = new URL(input)
+      const host = url.hostname.replace(/^www\./, '')
+      if (host === 'youtu.be') {
+        const id = url.pathname.split('/').filter(Boolean)[0]
+        return id && /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null
+      }
+      if (host.endsWith('youtube.com')) {
+        const v = url.searchParams.get('v')
+        if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v
+        const parts = url.pathname.split('/').filter(Boolean)
+        const idx = parts.findIndex(p => ['embed', 'shorts', 'live', 'v'].includes(p))
+        if (idx !== -1 && parts[idx + 1] && /^[a-zA-Z0-9_-]{11}$/.test(parts[idx + 1])) {
+          return parts[idx + 1]
+        }
+        const last = parts[parts.length - 1]
+        if (last && /^[a-zA-Z0-9_-]{11}$/.test(last)) return last
+      }
+    } catch {}
+    return null
+  }
+
   const renderDocPreview = (doc: UserDoc) => {
     const url = doc?.metadata?.downloadURL
     const mime = doc?.metadata?.mimeType || ''
+    const fileName = (doc?.metadata?.fileName || '').toLowerCase()
     const text = (doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
     const iconCls = "h-8 w-8 text-muted-foreground"
+
+    if (doc.type === 'youtube') {
+      const videoId = getYouTubeId(doc?.metadata?.url || null)
+      if (videoId) {
+        const thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+        return (
+          <div className="absolute inset-0 w-full h-full">
+            <Image src={thumb} alt={doc.title} fill className="object-cover" sizes="(max-width: 768px) 100vw, 33vw" />
+          </div>
+        )
+      }
+      return <Play className={iconCls} />
+    }
 
     if (url && mime.startsWith('image/')) {
       return (
@@ -91,9 +144,41 @@ export default function SpacePage() {
         </div>
       )
     }
-    if (doc.type === 'youtube') return <Play className={iconCls} />
-    if (doc.type === 'website') return <Globe className={iconCls} />
-    if (doc.type === 'audio') return <Mic className={iconCls} />
+
+    if (doc.type === 'website') {
+      const rawUrl = (doc.metadata?.url || '') as string
+      if (rawUrl) {
+        return <WebsiteThumbnail url={rawUrl} className="absolute inset-0" />
+      }
+      const host = (() => { try { return new URL(rawUrl).hostname.replace(/^www\./,'') } catch { return '' } })()
+      return (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
+          {host ? <Favicon host={host} className="h-8 w-8 mb-1 rounded" /> : <Globe className={iconCls} />}
+          <p className="text-[10px] font-medium truncate w-full">{host || 'Website'}</p>
+        </div>
+      )
+    }
+
+    if (doc.type === 'audio') {
+      const audioUrl = doc?.metadata?.downloadURL
+      if (audioUrl && typeof audioUrl === 'string') {
+        return <AudioThumbnail audioUrl={audioUrl} title={doc.title} className="absolute inset-0" />
+      }
+      return <Mic className={iconCls} />
+    }
+
+    const isPdf = doc.type === 'pdf' || mime.includes('pdf') || fileName.endsWith('.pdf')
+    const isDocx = doc.type === 'docx' || mime.includes('word') || fileName.endsWith('.docx')
+    const isPptx = doc.type === 'pptx' || mime.includes('presentation') || fileName.endsWith('.pptx')
+    if (isPdf && typeof url === 'string' && url) {
+      return <PdfThumbnail fileUrl={url} className="absolute inset-0" />
+    }
+    if (isDocx && typeof url === 'string' && url) {
+      return <DocxThumbnail fileUrl={url} className="absolute inset-0" />
+    }
+    if (isPptx && typeof url === 'string' && url) {
+      return <PptxThumbnail fileUrl={url} className="absolute inset-0" />
+    }
 
     if (text) {
       const excerpt = text.split(/\n+/).slice(0, 4).join('\n')
@@ -119,6 +204,36 @@ export default function SpacePage() {
   const closeWebsiteLinkModal = () => setWebsiteLinkModalOpen(false)
 
   // Helper reserved for future actions
+  const addDocToSpace = async (doc: UserDoc, destSpaceId: string) => {
+    if (!user?.uid) return
+    try {
+      await updateDocument(doc.id, user.uid, { spaceId: destSpaceId })
+    } catch (e) {
+      console.error('Add to space failed', e)
+      alert('Failed to add to space')
+    }
+  }
+
+  const removeDocFromSpace = async (doc: UserDoc) => {
+    if (!user?.uid) return
+    try {
+      await updateDocument(doc.id, user.uid, { spaceId: '' as unknown as undefined })
+    } catch (e) {
+      console.error('Remove from space failed', e)
+      alert('Failed to remove from space')
+    }
+  }
+
+  const deleteDocPermanently = async (doc: UserDoc) => {
+    if (!user?.uid) return
+    if (!confirm('Delete this document permanently?')) return
+    try {
+      await deleteDocument(doc.id, user.uid)
+    } catch (e) {
+      console.error('Delete doc failed', e)
+      alert('Failed to delete')
+    }
+  }
 
   return (
     <ProtectedRoute>
@@ -258,10 +373,45 @@ export default function SpacePage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {docs.map((d) => (
-                  <div key={d.id} className="bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer">
+                  <div
+                    key={d.id}
+                    className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer"
+                    onClick={() => router.push(`/notes/${d.id}`)}
+                  >
                     <div className="relative h-32 bg-muted flex items-center justify-center">
                       {renderDocPreview(d)}
                       <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">{space?.name || `${username}'s Space`}</span>
+                      {/* Three dots menu */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="absolute top-2 right-2 opacity-0 hover:opacity-100 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Document menu"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-black" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
+                          {spaces.length === 0 ? (
+                            <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
+                          ) : (
+                            <>
+                              <DropdownMenuItem disabled className="opacity-70">Add to space</DropdownMenuItem>
+                              {spaces.slice(0,6).map(sp => (
+                                <DropdownMenuItem key={sp.id} onSelect={(e)=>{ e.preventDefault(); addDocToSpace(d, sp.id) }}>
+                                  {sp.name || 'Untitled'}
+                                </DropdownMenuItem>
+                              ))}
+                              {d.spaceId ? (
+                                <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); removeDocFromSpace(d) }}>Remove from space</DropdownMenuItem>
+                              ) : null}
+                            </>
+                          )}
+                          <div className="my-1 h-px bg-border" />
+                          <DropdownMenuItem className="text-destructive" onSelect={(e)=>{ e.preventDefault(); deleteDocPermanently(d) }}>Delete</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div className="p-4">
                       <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
