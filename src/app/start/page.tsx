@@ -1,40 +1,8 @@
 "use client"
-
-import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
 import Link from "next/link"
 import { FileText, Mic, Play, Globe, Camera, ArrowRight, AtSign, Brain, ChevronDown, ArrowUp, Plus, Search, Clock, GitBranch } from "lucide-react"
-import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore'
-import { db } from '@/lib/firebase'
-import { getDocument as getUserDoc } from '@/lib/firestore'
 
-// Public explore doc minimal type (mirrors subset of dashboard/explore logic)
-type PublicDocument = {
-	id: string
-	ownerId?: string
-	title: string
-	type: string
-	preview?: string
-	masterUrl?: string
-	summary?: string
-	content?: { processed?: string; raw?: string }
-	metadata?: { mimeType?: string; downloadURL?: string }
-	createdAt?: unknown
-	updatedAt?: unknown
-}
-
-// Fetch a small set of public docs similar to explore page
-async function fetchPublicDocs(): Promise<PublicDocument[]> {
-  try {
-    const col = collection(db, 'allDocuments')
-    const qy = query(col, where('isPublic','==',true), orderBy('createdAt','desc'), limit(12))
-    const snap = await getDocs(qy)
-	return snap.docs.map(d => ({ id: d.id, ...(d.data() as Record<string, unknown>) })) as PublicDocument[]
-  } catch {
-    return []
-  }
-}
 
 // Prefilled sidebar replicating structure (without recents) - all actions redirect to signup
 function StartSidebar({ onAction }: { onAction: () => void }) {
@@ -47,7 +15,6 @@ function StartSidebar({ onAction }: { onAction: () => void }) {
 				<nav className="space-y-1 mb-4">
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Plus className="h-4 w-4" /><span className="text-sm">Add content</span></button>
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><GitBranch className="h-4 w-4" /><span className="text-sm">Mind Maps</span></button>
-					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Globe className="h-4 w-4" /><span className="text-sm">Explore</span></button>
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Search className="h-4 w-4" /><span className="text-sm">Search</span></button>
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Clock className="h-4 w-4" /><span className="text-sm">History</span></button>
 				</nav>
@@ -74,41 +41,6 @@ function StartSidebar({ onAction }: { onAction: () => void }) {
 
 export default function StartPage() {
 	const router = useRouter()
-	const [exploreDocs, setExploreDocs] = useState<PublicDocument[]>([])
-	const [loadingExplore, setLoadingExplore] = useState(true)
-	const [previewMap, setPreviewMap] = useState<Record<string,string>>({})
-
-	useEffect(() => {
-		fetchPublicDocs().then(d => { setExploreDocs(d); setLoadingExplore(false) })
-	}, [])
-
-	// After docs load, fetch richer previews from user documents mirroring explore logic
-	useEffect(() => {
-		let cancelled = false
-		const loadPreviews = async () => {
-			if (!exploreDocs.length) { setPreviewMap({}); return }
-			try {
-				const entries = await Promise.all(exploreDocs.map(async (d) => {
-					const idx = d.id.indexOf('_')
-					const ownerId = idx === -1 ? d.ownerId : d.id.slice(0, idx) || d.ownerId
-					const documentId = idx === -1 ? d.id : d.id.slice(idx + 1)
-					if (!ownerId || !documentId) return [d.id, ''] as const
-					try {
-						const full = await getUserDoc(documentId, ownerId as string)
-						const text = (full?.summary || full?.content?.processed || full?.content?.raw || '').trim()
-						return [d.id, text] as const
-					} catch { return [d.id, ''] as const }
-				}))
-				if (!cancelled) {
-					const map: Record<string,string> = {}
-					for (const [id, text] of entries) map[id] = text
-					setPreviewMap(map)
-				}
-			} catch { /* noop */ }
-		}
-		loadPreviews()
-		return () => { cancelled = true }
-	}, [exploreDocs])
 
 	// Generic click handler for all gated widgets
 	const goSignup = () => router.push('/signup')
@@ -122,20 +54,7 @@ export default function StartPage() {
 		{ key: 'camera', title: 'Camera capture', desc: 'Whiteboard / notes OCR', icon: <Camera className="h-5 w-5 text-white" />, badgeCls: 'bg-purple-600', boxCls: 'bg-purple-600' },
 	]
 
-		const renderDocPreview = (doc: PublicDocument) => {
-			const override = previewMap[doc.id]
-			const url = doc.masterUrl || doc.metadata?.downloadURL
-			const mime = doc.metadata?.mimeType || ''
-			const text = (override || doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
-			if (url && mime.startsWith('image/')) {
-				return <div className="absolute inset-0"><Image src={url} alt={doc.title} fill className="object-cover" sizes="(max-width:768px)100vw,33vw" /></div>
-			}
-			if (doc.type === 'youtube') return <span className="text-4xl">▶</span>
-			if (doc.type === 'website') return <span className="text-2xl">🌐</span>
-			if (doc.type === 'audio') return <span className="text-2xl">🎙️</span>
-			if (text) return <div className="absolute inset-0 p-3 text-[11px] leading-4 text-foreground/80 whitespace-pre-line overflow-hidden">{text.split(/\n+/).slice(0,4).join('\n')}</div>
-			return <div className="flex items-center justify-center h-full text-xs text-muted-foreground">No preview</div>
-		}
+		// Explore section removed
 
 	return (
 			<div className="h-screen bg-background flex overflow-hidden">
@@ -198,32 +117,7 @@ export default function StartPage() {
 							</div>
 						</div>
 
-						{/* Explore Teaser */}
-				<section>
-					<div className="flex items-center justify-between mb-4">
-						<h2 className="text-lg font-semibold">Explore public knowledge</h2>
-						<Link href="/explore" className="text-sm text-muted-foreground hover:text-foreground">View all</Link>
-					</div>
-					{loadingExplore ? (
-						<div className="text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">Loading…</div>
-					) : exploreDocs.length === 0 ? (
-						<div className="text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">No public documents yet.</div>
-					) : (
-						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-							{exploreDocs.map(d => (
-								<div key={d.id} onClick={goSignup} className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative">
-									<div className="relative h-32 bg-muted flex items-center justify-center">
-										{renderDocPreview(d)}
-										<span className="absolute left-3 bottom-3 text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 bg-background/80 border border-border">{d.type}</span>
-									</div>
-									<div className="p-4">
-										<p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
-									</div>
-								</div>
-							))}
-						</div>
-					)}
-				</section>
+				{/* Explore teaser removed */}
 
 				{/* Benefits pills */}
 				<div className="flex flex-wrap gap-2 mt-10 text-xs">

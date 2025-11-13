@@ -165,14 +165,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
             <GitBranch className="h-4 w-4" />
             {!collapsed && <span className="text-sm">Mind Maps</span>}
           </Link>
-          {/* Explore */}
-          <Link
-            href="/explore"
-            className={`flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-3"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
-          >
-            <Globe className="h-4 w-4" />
-            {!collapsed && <span className="text-sm">Explore</span>}
-          </Link>
+          {/* Explore removed */}
           <button
             onClick={() => {
               if (onSearchClick) return onSearchClick()

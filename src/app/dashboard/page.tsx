@@ -20,8 +20,6 @@ import {
   MoreHorizontal,
   X,
   Brain,
-  Lock,
-  Unlock
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
@@ -31,11 +29,10 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
-import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, listenToExploreDocuments, updateDocument, deleteDocument, createWebsiteDocument, getDocument as getUserDoc, listenToUserChats } from "@/lib/firestore"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, updateDocument, deleteDocument, listenToUserChats } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType, Chat } from "@/lib/types"
-import type { PublicDocumentMeta } from "@/lib/firestore"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { functions } from "@/lib/firebase"
 import Favicon from "@/components/Favicon"
@@ -69,8 +66,7 @@ export default function Dashboard() {
   const [recentChats, setRecentChats] = useState<Chat[]>([])
   const [spaces, setSpaces] = useState<SpaceType[]>([])
   const [spaceCounts, setSpaceCounts] = useState<Record<string, number>>({})
-  const [exploreDocs, setExploreDocs] = useState<PublicDocumentMeta[]>([])
-  const [explorePreviewMap, setExplorePreviewMap] = useState<Record<string, string>>({})
+  // Explore removed
   // Prompt options
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   const [thinkModeEnabled, setThinkModeEnabled] = useState(false)
@@ -218,44 +214,7 @@ export default function Dashboard() {
     return () => { unsubs.forEach((u) => { try { u() } catch {} }) }
   }, [spaces, user?.uid])
 
-  // Listen to public Explore docs (newest first)
-  useEffect(() => {
-    const unsub = listenToExploreDocuments((docs) => {
-      setExploreDocs(docs.slice(0, 8))
-    })
-    return () => { try { unsub() } catch {} }
-  }, [])
-
-  // Fetch preview text for Explore docs from source userDocuments (summary/content)
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      if (!exploreDocs.length) { setExplorePreviewMap({}); return }
-      try {
-        const pairs = await Promise.all(exploreDocs.map(async (d) => {
-          const idx = d.id.indexOf('_')
-          const parsedOwner = idx === -1 ? '' : d.id.slice(0, idx)
-          const ownerId = d.ownerId || parsedOwner
-          const documentId = idx === -1 ? d.id : d.id.slice(idx + 1)
-          if (!ownerId || !documentId) return [d.id, ''] as const
-          try {
-            const full = await getUserDoc(documentId, ownerId)
-            const text = (full?.summary || full?.content?.processed || full?.content?.raw || '').trim()
-            return [d.id, text] as const
-          } catch {
-            return [d.id, ''] as const
-          }
-        }))
-        if (!cancelled) {
-          const map: Record<string, string> = {}
-          for (const [id, text] of pairs) map[id] = text
-          setExplorePreviewMap(map)
-        }
-      } catch {}
-    }
-    load()
-    return () => { cancelled = true }
-  }, [exploreDocs])
+  // Explore removed
 
   const relativeTime = (date: unknown) => {
     try {
@@ -319,73 +278,7 @@ export default function Dashboard() {
     } catch {}
     return null
   }
-  const renderPublicDocPreview = (doc: PublicDocumentMeta) => {
-    const url = doc.masterUrl || doc.metadata?.downloadURL
-    const mime = doc.metadata?.mimeType || ''
-    const override = explorePreviewMap[doc.id]
-    const text = (override || doc.preview || doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
-    const iconCls = "h-8 w-8 text-muted-foreground"
-
-    if (doc.type === 'youtube') {
-      const videoId = getYouTubeId(typeof url === 'string' ? url : undefined)
-      if (videoId) {
-        const thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
-        return (
-          <div className="absolute inset-0 w-full h-full">
-            <Image
-              src={thumb}
-              alt={doc.title}
-              fill
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, 33vw"
-            />
-          </div>
-        )
-      }
-      return <Play className={iconCls} />
-    }
-
-    if (url && typeof url === 'string' && mime.startsWith('image/')) {
-      return (
-        <div className="absolute inset-0 w-full h-full">
-          <Image 
-            src={url}
-            alt={doc.title}
-            fill
-            className="object-cover"
-            sizes="(max-width: 768px) 100vw, 33vw"
-          />
-        </div>
-      )
-    }
-  if (doc.type === 'youtube') return <Play className={iconCls} />
-  if (doc.type === 'website') {
-      // PublicDocumentMeta.metadata may not declare `url`; prefer masterUrl, then try metadata.url if present
-      const rawUrl = (typeof doc.masterUrl === 'string' && doc.masterUrl)
-        ? doc.masterUrl
-        : ((doc.metadata as unknown as { url?: string })?.url || '')
-      const host = (() => {
-        try { return new URL(rawUrl).hostname.replace(/^www\./,'') } catch { return '' }
-      })()
-      return (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
-          {host ? <Favicon host={host} className="h-8 w-8 mb-1 rounded" /> : <Globe className={iconCls} />}
-          <p className="text-[10px] font-medium truncate w-full">{host || 'Website'}</p>
-        </div>
-      )
-    }
-    if (doc.type === 'audio') return <Mic className={iconCls} />
-
-    if (text) {
-      const excerpt = text.split(/\n+/).slice(0, 4).join('\n')
-      return (
-        <div className="absolute inset-0 p-3 text-[11px] leading-4 text-foreground/80 whitespace-pre-line overflow-hidden">
-          {excerpt}
-        </div>
-      )
-    }
-    return <FileText className={iconCls} />
-  }
+  // Explore removed
 
   const renderChatPreview = (chatId: string) => {
     return <ChatThumbnail chatId={chatId} />
@@ -651,18 +544,7 @@ export default function Dashboard() {
       alert('Failed to create space')
     }
   }
-
-  // Recents card actions
-  const toggleVisibility = async (doc: UserDoc) => {
-    if (!user?.uid) return
-    try {
-      await updateDocument(doc.id, user.uid, { isPublic: !doc.isPublic })
-    } catch (e) {
-      console.error('Toggle visibility failed', e)
-      alert('Failed to update visibility')
-    }
-  }
-
+  
   const addDocToSpace = async (doc: UserDoc, spaceId: string) => {
     if (!user?.uid) return
     try {
@@ -732,39 +614,7 @@ export default function Dashboard() {
   }, [recentDocs, recentChats])
 
   // Parse mirror id of public docs: `${ownerId}_${documentId}`
-  const parseMirrorId = (mirrorId: string) => {
-    const idx = mirrorId.indexOf('_')
-    if (idx === -1) return { ownerId: '', documentId: mirrorId }
-    return { ownerId: mirrorId.slice(0, idx), documentId: mirrorId.slice(idx + 1) }
-  }
-
-  // Open a public explore document (dashboard explore section)
-  const openExploreDoc = (doc: PublicDocumentMeta) => {
-    const { ownerId: fromId, documentId } = parseMirrorId(doc.id)
-    const ownerId = (doc as unknown as { ownerId?: string })?.ownerId || fromId
-    router.push(`/notes/${documentId}?owner=${ownerId}`)
-  }
-
-  // Add a public explore document to user's space from Dashboard Explore section
-  const addExploreDocToSpace = async (doc: PublicDocumentMeta, spaceId: string) => {
-    if (!user?.uid) return
-    const { ownerId: fromId, documentId } = parseMirrorId(doc.id)
-    const ownerId = (doc as unknown as { ownerId?: string })?.ownerId || fromId
-    try {
-      if (ownerId && ownerId === user.uid) {
-        // Own document: attach directly
-        await updateDocument(documentId, user.uid, { spaceId })
-      } else {
-        // Not own: save a link into the space
-        const url = `${window.location.origin}/notes/${documentId}`
-        await createWebsiteDocument(user.uid, url, doc.title, spaceId)
-      }
-      alert('Added to space')
-    } catch (e) {
-      console.error('Add to space failed', e)
-      alert('Failed to add to space')
-    }
-  }
+  // Explore removed
 
   return (
     <ProtectedRoute>
@@ -1129,7 +979,11 @@ export default function Dashboard() {
                       >
                         <div className="relative h-32 bg-muted flex items-center justify-center">
                           {renderDocPreview(d)}
-                          <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">{username}&apos;s Space</span>
+                          {d.spaceId ? (
+                            <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">
+                              {spaces.find(sp => sp.id === d.spaceId)?.name || 'Space'}
+                            </span>
+                          ) : null}
                           {/* Three dots menu */}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -1142,11 +996,6 @@ export default function Dashboard() {
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
-                              <DropdownMenuItem onSelect={(e)=>{ e.preventDefault(); toggleVisibility(d) }} className="flex items-center gap-2">
-                                {d.isPublic ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                                <span>{d.isPublic ? 'Make private' : 'Make public'}</span>
-                              </DropdownMenuItem>
-                              <div className="my-1 h-px bg-border" />
                               {spaces.length === 0 ? (
                                 <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
                               ) : (
@@ -1198,64 +1047,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Explore Section */}
-          <div className="max-w-6xl mx-auto mt-10">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-foreground">Explore</h2>
-              <button onClick={() => router.push('/explore')} className="text-sm text-muted-foreground hover:text-foreground">View all</button>
-            </div>
-            {exploreDocs.length === 0 ? (
-              <div className="text-sm text-muted-foreground border border-border rounded-xl p-6 text-center">No public documents yet.</div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {exploreDocs.map((d) => (
-                  <div
-                    key={d.id}
-                    className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-blue-500 transition-colors cursor-pointer relative"
-                    onClick={() => openExploreDoc(d)}
-                  >
-                    <div className="relative h-32 bg-muted flex items-center justify-center">
-                      {renderPublicDocPreview(d)}
-                      <span className="absolute left-3 bottom-3 text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 bg-background/80 border border-border">{d.type}</span>
-                      {/* Hover menu for adding to spaces */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md bg-black/90 text-white hover:bg-black"
-                            onClick={(e) => { e.stopPropagation() }}
-                            aria-label="Document menu"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
-                          {spaces.length === 0 ? (
-                            <DropdownMenuItem disabled>Add to space (none)</DropdownMenuItem>
-                          ) : (
-                            <>
-                              <DropdownMenuItem disabled className="opacity-70">Add to space</DropdownMenuItem>
-                              {spaces.slice(0,6).map(sp => (
-                                <DropdownMenuItem key={sp.id} onSelect={(e)=>{ e.preventDefault(); addExploreDocToSpace(d, sp.id) }}>
-                                  {sp.name || 'Untitled'}
-                                </DropdownMenuItem>
-                              ))}
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    <div className="p-4">
-                      <p className="font-medium text-card-foreground truncate" title={d.title}>{d.title || 'Untitled'}</p>
-                      <p className="text-xs text-muted-foreground">{relativeTime(d.createdAt || d.updatedAt)}</p>
-                      {d.preview && (
-                        <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{d.preview}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* Explore section removed */}
         </div>
 
         {/* Camera Modal */}
