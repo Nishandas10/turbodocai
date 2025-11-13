@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { uploadCameraSnapshot, uploadImageFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
+import { toast } from "@/components/ui/sonner"
 
 interface CameraModalProps {
   isOpen: boolean
@@ -23,6 +24,7 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
   const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
   const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
   const [imageFile, setImageFile] = useState<File | null>(null)
+  const [processingToastId, setProcessingToastId] = useState<string | number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -133,6 +135,11 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
           setProcessingStatus('Processing: starting')
           setOptimisticProgress(0)
           setOptimisticTimerActive(true)
+          const tid = toast.info(
+            "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
+            { duration: 10000 }
+          )
+          setProcessingToastId(tid)
           try {
             await waitAndGenerateSummary(
               result.documentId,
@@ -157,6 +164,7 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
           } finally {
             setIsProcessing(false)
             setOptimisticTimerActive(false)
+            if (processingToastId) toast.dismiss(processingToastId)
           }
         } else {
           alert('Image uploaded but missing document id')
@@ -200,6 +208,11 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
           setProcessingStatus('Processing: starting')
           setOptimisticProgress(0)
           setOptimisticTimerActive(true)
+          const tid = toast.info(
+            "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
+            { duration: 10000 }
+          )
+          setProcessingToastId(tid)
           try {
             await waitAndGenerateSummary(
               result.documentId,
@@ -224,6 +237,7 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
           } finally {
             setIsProcessing(false)
             setOptimisticTimerActive(false)
+            if (processingToastId) toast.dismiss(processingToastId)
           }
         } else {
           alert('Image uploaded but missing document id')

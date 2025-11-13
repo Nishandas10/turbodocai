@@ -67,6 +67,7 @@
     "reactflow": "^11.11.3",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
+    "sonner": "^1.5.0",
     "tailwind-merge": "^3.3.0"
   },
   "devDependencies": {

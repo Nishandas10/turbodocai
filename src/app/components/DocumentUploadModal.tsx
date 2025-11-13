@@ -8,12 +8,14 @@ import { useAuth } from "@/contexts/AuthContext"
 import { uploadDocumentFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from 'next/navigation'
+import { toast } from "@/components/ui/sonner"
 
 export default function DocumentUploadModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [processingToastId, setProcessingToastId] = useState<string | number | null>(null)
   const [processingStatus, setProcessingStatus] = useState<string>("")
   const [processingProgress, setProcessingProgress] = useState<number | null>(null)
   const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
@@ -108,6 +110,11 @@ export default function DocumentUploadModal(props: any) {
           // Start optimistic progress when processing starts
           setOptimisticProgress(0)
           setOptimisticTimerActive(true)
+          const tid = toast.info(
+            "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
+            { duration: 10000 }
+          )
+          setProcessingToastId(tid)
           
           try {
             await waitAndGenerateSummary(
@@ -137,6 +144,7 @@ export default function DocumentUploadModal(props: any) {
           } finally {
             setIsProcessing(false)
             setOptimisticTimerActive(false)
+            if (processingToastId) toast.dismiss(processingToastId)
           }
         } else {
           alert(`File uploaded successfully! Document ID: ${result.documentId}`)
@@ -166,8 +174,9 @@ export default function DocumentUploadModal(props: any) {
       setShowDocAlert(false)
       setBlockedDocName("")
       setSelectedFile(null)
+      if (processingToastId) toast.dismiss(processingToastId)
     }
-  }, [isOpen])
+  }, [isOpen, processingToastId])
 
   // Optimistic progress timer: smoothly advance up to 90% while processing
   useEffect(() => {

@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { createYouTubeDocument } from "@/lib/firestore"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
+import { toast } from "@/components/ui/sonner"
 
 export default function YouTubeVideoModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
@@ -17,6 +18,7 @@ export default function YouTubeVideoModal(props: any) {
   const [processingProgress, setProcessingProgress] = useState<number | null>(null)
   const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
   const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
+  const [processingToastId, setProcessingToastId] = useState<string | number | null>(null)
   // Removed transcript & summary previews per new requirement
   const [isFinished, setIsFinished] = useState<boolean>(false)
   const router = useRouter()
@@ -42,6 +44,11 @@ export default function YouTubeVideoModal(props: any) {
       setProcessingStatus("Processing video...")
       setOptimisticProgress(0)
       setOptimisticTimerActive(true)
+      const tid = toast.info(
+        "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
+        { duration: 10000 }
+      )
+      setProcessingToastId(tid)
       try {
         await waitAndGenerateSummary(
           documentId,
@@ -67,6 +74,7 @@ export default function YouTubeVideoModal(props: any) {
       } finally {
         setIsProcessing(false)
         setOptimisticTimerActive(false)
+        if (processingToastId) toast.dismiss(processingToastId)
       }
     } catch (error) {
       console.error('Error saving YouTube video:', error)

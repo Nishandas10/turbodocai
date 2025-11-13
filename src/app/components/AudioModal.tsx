@@ -8,12 +8,14 @@ import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { uploadAudioFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
+import { toast } from "@/components/ui/sonner"
 
 export default function AudioModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [processingToastId, setProcessingToastId] = useState<string | number | null>(null)
   const [processingStatus, setProcessingStatus] = useState<string>("")
   const [processingProgress, setProcessingProgress] = useState<number | null>(null)
   const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
@@ -75,6 +77,11 @@ export default function AudioModal(props: any) {
           setProcessingStatus('Processing: starting')
           setOptimisticProgress(0)
           setOptimisticTimerActive(true)
+          const tid = toast.info(
+            "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
+            { duration: 10000 }
+          )
+          setProcessingToastId(tid)
           try {
             await waitAndGenerateSummary(
               result.documentId,
@@ -99,6 +106,7 @@ export default function AudioModal(props: any) {
           } finally {
             setIsProcessing(false)
             setOptimisticTimerActive(false)
+            if (processingToastId) toast.dismiss(processingToastId)
           }
         } else {
           alert('Audio uploaded but missing document id')

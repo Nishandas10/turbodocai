@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { createWebsiteDocument } from "@/lib/firestore"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
+import { toast } from "@/components/ui/sonner"
 
 export default function WebsiteLinkModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
@@ -18,6 +19,7 @@ export default function WebsiteLinkModal(props: any) {
   const [optimisticProgress, setOptimisticProgress] = useState<number>(0)
   const [optimisticTimerActive, setOptimisticTimerActive] = useState<boolean>(false)
   const [displayedProgress, setDisplayedProgress] = useState<number>(0)
+  const [processingToastId, setProcessingToastId] = useState<string | number | null>(null)
   const { user } = useAuth()
   const router = useRouter()
 
@@ -65,6 +67,11 @@ export default function WebsiteLinkModal(props: any) {
   setOptimisticProgress(0)
   setDisplayedProgress(0)
   setOptimisticTimerActive(true)
+      const tid = toast.info(
+        "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
+        { duration: 10000 }
+      )
+      setProcessingToastId(tid)
 
       try {
         await waitAndGenerateSummary(
@@ -103,6 +110,7 @@ export default function WebsiteLinkModal(props: any) {
       } finally {
         setIsProcessing(false)
         setOptimisticTimerActive(false)
+        if (processingToastId) toast.dismiss(processingToastId)
       }
     } catch (error) {
       console.error('Error saving website:', error)
@@ -120,8 +128,9 @@ export default function WebsiteLinkModal(props: any) {
       setProcessingProgress(null)
       setDisplayedProgress(0)
       setProcessingStatus("")
+      if (processingToastId) toast.dismiss(processingToastId)
     }
-  }, [isOpen])
+  }, [isOpen, processingToastId])
 
   // Optimistic progress timer: smoothly advance up to 90% while processing
   useEffect(() => {
