@@ -307,24 +307,31 @@ export default function ChatPage() {
 						<div className="bg-card rounded-2xl shadow-lg relative">
 							{/* Input row */}
 							<div className="flex items-center gap-3 px-4 pt-3">
-												<input
-									className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
-				    placeholder={'Ask something...'}
-													value={effectiveInputValue}
-													onChange={(e) => {
-														const v = e.target.value;
-					    const interimShown = interimTranscript || '';
-														let base = v;
-														if (voiceActive && interimShown) {
-															if (base.endsWith(' ' + interimShown)) base = base.slice(0, -(' '.length + interimShown.length));
-															else if (base.endsWith(interimShown)) base = base.slice(0, -interimShown.length);
-														}
-														setInput(base);
-														if (voiceActive) {
-															userEditedRef.current = true;
-														}
-													}}
-									onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+											<textarea
+									className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2 resize-none min-h-10 max-h-40"
+					placeholder={'Ask something...'}
+												value={effectiveInputValue}
+												onChange={(e) => {
+													const v = e.target.value;
+						const interimShown = interimTranscript || '';
+													let base = v;
+													if (voiceActive && interimShown) {
+														if (base.endsWith(' ' + interimShown)) base = base.slice(0, -(' '.length + interimShown.length));
+														else if (base.endsWith(interimShown)) base = base.slice(0, -interimShown.length);
+													}
+													setInput(base);
+													if (voiceActive) {
+														userEditedRef.current = true;
+													}
+												}}
+									onKeyDown={(e) => {
+										if (e.key === 'Enter' && !e.shiftKey) {
+											e.preventDefault();
+											send();
+										}
+										// Shift+Enter will insert a newline by default
+									}}
+									rows={1}
 								/>
 								<button
 									type="button"

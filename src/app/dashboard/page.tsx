@@ -610,7 +610,7 @@ export default function Dashboard() {
       return bTimestamp - aTimestamp
     })
     
-    return allItems.slice(0, 8) // Limit to 8 total items
+    return allItems.slice(0, 9) // Limit to 8 total items
   }, [recentDocs, recentChats])
 
   // Parse mirror id of public docs: `${ownerId}_${documentId}`
@@ -722,8 +722,8 @@ export default function Dashboard() {
             <div className="bg-card border border-border rounded-2xl shadow-sm relative">
               {/* Top row: input + Send button */}
               <div className="flex items-center gap-3 px-4 pt-3">
-                <input
-                  className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
+                <textarea
+                  className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2 resize-none min-h-10 max-h-40"
                   placeholder={`Greetings ${username}`}
                   value={effectivePromptValue}
                   onChange={(e) => {
@@ -742,7 +742,14 @@ export default function Dashboard() {
                       userEditTimerRef.current = setTimeout(() => { userEditedRef.current = false }, 1200)
                     }
                   }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSendPrompt() }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSendPrompt()
+                    }
+                    // Shift+Enter inserts a newline by default
+                  }}
+                  rows={1}
                 />
 
                 <button
