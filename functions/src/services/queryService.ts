@@ -362,94 +362,35 @@ export class QueryService {
   // buildPrompt removed; generateAnswer now constructs messages directly with system + context.
 
   /**
-   * Summarize a document using OpenAI Assistants API with file_search over a vector store.
-   * This asks the model to produce a structured markdown summary grounded only on the attached store.
+   * Summarize a document using OpenAI chat completion with the specific document's content.
+   * This avoids the issue where file_search on a shared vector store retrieves content from multiple documents.
    */
-  private async summarizeWithOpenAIVectorStore(
-    vectorStoreId: string,
+  private async summarizeWithSpecificContent(
+    documentContent: string,
     maxLength: number,
     title: string
   ): Promise<string> {
     try {
-      const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the attached document titled "${title}" using only retrieved content.\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.`;
+      const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the following document titled "${title}".\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.\n\nDocument content:\n\n${documentContent}`;
 
-      // Create a temporary assistant with file_search enabled on the vector store
-      const assistant = await this.openai.beta.assistants.create({
+      const resp = await this.openai.chat.completions.create({
         model: "gpt-4o-mini",
-        instructions:
-          "You are a helpful assistant that creates document summaries based strictly on the provided documents. Use the file_search tool to find relevant information and create comprehensive summaries.",
-        tools: [{ type: "file_search" }],
-        tool_resources: {
-          file_search: {
-            vector_store_ids: [vectorStoreId],
-          },
-        },
-      });
-
-      // Create a thread and add the summarization request
-      const thread = await this.openai.beta.threads.create({
         messages: [
           {
-            role: "user",
-            content: prompt,
+            role: "system",
+            content:
+              "You are an expert summarizer. Produce clear, well-structured markdown summaries. Be faithful to the source content and do not add information not present in the document.",
           },
+          { role: "user", content: prompt },
         ],
+        max_tokens: Math.ceil(maxLength * 1.6),
+        temperature: 0.25,
       });
 
-      // Run the assistant
-      const run = await this.openai.beta.threads.runs.create(thread.id, {
-        assistant_id: assistant.id,
-      });
-
-      // Wait for completion and get the response
-      let runStatus = await this.openai.beta.threads.runs.retrieve(
-        thread.id,
-        run.id
-      );
-      while (
-        runStatus.status === "queued" ||
-        runStatus.status === "in_progress"
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        runStatus = await this.openai.beta.threads.runs.retrieve(
-          thread.id,
-          run.id
-        );
-      }
-
-      if (runStatus.status === "completed") {
-        const messages = await this.openai.beta.threads.messages.list(
-          thread.id
-        );
-        // Find the most recent assistant message that has text content
-        let summary = "";
-        for (const msg of messages.data) {
-          if (msg.role !== "assistant") continue;
-          const parts = (msg.content || []).filter(
-            (c: any) => c?.type === "text" && c?.text?.value
-          );
-          if (parts.length) {
-            summary = parts
-              .map((p: any) => String(p.text.value || ""))
-              .join("\n")
-              .trim();
-            if (summary) break;
-          }
-        }
-
-        // Clean up temporary assistant
-        await this.openai.beta.assistants.del(assistant.id);
-
-        return summary.trim();
-      } else {
-        // Clean up temporary assistant on failure
-        await this.openai.beta.assistants.del(assistant.id);
-        throw new Error(
-          `Assistant run failed with status: ${runStatus.status}`
-        );
-      }
+      const summary = resp.choices?.[0]?.message?.content || "";
+      return summary.trim();
     } catch (err) {
-      logger.error("summarizeWithOpenAIVectorStore failed", err as any);
+      logger.error("summarizeWithSpecificContent failed", err as any);
       throw err;
     }
   }
@@ -534,58 +475,33 @@ export class QueryService {
           .get();
         if (snap.exists) {
           const data = (snap.data() as any) || {};
-          const vsId: string | undefined =
-            data?.metadata?.openaiVector?.vectorStoreId;
-          if (vsId) {
-            logger.info("Summarizing via OpenAI Vector Store", {
+          const docTitle = String(data?.title || "Document");
+
+          // Get the specific document content from transcript or Firestore
+          let documentContent = await this.waitForRawText(
+            userId,
+            documentId,
+            30000
+          );
+
+          if (documentContent && documentContent.length > 100) {
+            logger.info("Summarizing with specific document content", {
               documentId,
-              vsId,
+              contentLength: documentContent.length,
             });
-            // Small retry loop to allow vector store indexing to settle for large files
-            let vsErr: any = null;
-            for (let attempt = 0; attempt < 2; attempt++) {
-              try {
-                const summary = await this.summarizeWithOpenAIVectorStore(
-                  vsId,
-                  maxLength,
-                  String(data?.title || "Document")
-                );
-                if (summary && summary.trim().length) return summary;
-              } catch (e) {
-                vsErr = e;
-                await new Promise((r) => setTimeout(r, 1500));
-              }
-            }
-            if (vsErr) {
+
+            try {
+              const summary = await this.summarizeWithSpecificContent(
+                documentContent.slice(0, 18000), // Limit content size for API
+                maxLength,
+                docTitle
+              );
+              if (summary && summary.trim().length) return summary;
+            } catch (e) {
               logger.warn(
-                "Vector store summarization failed, attempting Firestore raw content fallback",
-                vsErr as any
+                "Direct content summarization failed, using fallback",
+                e as any
               );
-              // Fallback to Firestore raw content if available
-              // Wait briefly for transcript/inline content to become available
-              let rawText: string = await this.waitForRawText(
-                userId,
-                documentId,
-                30000
-              );
-              if (rawText && rawText.length > 100) {
-                const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
-                const resp = await this.openai.chat.completions.create({
-                  model: "gpt-4o-mini",
-                  messages: [
-                    {
-                      role: "system",
-                      content:
-                        "You are an expert summarizer. Produce clear, well-structured markdown. No code fences.",
-                    },
-                    { role: "user", content: prompt },
-                  ],
-                  max_tokens: Math.ceil(maxLength * 1.6),
-                  temperature: 0.25,
-                });
-                const txt = resp.choices?.[0]?.message?.content || "";
-                if (txt) return txt;
-              }
             }
           }
         }

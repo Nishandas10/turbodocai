@@ -257,6 +257,7 @@ const createServices = () => {
         documentProcessor: new services_1.DocumentProcessor(),
         embeddingService: new services_1.EmbeddingService(),
         queryService: new services_1.QueryService(),
+        translationService: new services_1.TranslationService(),
     };
 };
 // ===== Topic classification config & helpers =====
@@ -539,6 +540,9 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             return;
         }
         let extractedText = "";
+        // Track language detection/translation for metadata
+        let detectedLanguage = "und";
+        let wasTranslated = false;
         if (docType === "website") {
             // Webpage extraction path: use metadata.url
             const url = String(((_k = documentData === null || documentData === void 0 ? void 0 : documentData.metadata) === null || _k === void 0 ? void 0 : _k.url) || ((_l = documentData === null || documentData === void 0 ? void 0 : documentData.content) === null || _l === void 0 ? void 0 : _l.raw) || "");
@@ -574,6 +578,21 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             // Clean text using TXT pipeline cleaner
             const buffer = Buffer.from(transcriptText, "utf-8");
             extractedText = await createServices().documentProcessor.extractTextFromTXT(buffer);
+            // Ensure English for downstream RAG: detect language and translate if needed
+            try {
+                const ensured = await createServices().translationService.ensureEnglish(extractedText);
+                detectedLanguage = ensured.detectedLang || "und";
+                wasTranslated = ensured.translated && ensured.detectedLang !== "en";
+                extractedText = ensured.englishText || extractedText;
+                firebase_functions_1.logger.info("YouTube transcript language handling", {
+                    detectedLanguage,
+                    wasTranslated,
+                    length: extractedText.length,
+                });
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("Language detection/translation failed; using original text", e);
+            }
             // Optionally update document title if API provided one and current title is generic
             if (apiTitle) {
                 const currentTitle = String(documentData.title || "");
@@ -799,12 +818,17 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                 .update({
                 // Keep a smaller inline preview to stay well under Firestore limits
                 "content.raw": workingText.slice(0, 200000),
-                "content.processed": `Indexed to OpenAI Vector Store`,
+                "content.processed": wasTranslated
+                    ? `Indexed to OpenAI Vector Store (EN)`
+                    : `Indexed to OpenAI Vector Store`,
                 "metadata.openaiVector": {
                     vectorStoreId: openaiVS.getVectorStoreId(),
                     fileId: vsUpload.fileId,
                     vectorStoreFileId: vsUpload.vectorStoreFileId,
                 },
+                // Save language/translation flags for UI & analytics
+                "metadata.originalLanguage": detectedLanguage,
+                "metadata.translatedToEnglish": wasTranslated,
                 // Store transcript file path for full-text retrieval in UI
                 "metadata.transcriptPath": transcriptPath,
                 processingStatus: "completed",

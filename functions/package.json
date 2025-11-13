@@ -20,6 +20,7 @@
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^6.1.0",
     "fluent-ffmpeg": "^2.1.2",
+    "franc-min": "^6.1.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.6.0",
     "openai": "^4.80.1",

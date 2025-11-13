@@ -240,6 +240,72 @@
 				"build"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Install functions deps and build (PowerShell)",
+			"type": "shell",
+			"command": "npm --prefix functions install; npm --prefix functions run build",
+			"isBackground": false
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Build functions (tsc)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"--prefix",
+				"functions",
+				"build"
+			],
+			"isBackground": false
 		}
 	]
 }

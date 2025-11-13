@@ -18,6 +18,7 @@ import {
   EmbeddingService,
   QueryService,
   OpenAIVectorStoreService,
+  TranslationService,
 } from "./services";
 
 // Initialize Firebase Admin
@@ -231,6 +232,7 @@ const createServices = () => {
     documentProcessor: new DocumentProcessor(),
     embeddingService: new EmbeddingService(),
     queryService: new QueryService(),
+    translationService: new TranslationService(),
   };
 };
 
@@ -568,6 +570,9 @@ export const processDocument = onDocumentWritten(
       }
 
       let extractedText = "";
+      // Track language detection/translation for metadata
+      let detectedLanguage: string = "und";
+      let wasTranslated = false;
       if (docType === "website") {
         // Webpage extraction path: use metadata.url
         const url = String(
@@ -614,6 +619,27 @@ export const processDocument = onDocumentWritten(
         extractedText = await (
           createServices().documentProcessor as any
         ).extractTextFromTXT(buffer);
+
+        // Ensure English for downstream RAG: detect language and translate if needed
+        try {
+          const ensured =
+            await createServices().translationService.ensureEnglish(
+              extractedText
+            );
+          detectedLanguage = ensured.detectedLang || "und";
+          wasTranslated = ensured.translated && ensured.detectedLang !== "en";
+          extractedText = ensured.englishText || extractedText;
+          logger.info("YouTube transcript language handling", {
+            detectedLanguage,
+            wasTranslated,
+            length: extractedText.length,
+          });
+        } catch (e) {
+          logger.warn(
+            "Language detection/translation failed; using original text",
+            e as any
+          );
+        }
         // Optionally update document title if API provided one and current title is generic
         if (apiTitle) {
           const currentTitle = String(documentData.title || "");
@@ -886,12 +912,17 @@ export const processDocument = onDocumentWritten(
           .update({
             // Keep a smaller inline preview to stay well under Firestore limits
             "content.raw": workingText.slice(0, 200_000),
-            "content.processed": `Indexed to OpenAI Vector Store`,
+            "content.processed": wasTranslated
+              ? `Indexed to OpenAI Vector Store (EN)`
+              : `Indexed to OpenAI Vector Store`,
             "metadata.openaiVector": {
               vectorStoreId: openaiVS.getVectorStoreId(),
               fileId: vsUpload.fileId,
               vectorStoreFileId: vsUpload.vectorStoreFileId,
             },
+            // Save language/translation flags for UI & analytics
+            "metadata.originalLanguage": detectedLanguage,
+            "metadata.translatedToEnglish": wasTranslated,
             // Store transcript file path for full-text retrieval in UI
             "metadata.transcriptPath": transcriptPath,
             processingStatus: "completed",
