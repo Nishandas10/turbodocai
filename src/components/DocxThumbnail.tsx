@@ -40,8 +40,11 @@ export default function DocxThumbnail({ fileUrl, className }: DocxThumbnailProps
         // Keep only the first ~800 characters to limit cost
         const trimmed = result.value.slice(0, 1200)
         setHtml(trimmed)
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Preview not available")
+      } catch (e) {
+        if (!cancelled) {
+          const message = e instanceof Error ? e.message : "Preview not available"
+          setError(message)
+        }
       }
     })()
     return () => { cancelled = true }

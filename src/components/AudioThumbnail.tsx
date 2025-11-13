@@ -82,7 +82,7 @@ export default function AudioThumbnail({ audioUrl, className, title }: AudioThum
     setIsLoading(false)
   }
 
-  const handleLoadError = (e: any) => {
+  const handleLoadError = (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
     console.warn('Audio load error:', e, 'URL:', audioUrl)
     setError(true)
     setIsLoading(false)

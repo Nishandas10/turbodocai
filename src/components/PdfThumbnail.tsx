@@ -32,7 +32,7 @@ export default function PdfThumbnail({ fileUrl, className }: PdfThumbnailProps) 
     // Configure PDF.js worker on client side only
     import("react-pdf").then(({ pdfjs }) => {
       try {
-        (pdfjs as any).GlobalWorkerOptions.workerSrc = new URL(
+        (pdfjs as { GlobalWorkerOptions: { workerSrc?: string } }).GlobalWorkerOptions.workerSrc = new URL(
           "pdfjs-dist/build/pdf.worker.min.mjs",
           import.meta.url
         ).toString()
@@ -73,7 +73,7 @@ export default function PdfThumbnail({ fileUrl, className }: PdfThumbnailProps) 
           key={fileUrl}
           file={fileUrl}
           loading={<div className="text-xs text-muted-foreground">Loading…</div>}
-          onLoadError={(e: any) => setError(e?.message || "Failed to load PDF")}
+          onLoadError={(error: Error) => setError(error.message || "Failed to load PDF")}
           error={<div className="text-xs text-muted-foreground">{error || "No preview"}</div>}
         >
           <div className="max-h-full max-w-full">
