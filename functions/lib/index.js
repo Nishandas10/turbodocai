@@ -347,7 +347,8 @@ function selectDocTextForClassification(data) {
 async function classifyTopics(data, embeddingService) {
     try {
         const text = selectDocTextForClassification(data);
-        if (!text || text.length < 10)
+        // Be stricter: require a reasonable amount of text before classifying
+        if (!text || text.length < 120)
             return [];
         const topicEmb = await getTopicEmbeddings(embeddingService);
         if (!topicEmb.vectors.length)
@@ -357,14 +358,14 @@ async function classifyTopics(data, embeddingService) {
             label: topicEmb.labels[i],
             score: cosineSim(docVec, v),
         }));
-        // Pick top 1-3 topics above threshold; ensure AI + CS example maps well
+        // Stricter policy: sort, apply higher threshold, and keep at most 1 tag
         scores.sort((a, b) => b.score - a.score);
-        const threshold = 0.25; // conservative; adjust with real data
-        const top = scores.filter((s) => s.score >= threshold).slice(0, 3);
+        const threshold = 0.45; // stricter similarity requirement
+        const top = scores.filter((s) => s.score >= threshold).slice(0, 1);
+        // No fallback: if nothing crosses threshold, return no tags
         if (top.length)
             return top.map((t) => t.label);
-        // Fallback: just the best one if nothing crossed threshold
-        return scores.slice(0, 1).map((s) => s.label);
+        return [];
     }
     catch (err) {
         firebase_functions_1.logger.warn("Topic classification failed", err);
@@ -1058,7 +1059,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
     var _a, e_1, _b, _c;
     var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13;
     try {
-        const { userId, prompt, language, chatId, docIds, webSearch, thinkMode, docOwnerId } = request.data || {};
+        const { userId, prompt, language, chatId, docIds, webSearch, thinkMode, docOwnerId, } = request.data || {};
         if (!userId || !prompt || typeof prompt !== "string") {
             throw new Error("Missing required parameters: userId and prompt");
         }

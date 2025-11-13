@@ -349,7 +349,8 @@ async function classifyTopics(
 ): Promise<string[]> {
   try {
     const text = selectDocTextForClassification(data);
-    if (!text || text.length < 10) return [];
+    // Be stricter: require a reasonable amount of text before classifying
+    if (!text || text.length < 120) return [];
     const topicEmb = await getTopicEmbeddings(embeddingService);
     if (!topicEmb.vectors.length) return [];
     const docVec = await embeddingService.embedQuery(text);
@@ -357,13 +358,13 @@ async function classifyTopics(
       label: topicEmb.labels[i],
       score: cosineSim(docVec, v),
     }));
-    // Pick top 1-3 topics above threshold; ensure AI + CS example maps well
+    // Stricter policy: sort, apply higher threshold, and keep at most 1 tag
     scores.sort((a, b) => b.score - a.score);
-    const threshold = 0.25; // conservative; adjust with real data
-    const top = scores.filter((s) => s.score >= threshold).slice(0, 3);
+    const threshold = 0.45; // stricter similarity requirement
+    const top = scores.filter((s) => s.score >= threshold).slice(0, 1);
+    // No fallback: if nothing crosses threshold, return no tags
     if (top.length) return top.map((t) => t.label);
-    // Fallback: just the best one if nothing crossed threshold
-    return scores.slice(0, 1).map((s) => s.label);
+    return [];
   } catch (err) {
     logger.warn("Topic classification failed", err as any);
     return [];

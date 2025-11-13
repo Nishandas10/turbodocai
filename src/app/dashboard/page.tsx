@@ -40,6 +40,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { functions } from "@/lib/firebase"
 import Favicon from "@/components/Favicon"
 import { httpsCallable } from "firebase/functions"
+import PdfThumbnail from "@/components/PdfThumbnail"
+import DocxThumbnail from "@/components/DocxThumbnail"
+import PptxThumbnail from "@/components/PptxThumbnail"
+import WebsiteThumbnail from "@/components/WebsiteThumbnail"
+import ChatThumbnail from "@/components/ChatThumbnail"
+import AudioThumbnail from "@/components/AudioThumbnail"
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -353,7 +359,7 @@ export default function Dashboard() {
       )
     }
   if (doc.type === 'youtube') return <Play className={iconCls} />
-    if (doc.type === 'website') {
+  if (doc.type === 'website') {
       // PublicDocumentMeta.metadata may not declare `url`; prefer masterUrl, then try metadata.url if present
       const rawUrl = (typeof doc.masterUrl === 'string' && doc.masterUrl)
         ? doc.masterUrl
@@ -381,14 +387,14 @@ export default function Dashboard() {
     return <FileText className={iconCls} />
   }
 
-  const renderChatPreview = () => {
-    const iconCls = "h-8 w-8 text-muted-foreground"
-    return <Brain className={iconCls} />
+  const renderChatPreview = (chatId: string) => {
+    return <ChatThumbnail chatId={chatId} />
   }
 
   const renderDocPreview = (doc: UserDoc) => {
     const url = doc?.metadata?.downloadURL
     const mime = doc?.metadata?.mimeType || ''
+    const fileName = (doc?.metadata?.fileName || '').toLowerCase()
     const text = (doc.summary || doc.content?.processed || doc.content?.raw || '').trim()
     const iconCls = "h-8 w-8 text-muted-foreground"
 
@@ -426,9 +432,11 @@ export default function Dashboard() {
     }
     if (doc.type === 'website') {
       const rawUrl = (doc.metadata?.url || '') as string
-      const host = (() => {
-        try { return new URL(rawUrl).hostname.replace(/^www\./,'') } catch { return '' }
-      })()
+      if (rawUrl) {
+        return <WebsiteThumbnail url={rawUrl} className="absolute inset-0" />
+      }
+      // Fallback to favicon + host label if URL missing
+      const host = (() => { try { return new URL(rawUrl).hostname.replace(/^www\./,'') } catch { return '' } })()
       return (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
           {host ? <Favicon host={host} className="h-8 w-8 mb-1 rounded" /> : <Globe className={iconCls} />}
@@ -436,9 +444,31 @@ export default function Dashboard() {
         </div>
       )
     }
-    if (doc.type === 'audio') return <Mic className={iconCls} />
+    if (doc.type === 'audio') {
+      const audioUrl = doc?.metadata?.downloadURL
+      if (audioUrl && typeof audioUrl === 'string') {
+        return <AudioThumbnail audioUrl={audioUrl} title={doc.title} className="absolute inset-0" />
+      }
+      return <Mic className={iconCls} />
+    }
 
     // Default: show text excerpt if available
+    // If this is a PDF and we have a direct URL, render a first-page thumbnail like in notes/[id]/chat
+    const isPdf = doc.type === 'pdf' || mime.includes('pdf') || fileName.endsWith('.pdf')
+    const isDocx = doc.type === 'docx' || mime.includes('word') || fileName.endsWith('.docx')
+    const isPptx = doc.type === 'pptx' || mime.includes('presentation') || fileName.endsWith('.pptx')
+    if (isPdf && typeof url === 'string' && url) {
+      return (
+        <PdfThumbnail fileUrl={url} className="absolute inset-0" />
+      )
+    }
+    if (isDocx && typeof url === 'string' && url) {
+      return <DocxThumbnail fileUrl={url} className="absolute inset-0" />
+    }
+    if (isPptx && typeof url === 'string' && url) {
+      return <PptxThumbnail fileUrl={url} className="absolute inset-0" />
+    }
+
     if (text) {
       const excerpt = text.split(/\n+/).slice(0, 4).join('\n')
       return (
@@ -1153,7 +1183,7 @@ export default function Dashboard() {
                         onClick={() => openRecentChat(c)}
                       >
                         <div className="relative h-32 bg-muted flex items-center justify-center">
-                          {renderChatPreview()}
+                          {renderChatPreview(c.id)}
                           <span className="absolute left-3 bottom-3 text-xs bg-background/80 border border-border rounded-full px-2 py-0.5">Chat</span>
                         </div>
                         <div className="p-4">
