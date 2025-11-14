@@ -1094,7 +1094,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
     enforceAppCheck: false,
 }, async (request) => {
     var _a, e_1, _b, _c;
-    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13;
+    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10;
     try {
         const { userId, prompt, language, chatId, docIds, webSearch, thinkMode, docOwnerId, } = request.data || {};
         if (!userId || !prompt || typeof prompt !== "string") {
@@ -1110,7 +1110,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 ? "o3-mini"
                 : "gpt-4o-mini";
         // Determine if this is a document-based chat or standalone chat
-        const isDocumentBasedChat = Array.isArray(docIds) && docIds.length > 0;
+        // Important: Only treat as document-based when an explicit docOwnerId is provided
+        // (DocumentChat flow). ChatPage may pass docIds as context but should remain in top-level chats.
+        const isDocumentBasedChat = !!docOwnerId && Array.isArray(docIds) && docIds.length > 0;
         let chatDocId = chatId;
         let chatCollection;
         if (isDocumentBasedChat) {
@@ -1205,8 +1207,14 @@ exports.sendChatMessage = (0, https_1.onCall)({
         // Optional RAG retrieval
         let docsContext = "";
         let vectorStoreIds = [];
+        let vectorFileIds = [];
         let metaSnaps = [];
         if (activeDocIds.length) {
+            firebase_functions_1.logger.info("Processing document context", {
+                activeDocIds,
+                docOwnerId: docOwnerId || "not provided",
+                userId,
+            });
             // Inspect whether any of the context docs were indexed in OpenAI Vector Store
             try {
                 const documentOwnerId = docOwnerId || userId; // Use docOwnerId if provided, otherwise fall back to userId
@@ -1216,10 +1224,22 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     .collection("userDocuments")
                     .doc(id)
                     .get()));
-                vectorStoreIds = Array.from(new Set(metaSnaps
-                    .map((s) => s.data())
+                firebase_functions_1.logger.info("Retrieved document metadata", {
+                    docCount: metaSnaps.length,
+                    docsExist: metaSnaps.map((s) => ({ id: s.id, exists: s.exists })),
+                });
+                const metaDatas = metaSnaps.map((s) => s.data() || {});
+                vectorStoreIds = Array.from(new Set(metaDatas
                     .map((d) => { var _a, _b; return (_b = (_a = d === null || d === void 0 ? void 0 : d.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.vectorStoreId; })
                     .filter(Boolean)));
+                vectorFileIds = metaDatas
+                    .map((d) => { var _a, _b; return (_b = (_a = d === null || d === void 0 ? void 0 : d.metadata) === null || _a === void 0 ? void 0 : _a.openaiVector) === null || _b === void 0 ? void 0 : _b.fileId; })
+                    .filter(Boolean);
+                firebase_functions_1.logger.info("Vector store analysis", {
+                    vectorStoreIds,
+                    vectorStoreCount: vectorStoreIds.length,
+                    vectorFileIdsCount: vectorFileIds.length
+                });
             }
             catch (e) {
                 firebase_functions_1.logger.warn("Failed to read doc metadata for vector store IDs", e);
@@ -1245,7 +1265,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                                     .download();
                                 text = buf.toString("utf-8");
                             }
-                            catch (_14) {
+                            catch (_11) {
                                 /* ignore */
                             }
                         }
@@ -1263,6 +1283,13 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     }
                     if (pieces.length) {
                         docsContext = `Retrieved document context (no vector store available):\n\n${pieces.join("\n\n---\n\n")}`;
+                        firebase_functions_1.logger.info("Built fallback context", {
+                            pieceCount: pieces.length,
+                            totalChars: docsContext.length,
+                        });
+                    }
+                    else {
+                        firebase_functions_1.logger.warn("No fallback context could be built from documents");
                     }
                 }
                 catch (fbErr) {
@@ -1326,22 +1353,68 @@ exports.sendChatMessage = (0, https_1.onCall)({
             }
         };
         try {
-            // Prefer OpenAI file_search when DOCX/PPTX vector stores are in context
+            // Prefer OpenAI file_search when vector stores are in context
             if (vectorStoreIds.length) {
-                // Use regular chat completions with system message about available documents
-                const systemMessage = {
-                    role: "system",
-                    content: `${baseInstruction}\n\nNote: You have access to document content via context. Answer based on the conversation and any provided document context.`,
-                };
-                const completion = await openai.chat.completions.create({
+                firebase_functions_1.logger.info("Using vector store file_search", { vectorStoreIds });
+                // Create assistant with file_search tool; we'll restrict to the selected files via attachments
+                const assistant = await openai.beta.assistants.create({
+                    name: "Document Assistant",
+                    instructions: baseInstruction,
+                    tools: [{ type: "file_search" }],
                     model: "gpt-4o-mini",
                     temperature: 0.2,
-                    messages: [systemMessage, ...chatMessages.slice(1)],
-                    max_tokens: 1200,
                 });
-                const fullText = ((_k = (_j = (_h = completion.choices) === null || _h === void 0 ? void 0 : _h[0]) === null || _j === void 0 ? void 0 : _j.message) === null || _k === void 0 ? void 0 : _k.content) ||
-                    "I'm sorry, I couldn't generate a response.";
-                await streamOut(String(fullText));
+                // Create thread with conversation history
+                const thread = await openai.beta.threads.create({
+                    messages: convo.map((m) => ({
+                        role: m.role === "user" ? "user" : "assistant",
+                        content: String(m.content || ""),
+                    })),
+                });
+                // Add the current user message, attaching only the selected file IDs to restrict search scope
+                const attachments = (vectorFileIds && vectorFileIds.length)
+                    ? vectorFileIds.map((fid) => ({ file_id: fid, tools: [{ type: "file_search" }] }))
+                    : undefined;
+                await openai.beta.threads.messages.create(thread.id, {
+                    role: "user",
+                    content: String(prompt),
+                    // @ts-ignore - beta types may not include attachments yet
+                    attachments
+                });
+                // Run the assistant
+                const run = await openai.beta.threads.runs.create(thread.id, {
+                    assistant_id: assistant.id,
+                });
+                // Poll for completion
+                let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+                while (runStatus.status === "in_progress" ||
+                    runStatus.status === "queued") {
+                    await new Promise((r) => setTimeout(r, 1000));
+                    runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+                }
+                if (runStatus.status === "completed") {
+                    // Get the assistant's response
+                    const messages = await openai.beta.threads.messages.list(thread.id);
+                    const lastMessage = messages.data[0];
+                    const textContent = lastMessage.content.find((c) => c.type === "text");
+                    const fullText = (textContent === null || textContent === void 0 ? void 0 : textContent.type) === "text"
+                        ? textContent.text.value
+                        : "I couldn't generate a response.";
+                    await streamOut(String(fullText));
+                }
+                else {
+                    firebase_functions_1.logger.error("Assistant run failed", {
+                        status: runStatus.status,
+                        lastError: runStatus.last_error,
+                    });
+                    throw new Error(`Assistant run failed with status: ${runStatus.status}`);
+                }
+                // Clean up the temporary assistant
+                try {
+                    await openai.beta.assistants.del(assistant.id);
+                }
+                catch (_12) { }
+                // Note: threads are automatically cleaned up by OpenAI
             }
             else if (webSearch) {
                 // Non-streaming Responses API with web_search tool (gpt-4.1)
@@ -1362,9 +1435,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     tools: [{ type: "web_search" }],
                 });
                 const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                    ((_p = (_o = (_m = (_l = resp === null || resp === void 0 ? void 0 : resp.output) === null || _l === void 0 ? void 0 : _l[0]) === null || _m === void 0 ? void 0 : _m.content) === null || _o === void 0 ? void 0 : _o[0]) === null || _p === void 0 ? void 0 : _p.text) ||
-                    ((_t = (_s = (_r = (_q = resp === null || resp === void 0 ? void 0 : resp.data) === null || _q === void 0 ? void 0 : _q[0]) === null || _r === void 0 ? void 0 : _r.content) === null || _s === void 0 ? void 0 : _s[0]) === null || _t === void 0 ? void 0 : _t.text) ||
-                    ((_w = (_v = (_u = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _u === void 0 ? void 0 : _u[0]) === null || _v === void 0 ? void 0 : _v.message) === null || _w === void 0 ? void 0 : _w.content) ||
+                    ((_l = (_k = (_j = (_h = resp === null || resp === void 0 ? void 0 : resp.output) === null || _h === void 0 ? void 0 : _h[0]) === null || _j === void 0 ? void 0 : _j.content) === null || _k === void 0 ? void 0 : _k[0]) === null || _l === void 0 ? void 0 : _l.text) ||
+                    ((_q = (_p = (_o = (_m = resp === null || resp === void 0 ? void 0 : resp.data) === null || _m === void 0 ? void 0 : _m[0]) === null || _o === void 0 ? void 0 : _o.content) === null || _p === void 0 ? void 0 : _p[0]) === null || _q === void 0 ? void 0 : _q.text) ||
+                    ((_t = (_s = (_r = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _r === void 0 ? void 0 : _r[0]) === null || _s === void 0 ? void 0 : _s.message) === null || _t === void 0 ? void 0 : _t.content) ||
                     "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
@@ -1386,9 +1459,9 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     input,
                 });
                 const fullText = (resp === null || resp === void 0 ? void 0 : resp.output_text) ||
-                    ((_0 = (_z = (_y = (_x = resp === null || resp === void 0 ? void 0 : resp.output) === null || _x === void 0 ? void 0 : _x[0]) === null || _y === void 0 ? void 0 : _y.content) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.text) ||
-                    ((_4 = (_3 = (_2 = (_1 = resp === null || resp === void 0 ? void 0 : resp.data) === null || _1 === void 0 ? void 0 : _1[0]) === null || _2 === void 0 ? void 0 : _2.content) === null || _3 === void 0 ? void 0 : _3[0]) === null || _4 === void 0 ? void 0 : _4.text) ||
-                    ((_7 = (_6 = (_5 = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _5 === void 0 ? void 0 : _5[0]) === null || _6 === void 0 ? void 0 : _6.message) === null || _7 === void 0 ? void 0 : _7.content) ||
+                    ((_x = (_w = (_v = (_u = resp === null || resp === void 0 ? void 0 : resp.output) === null || _u === void 0 ? void 0 : _u[0]) === null || _v === void 0 ? void 0 : _v.content) === null || _w === void 0 ? void 0 : _w[0]) === null || _x === void 0 ? void 0 : _x.text) ||
+                    ((_1 = (_0 = (_z = (_y = resp === null || resp === void 0 ? void 0 : resp.data) === null || _y === void 0 ? void 0 : _y[0]) === null || _z === void 0 ? void 0 : _z.content) === null || _0 === void 0 ? void 0 : _0[0]) === null || _1 === void 0 ? void 0 : _1.text) ||
+                    ((_4 = (_3 = (_2 = resp === null || resp === void 0 ? void 0 : resp.choices) === null || _2 === void 0 ? void 0 : _2[0]) === null || _3 === void 0 ? void 0 : _3.message) === null || _4 === void 0 ? void 0 : _4.content) ||
                     "I'm sorry, I couldn't generate a response.";
                 await streamOut(String(fullText));
             }
@@ -1401,11 +1474,11 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     stream: true,
                 });
                 try {
-                    for (var _15 = true, _16 = __asyncValues(stream), _17; _17 = await _16.next(), _a = _17.done, !_a; _15 = true) {
-                        _c = _17.value;
-                        _15 = false;
+                    for (var _13 = true, _14 = __asyncValues(stream), _15; _15 = await _14.next(), _a = _15.done, !_a; _13 = true) {
+                        _c = _15.value;
+                        _13 = false;
                         const part = _c;
-                        const delta = ((_10 = (_9 = (_8 = part === null || part === void 0 ? void 0 : part.choices) === null || _8 === void 0 ? void 0 : _8[0]) === null || _9 === void 0 ? void 0 : _9.delta) === null || _10 === void 0 ? void 0 : _10.content) || "";
+                        const delta = ((_7 = (_6 = (_5 = part === null || part === void 0 ? void 0 : part.choices) === null || _5 === void 0 ? void 0 : _5[0]) === null || _6 === void 0 ? void 0 : _6.delta) === null || _7 === void 0 ? void 0 : _7.content) || "";
                         if (delta)
                             buffered += delta;
                         const now = Date.now();
@@ -1418,7 +1491,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 catch (e_1_1) { e_1 = { error: e_1_1 }; }
                 finally {
                     try {
-                        if (!_15 && !_a && (_b = _16.return)) await _b.call(_16);
+                        if (!_13 && !_a && (_b = _14.return)) await _b.call(_14);
                     }
                     finally { if (e_1) throw e_1.error; }
                 }
@@ -1437,7 +1510,7 @@ exports.sendChatMessage = (0, https_1.onCall)({
                     messages: chatMessages,
                 });
                 buffered =
-                    ((_13 = (_12 = (_11 = completion.choices) === null || _11 === void 0 ? void 0 : _11[0]) === null || _12 === void 0 ? void 0 : _12.message) === null || _13 === void 0 ? void 0 : _13.content) ||
+                    ((_10 = (_9 = (_8 = completion.choices) === null || _8 === void 0 ? void 0 : _8[0]) === null || _9 === void 0 ? void 0 : _9.message) === null || _10 === void 0 ? void 0 : _10.content) ||
                         "I'm sorry, I couldn't generate a response.";
                 await flush(true);
             }

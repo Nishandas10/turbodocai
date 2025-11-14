@@ -1266,7 +1266,10 @@ export const sendChatMessage = onCall(
         : "gpt-4o-mini";
 
       // Determine if this is a document-based chat or standalone chat
-      const isDocumentBasedChat = Array.isArray(docIds) && docIds.length > 0;
+      // Important: Only treat as document-based when an explicit docOwnerId is provided
+      // (DocumentChat flow). ChatPage may pass docIds as context but should remain in top-level chats.
+      const isDocumentBasedChat =
+        !!docOwnerId && Array.isArray(docIds) && docIds.length > 0;
       let chatDocId: string = chatId;
       let chatCollection: any;
 
@@ -1377,8 +1380,15 @@ export const sendChatMessage = onCall(
       // Optional RAG retrieval
       let docsContext = "";
       let vectorStoreIds: string[] = [];
+      let vectorFileIds: string[] = [];
       let metaSnaps: any[] = [];
       if (activeDocIds.length) {
+        logger.info("Processing document context", {
+          activeDocIds,
+          docOwnerId: docOwnerId || "not provided",
+          userId,
+        });
+
         // Inspect whether any of the context docs were indexed in OpenAI Vector Store
         try {
           const documentOwnerId = docOwnerId || userId; // Use docOwnerId if provided, otherwise fall back to userId
@@ -1392,14 +1402,29 @@ export const sendChatMessage = onCall(
                 .get()
             )
           );
+
+          logger.info("Retrieved document metadata", {
+            docCount: metaSnaps.length,
+            docsExist: metaSnaps.map((s) => ({ id: s.id, exists: s.exists })),
+          });
+
+          const metaDatas = metaSnaps.map((s) => (s.data() as any) || {});
           vectorStoreIds = Array.from(
             new Set(
-              metaSnaps
-                .map((s) => s.data() as any)
+              metaDatas
                 .map((d) => d?.metadata?.openaiVector?.vectorStoreId)
                 .filter(Boolean) as string[]
             )
           );
+          vectorFileIds = metaDatas
+            .map((d) => d?.metadata?.openaiVector?.fileId)
+            .filter(Boolean) as string[];
+
+          logger.info("Vector store analysis", {
+            vectorStoreIds,
+            vectorStoreCount: vectorStoreIds.length,
+            vectorFileIdsCount: vectorFileIds.length,
+          });
         } catch (e) {
           logger.warn("Failed to read doc metadata for vector store IDs", e);
         }
@@ -1445,6 +1470,12 @@ export const sendChatMessage = onCall(
               docsContext = `Retrieved document context (no vector store available):\n\n${pieces.join(
                 "\n\n---\n\n"
               )}`;
+              logger.info("Built fallback context", {
+                pieceCount: pieces.length,
+                totalChars: docsContext.length,
+              });
+            } else {
+              logger.warn("No fallback context could be built from documents");
             }
           } catch (fbErr) {
             logger.warn("Context fallback assembly failed", fbErr);
@@ -1512,23 +1543,90 @@ export const sendChatMessage = onCall(
       };
 
       try {
-        // Prefer OpenAI file_search when DOCX/PPTX vector stores are in context
+        // Prefer OpenAI file_search when vector stores are in context
         if (vectorStoreIds.length) {
-          // Use regular chat completions with system message about available documents
-          const systemMessage = {
-            role: "system" as const,
-            content: `${baseInstruction}\n\nNote: You have access to document content via context. Answer based on the conversation and any provided document context.`,
-          };
-          const completion = await openai.chat.completions.create({
+          logger.info("Using vector store file_search", { vectorStoreIds });
+
+          // Create assistant with file_search tool; we'll restrict to the selected files via attachments
+          const assistant = await openai.beta.assistants.create({
+            name: "Document Assistant",
+            instructions: baseInstruction,
+            tools: [{ type: "file_search" }],
             model: "gpt-4o-mini",
             temperature: 0.2,
-            messages: [systemMessage, ...chatMessages.slice(1)] as any,
-            max_tokens: 1200,
           });
-          const fullText =
-            completion.choices?.[0]?.message?.content ||
-            "I'm sorry, I couldn't generate a response.";
-          await streamOut(String(fullText));
+
+          // Create thread with conversation history
+          const thread = await openai.beta.threads.create({
+            messages: convo.map((m: any) => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: String(m.content || ""),
+            })),
+          });
+
+          // Add the current user message, attaching only the selected file IDs to restrict search scope
+          const attachments =
+            vectorFileIds && vectorFileIds.length
+              ? vectorFileIds.map((fid) => ({
+                  file_id: fid,
+                  tools: [{ type: "file_search" }],
+                }))
+              : undefined;
+          await openai.beta.threads.messages.create(thread.id, {
+            role: "user",
+            content: String(prompt),
+            // @ts-ignore - beta types may not include attachments yet
+            attachments,
+          } as any);
+
+          // Run the assistant
+          const run = await openai.beta.threads.runs.create(thread.id, {
+            assistant_id: assistant.id,
+          });
+
+          // Poll for completion
+          let runStatus = await openai.beta.threads.runs.retrieve(
+            thread.id,
+            run.id
+          );
+          while (
+            runStatus.status === "in_progress" ||
+            runStatus.status === "queued"
+          ) {
+            await new Promise((r) => setTimeout(r, 1000));
+            runStatus = await openai.beta.threads.runs.retrieve(
+              thread.id,
+              run.id
+            );
+          }
+
+          if (runStatus.status === "completed") {
+            // Get the assistant's response
+            const messages = await openai.beta.threads.messages.list(thread.id);
+            const lastMessage = messages.data[0];
+            const textContent = lastMessage.content.find(
+              (c) => c.type === "text"
+            );
+            const fullText =
+              textContent?.type === "text"
+                ? textContent.text.value
+                : "I couldn't generate a response.";
+            await streamOut(String(fullText));
+          } else {
+            logger.error("Assistant run failed", {
+              status: runStatus.status,
+              lastError: runStatus.last_error,
+            });
+            throw new Error(
+              `Assistant run failed with status: ${runStatus.status}`
+            );
+          }
+
+          // Clean up the temporary assistant
+          try {
+            await openai.beta.assistants.del(assistant.id);
+          } catch {}
+          // Note: threads are automatically cleaned up by OpenAI
         } else if (webSearch) {
           // Non-streaming Responses API with web_search tool (gpt-4.1)
           const input = chatMessages.map((m) => ({
