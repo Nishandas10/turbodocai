@@ -119,6 +119,13 @@ export interface UserAnalytics {
   totalStorageUsed: number;
   lastActiveDate: Timestamp;
   featureUsage: FeatureUsage;
+  // Onboarding fields (optional for backward compatibility)
+  onboardingCompleted?: boolean;
+  onboarding?: OnboardingData;
+  // Extended analytics
+  uploadsThisMonth?: number; // count of documents uploaded in current month
+  uploadsMonthKey?: string; // e.g. "2025-11" to know if rollover needed
+  aiChatsUsed?: number; // total chats created by user
 }
 
 // Document Creation/Update Types
@@ -240,4 +247,52 @@ export interface CreateSpaceTestData {
   questionCount: number;
   durationMin: number; // in minutes
   title?: string;
+}
+
+// Onboarding Types
+export type PersonaType =
+  | "University Student"
+  | "Prepare for Competitive Exam"
+  | "Working Professional"
+  | "Casual Learner"
+  | "Researcher";
+
+export type CompetitiveExamType =
+  | "UPSC/State PSC"
+  | "SSC"
+  | "Banking"
+  | "CAT"
+  | "NEET"
+  | "Engineering exams"
+  | "Railways"
+  | "Other Govt exams";
+
+export type MainUseType =
+  | "Turn your documents into summaries"
+  | "AI Chat"
+  | "Quizes"
+  | "Podcast"
+  | "Record lectures and meets with AI"
+  | "Turn Youtube Videos and Websites into editable notes"
+  | "Create tests and exams"
+  | "Learn and chat with AI Web";
+
+export type HeardFromType =
+  | "Friend or Colleague"
+  | "Youtube"
+  | "Instagram"
+  | "Facebook"
+  | "Reddit"
+  | "Google"
+  | "Others";
+
+export interface OnboardingData {
+  persona: PersonaType;
+  // Conditional field: only for competitive exam
+  examType?: CompetitiveExamType;
+  // Conditional field: only for university student
+  course?: string;
+  mainUse: MainUseType;
+  heardFrom: HeardFromType;
+  completedAt: Timestamp;
 }

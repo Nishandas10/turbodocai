@@ -409,6 +409,22 @@ export const createChat = onCall(
         updatedAt: new Date(),
       });
 
+      // Increment analytics for chats used
+      try {
+        await db
+          .collection("user_analytics")
+          .doc(userId)
+          .set(
+            {
+              aiChatsUsed: FieldValue.increment(1),
+              lastActiveDate: new Date(),
+            },
+            { merge: true }
+          );
+      } catch (e) {
+        logger.warn("Failed to increment aiChatsUsed", e as any);
+      }
+
       return { success: true, data: { chatId: chatRef.id } };
     } catch (error) {
       logger.error("Error in createChat:", error);
@@ -1281,6 +1297,25 @@ export const sendChatMessage = onCall(
           updatedAt: new Date(),
         });
         chatDocId = chatRef.id;
+
+        // Increment analytics for chats used (new chat created)
+        try {
+          await db
+            .collection("user_analytics")
+            .doc(userId)
+            .set(
+              {
+                aiChatsUsed: FieldValue.increment(1),
+                lastActiveDate: new Date(),
+              },
+              { merge: true }
+            );
+        } catch (e) {
+          logger.warn(
+            "Failed to increment aiChatsUsed (prompt handler)",
+            e as any
+          );
+        }
       } else {
         await chatCollection.doc(chatDocId).set(
           {

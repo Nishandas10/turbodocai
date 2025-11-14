@@ -406,6 +406,19 @@ exports.createChat = (0, https_1.onCall)({ enforceAppCheck: false }, async (requ
             createdAt: new Date(),
             updatedAt: new Date(),
         });
+        // Increment analytics for chats used
+        try {
+            await db
+                .collection("user_analytics")
+                .doc(userId)
+                .set({
+                aiChatsUsed: firestore_2.FieldValue.increment(1),
+                lastActiveDate: new Date(),
+            }, { merge: true });
+        }
+        catch (e) {
+            firebase_functions_1.logger.warn("Failed to increment aiChatsUsed", e);
+        }
         return { success: true, data: { chatId: chatRef.id } };
     }
     catch (error) {
@@ -1127,6 +1140,19 @@ exports.sendChatMessage = (0, https_1.onCall)({
                 updatedAt: new Date(),
             });
             chatDocId = chatRef.id;
+            // Increment analytics for chats used (new chat created)
+            try {
+                await db
+                    .collection("user_analytics")
+                    .doc(userId)
+                    .set({
+                    aiChatsUsed: firestore_2.FieldValue.increment(1),
+                    lastActiveDate: new Date(),
+                }, { merge: true });
+            }
+            catch (e) {
+                firebase_functions_1.logger.warn("Failed to increment aiChatsUsed (prompt handler)", e);
+            }
         }
         else {
             await chatCollection.doc(chatDocId).set(Object.assign({ updatedAt: new Date(), language: language || "en", model }, (Array.isArray(docIds) && docIds.length

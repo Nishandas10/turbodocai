@@ -14,11 +14,12 @@ import {
   Timestamp,
   writeBatch,
   onSnapshot,
+  increment,
   type QuerySnapshot,
   type DocumentData,
   type Unsubscribe,
 } from "firebase/firestore";
-import {
+import type {
   UserProfile,
   Document,
   CreateDocumentData,
@@ -33,6 +34,7 @@ import {
   SpaceTest,
   CreateSpaceTestData,
   Chat,
+  OnboardingData,
 } from "./types";
 import { db } from "./firebase";
 
@@ -58,6 +60,7 @@ export const createUserProfile = async (
   profileData: Omit<UserProfile, "createdAt" | "subscription">
 ): Promise<void> => {
   const userRef = doc(db, COLLECTIONS.USERS, userId);
+  // (OnboardingData type imported for other helpers; not used here)
 
   const profile: UserProfile = {
     ...profileData,
@@ -115,7 +118,6 @@ export const createDocument = async (
   documentData: CreateDocumentData
 ): Promise<string> => {
   const now = Timestamp.now();
-
   const document: Omit<Document, "id"> = {
     userId,
     ...documentData,
@@ -128,8 +130,6 @@ export const createDocument = async (
     updatedAt: now,
     lastAccessed: now,
   };
-
-  // Create document in nested structure: documents/{userId}/{documentId}
   const userDocumentsRef = collection(
     db,
     COLLECTIONS.DOCUMENTS,
@@ -137,15 +137,51 @@ export const createDocument = async (
     "userDocuments"
   );
   const docRef = await addDoc(userDocumentsRef, document);
-
-  // Update user analytics
+  // Increment totals
   await incrementUserAnalytics(userId, {
     documentsCreated: 1,
     totalStorageUsed: documentData.metadata.fileSize || 0,
   });
-
+  // Monthly uploads
+  try {
+    await incrementMonthlyUploads(userId);
+  } catch (e) {
+    console.warn("Monthly upload increment failed; will recalc later", e);
+  }
   return docRef.id;
 };
+
+// Helper: increment monthly uploads counter with rollover handling
+async function incrementMonthlyUploads(userId: string): Promise<void> {
+  const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
+  const currentMonthKey = new Date().toISOString().slice(0, 7);
+  const snap = await getDoc(analyticsRef);
+  if (!snap.exists()) {
+    await setDoc(
+      analyticsRef,
+      {
+        uploadsThisMonth: 1,
+        uploadsMonthKey: currentMonthKey,
+        lastActiveDate: Timestamp.now(),
+      },
+      { merge: true }
+    );
+    return;
+  }
+  const data = snap.data() as Partial<UserAnalytics> | undefined;
+  if (data?.uploadsMonthKey === currentMonthKey) {
+    await updateDoc(analyticsRef, {
+      uploadsThisMonth: increment(1),
+      lastActiveDate: Timestamp.now(),
+    });
+  } else {
+    await updateDoc(analyticsRef, {
+      uploadsThisMonth: 1,
+      uploadsMonthKey: currentMonthKey,
+      lastActiveDate: Timestamp.now(),
+    });
+  }
+}
 
 // ===== SPACES (WORKSPACES) OPERATIONS =====
 
@@ -618,9 +654,10 @@ export const initializeUserAnalytics = async (
     totalStorageUsed: 0,
     lastActiveDate: Timestamp.now(),
     featureUsage: {},
+    uploadsThisMonth: 0,
+    uploadsMonthKey: new Date().toISOString().slice(0, 7),
+    aiChatsUsed: 0,
   };
-
-  // Use setDoc to create the analytics document
   await setDoc(analyticsRef, analytics);
 };
 
@@ -634,27 +671,59 @@ export const incrementUserAnalytics = async (
   >
 ): Promise<void> => {
   const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
-
-  // Check if analytics exist, if not create them
   const existingAnalytics = await getUserAnalytics(userId);
   if (!existingAnalytics) {
     await initializeUserAnalytics(userId);
   }
+  const updates: {
+    lastActiveDate: Timestamp;
+    documentsCreated?: ReturnType<typeof increment>;
+    totalStorageUsed?: ReturnType<typeof increment>;
+  } = { lastActiveDate: Timestamp.now() };
+  if (
+    increments.documentsCreated !== undefined &&
+    increments.documentsCreated !== 0
+  ) {
+    updates.documentsCreated = increment(increments.documentsCreated);
+  }
+  if (
+    increments.totalStorageUsed !== undefined &&
+    increments.totalStorageUsed !== 0
+  ) {
+    updates.totalStorageUsed = increment(increments.totalStorageUsed);
+  }
+  if (Object.keys(updates).length > 0) {
+    await updateDoc(analyticsRef, updates);
+  }
+};
 
-  // Use FieldValue.increment() for atomic operations
-  const updates: Record<string, number | Timestamp> = {
+// Recalculate monthly uploads count (can be used for manual sync)
+export const updateMonthlyUploadsCount = async (
+  userId: string
+): Promise<void> => {
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + 1);
+  const userDocumentsRef = collection(
+    db,
+    COLLECTIONS.DOCUMENTS,
+    userId,
+    "userDocuments"
+  );
+  const qy = query(
+    userDocumentsRef,
+    where("createdAt", ">=", Timestamp.fromDate(start)),
+    where("createdAt", "<", Timestamp.fromDate(end))
+  );
+  const snap = await getDocs(qy);
+  const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
+  await updateDoc(analyticsRef, {
+    uploadsThisMonth: snap.size,
+    uploadsMonthKey: start.toISOString().slice(0, 7),
     lastActiveDate: Timestamp.now(),
-  };
-
-  if (increments.documentsCreated !== undefined) {
-    updates.documentsCreated = increments.documentsCreated;
-  }
-
-  if (increments.totalStorageUsed !== undefined) {
-    updates.totalStorageUsed = increments.totalStorageUsed;
-  }
-
-  await updateDoc(analyticsRef, updates);
+  });
 };
 
 /**
@@ -677,6 +746,58 @@ export const trackFeatureUsage = async (
       lastActiveDate: Timestamp.now(),
     });
   }
+};
+
+// ===== ONBOARDING HELPERS =====
+
+/** Get whether onboarding is completed and the saved payload */
+export const getUserOnboarding = async (
+  userId: string
+): Promise<{ completed: boolean; data: OnboardingData | null }> => {
+  const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
+  const snap = await getDoc(analyticsRef);
+  if (!snap.exists()) {
+    return { completed: false, data: null };
+  }
+  const data = snap.data() as Partial<UserAnalytics> & {
+    onboarding?: OnboardingData;
+  };
+  return {
+    completed: !!data.onboardingCompleted && !!data.onboarding,
+    data: (data.onboarding as OnboardingData) || null,
+  };
+};
+
+/** Save onboarding data and mark as completed */
+export const saveUserOnboarding = async (
+  userId: string,
+  onboarding: Omit<OnboardingData, "completedAt"> & {
+    completedAt?: OnboardingData["completedAt"];
+  }
+): Promise<void> => {
+  const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
+
+  // Ensure analytics exists; if not, initialize first
+  const exists = await getDoc(analyticsRef);
+  if (!exists.exists()) {
+    await initializeUserAnalytics(userId);
+  }
+
+  const payload: OnboardingData = {
+    completedAt: Timestamp.now(),
+    ...onboarding,
+  } as OnboardingData;
+
+  // Use setDoc merge to avoid clobbering counters
+  await setDoc(
+    analyticsRef,
+    {
+      onboardingCompleted: true,
+      onboarding: payload,
+      lastActiveDate: Timestamp.now(),
+    },
+    { merge: true }
+  );
 };
 
 // ===== REAL-TIME LISTENERS =====
@@ -748,12 +869,46 @@ export const listenToUserChats = (
         ...d.data(),
       })) as Chat[];
       callback(chats);
+
+      // Keep aiChatsUsed in sync with actual number of chats
+      (async () => {
+        try {
+          const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
+          // Ensure doc exists, then set exact count
+          await setDoc(
+            analyticsRef,
+            {
+              aiChatsUsed: snapshot.size,
+              lastActiveDate: Timestamp.now(),
+            },
+            { merge: true }
+          );
+        } catch (e) {
+          console.warn("Failed to sync aiChatsUsed from chats query", e);
+        }
+      })();
     },
     (err) => {
       if (onError) onError(err);
       else console.error("listenToUserChats error", err);
     }
   );
+};
+
+/** Manually sync aiChatsUsed by counting top-level /chats for the user */
+export const syncAiChatsUsedFromChats = async (
+  userId: string
+): Promise<number> => {
+  const chatsRef = collection(db, COLLECTIONS.CHATS);
+  const q = query(chatsRef, where("userId", "==", userId));
+  const snap = await getDocs(q);
+  const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
+  await setDoc(
+    analyticsRef,
+    { aiChatsUsed: snap.size, lastActiveDate: Timestamp.now() },
+    { merge: true }
+  );
+  return snap.size;
 };
 
 // Update a chat (e.g., rename or adjust language/context docs)
@@ -769,6 +924,39 @@ export const updateChat = async (
 export const deleteChat = async (chatId: string): Promise<void> => {
   const ref = doc(db, COLLECTIONS.CHATS, chatId);
   await deleteDoc(ref);
+};
+
+// Create chat + increment aiChatsUsed
+export const createChat = async (
+  userId: string,
+  data: {
+    title: string;
+    language: string;
+    model?: string;
+    contextDocIds?: string[];
+  }
+): Promise<string> => {
+  const now = Timestamp.now();
+  const chatsRef = collection(db, COLLECTIONS.CHATS);
+  const chat: Omit<Chat, "id"> = {
+    userId,
+    title: data.title,
+    language: data.language,
+    model: data.model,
+    contextDocIds: data.contextDocIds || [],
+    createdAt: now,
+    updatedAt: now,
+    lastAccessed: now,
+  };
+  const ref = await addDoc(chatsRef, chat);
+  const analyticsRef = doc(db, COLLECTIONS.USER_ANALYTICS, userId);
+  const snap = await getDoc(analyticsRef);
+  if (!snap.exists()) await initializeUserAnalytics(userId);
+  await updateDoc(analyticsRef, {
+    aiChatsUsed: increment(1),
+    lastActiveDate: Timestamp.now(),
+  });
+  return ref.id;
 };
 
 // Explore (public) operations removed
@@ -940,6 +1128,17 @@ export const createDocumentWithProcessing = async (
   // Commit batch
   await batch.commit();
 
+  // Update analytics
+  try {
+    await incrementUserAnalytics(userId, {
+      documentsCreated: 1,
+      totalStorageUsed: document.metadata?.fileSize || 0,
+    });
+    await incrementMonthlyUploads(userId);
+  } catch (e) {
+    console.warn("Analytics update failed (createDocumentWithProcessing)", e);
+  }
+
   return {
     documentId: documentRef.id,
     taskId: taskRef.id,
@@ -988,6 +1187,9 @@ export const createDocumentWithFile = async (
     documentsCreated: 1,
     totalStorageUsed: file.size,
   });
+  try {
+    await incrementMonthlyUploads(userId);
+  } catch {}
 
   return docRef.id;
 };
@@ -1086,6 +1288,9 @@ export const createYouTubeDocument = async (
     documentsCreated: 1,
     totalStorageUsed: 0, // No file storage for links
   });
+  try {
+    await incrementMonthlyUploads(userId);
+  } catch {}
 
   return docRef.id;
 };
@@ -1149,6 +1354,9 @@ export const createWebsiteDocument = async (
     documentsCreated: 1,
     totalStorageUsed: 0, // No file storage for links
   });
+  try {
+    await incrementMonthlyUploads(userId);
+  } catch {}
 
   return docRef.id;
 };

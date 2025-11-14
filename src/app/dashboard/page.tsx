@@ -29,7 +29,7 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
-import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, updateDocument, deleteDocument, listenToUserChats } from "@/lib/firestore"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, updateDocument, deleteDocument, listenToUserChats, getUserOnboarding } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType, Chat } from "@/lib/types"
@@ -157,6 +157,22 @@ export default function Dashboard() {
       document.removeEventListener('keydown', onKey)
     }
   }, [contextOpen])
+
+  // Gate: ensure onboarding is completed before using dashboard
+  useEffect(() => {
+    const run = async () => {
+      if (!user?.uid) return
+      try {
+        const res = await getUserOnboarding(user.uid)
+        if (!res.completed) router.replace('/onboarding')
+      } finally {
+        // no-op
+      }
+    }
+    run()
+  }, [user?.uid, router])
+
+  // Note: we do not early-return here to avoid conditional Hooks order.
 
   // Listen to user's recent documents
   useEffect(() => {

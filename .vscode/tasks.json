@@ -306,6 +306,16 @@
 				"build"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "Build web (next build)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
 		}
 	]
 }
