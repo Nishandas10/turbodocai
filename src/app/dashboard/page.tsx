@@ -79,6 +79,8 @@ export default function Dashboard() {
   const userEditedRef = useRef<boolean>(false)
   const userEditTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   
+  // Track onboarding check state
+  const [onboardingChecked, setOnboardingChecked] = useState(false)
 
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
     lang: 'en-US',
@@ -164,9 +166,15 @@ export default function Dashboard() {
       if (!user?.uid) return
       try {
         const res = await getUserOnboarding(user.uid)
-        if (!res.completed) router.replace('/onboarding')
-      } finally {
-        // no-op
+        if (!res.completed) {
+          router.replace('/onboarding')
+        } else {
+          setOnboardingChecked(true)
+        }
+      } catch (error) {
+        console.error('Error checking onboarding:', error)
+        // On error, allow access to dashboard
+        setOnboardingChecked(true)
       }
     }
     run()
@@ -631,6 +639,17 @@ export default function Dashboard() {
 
   // Parse mirror id of public docs: `${ownerId}_${documentId}`
   // Explore removed
+
+  // Show loading screen while checking onboarding status
+  if (!onboardingChecked) {
+    return (
+      <ProtectedRoute>
+        <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+          <div className="text-white text-xl">Loading...</div>
+        </div>
+      </ProtectedRoute>
+    )
+  }
 
   return (
     <ProtectedRoute>

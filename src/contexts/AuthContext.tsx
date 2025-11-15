@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { User, onAuthStateChanged, signInWithPopup, signInWithEmailLink, sendSignInLinkToEmail } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
-import { createUserProfile, getUserProfile, initializeUserAnalytics } from '@/lib/firestore';
+import { createUserProfile, getUserProfile, initializeUserAnalytics, getUserOnboarding } from '@/lib/firestore';
 
 interface AuthContextType {
   user: User | null;
@@ -98,8 +98,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(true);
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
-        console.log('Google sign-in successful, redirecting to dashboard...');
-        router.push('/dashboard');
+        console.log('Google sign-in successful, checking onboarding status...');
+        
+        // Check if user has completed onboarding
+        try {
+          const onboardingData = await getUserOnboarding(result.user.uid);
+          if (onboardingData.completed) {
+            console.log('Onboarding completed, redirecting to dashboard...');
+            router.push('/dashboard');
+          } else {
+            console.log('Onboarding not completed, redirecting to onboarding...');
+            router.push('/onboarding');
+          }
+        } catch (error) {
+          console.error('Error checking onboarding status:', error);
+          // If error checking onboarding, redirect to onboarding to be safe
+          router.push('/onboarding');
+        }
       }
     } catch (error) {
       console.error('Google sign-in error:', error);
@@ -120,8 +135,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // User is returning with a sign-in link
         const result = await signInWithEmailLink(auth, email, window.location.href);
         if (result.user) {
-          console.log('Email sign-in successful, redirecting to dashboard...');
-          router.push('/dashboard');
+          console.log('Email sign-in successful, checking onboarding status...');
+          
+          // Check if user has completed onboarding
+          try {
+            const onboardingData = await getUserOnboarding(result.user.uid);
+            if (onboardingData.completed) {
+              console.log('Onboarding completed, redirecting to dashboard...');
+              router.push('/dashboard');
+            } else {
+              console.log('Onboarding not completed, redirecting to onboarding...');
+              router.push('/onboarding');
+            }
+          } catch (error) {
+            console.error('Error checking onboarding status:', error);
+            // If error checking onboarding, redirect to onboarding to be safe
+            router.push('/onboarding');
+          }
         }
       } else {
         console.log('Sending sign-in link to email...');

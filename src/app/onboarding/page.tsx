@@ -54,6 +54,7 @@ export default function OnboardingPage() {
   const router = useRouter();
 
   const [submitting, setSubmitting] = useState(false);
+  const [checkingOnboarding, setCheckingOnboarding] = useState(true);
   const [persona, setPersona] = useState<PersonaType | "">("");
   const [examType, setExamType] = useState<CompetitiveExamType | "">("");
   const [course, setCourse] = useState("");
@@ -68,8 +69,18 @@ export default function OnboardingPage() {
         router.replace("/signup");
         return;
       }
-      const res = await getUserOnboarding(user.uid);
-      if (res.completed) router.replace("/dashboard");
+      try {
+        const res = await getUserOnboarding(user.uid);
+        if (res.completed) {
+          router.replace("/dashboard");
+        } else {
+          setCheckingOnboarding(false);
+        }
+      } catch (error) {
+        console.error('Error checking onboarding:', error);
+        // On error, show the onboarding form
+        setCheckingOnboarding(false);
+      }
     };
     check();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,6 +116,15 @@ export default function OnboardingPage() {
       setSubmitting(false);
     }
   };
+
+  // Show loading while checking onboarding status
+  if (loading || checkingOnboarding) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-white text-xl">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6 py-10 relative overflow-hidden">
