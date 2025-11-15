@@ -1356,12 +1356,18 @@ exports.sendChatMessage = (0, https_1.onCall)({
             // Prefer OpenAI file_search when vector stores are in context
             if (vectorStoreIds.length) {
                 const chosenVectorModel = thinkMode ? "o3-mini" : "gpt-4o-mini";
-                firebase_functions_1.logger.info("Using vector store file_search", { vectorStoreIds, thinkMode, chosenVectorModel });
+                firebase_functions_1.logger.info("Using vector store file_search", {
+                    vectorStoreIds,
+                    thinkMode,
+                    chosenVectorModel,
+                });
                 // Attempt to create assistant with desired model; fall back if tooling unsupported
                 let assistant;
                 try {
                     assistant = await openai.beta.assistants.create({
-                        name: thinkMode ? "Document Reasoning Assistant" : "Document Assistant",
+                        name: thinkMode
+                            ? "Document Reasoning Assistant"
+                            : "Document Assistant",
                         instructions: baseInstruction,
                         tools: [{ type: "file_search" }],
                         model: chosenVectorModel,
