@@ -95,13 +95,14 @@ export default function Home() {
   <section className="relative mt-20 py-20 md:py-28 overflow-hidden">
           <div className="container mx-auto px-4 relative z-10">
             <div className="text-center max-w-4xl mx-auto">
-              <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight text-white mb-6">
-                Transform Content Into <span className="text-blue-600">Learning Experiences</span>
-                </h1>
-              <p className="text-xl md:text-2xl text-gray-300 mb-10 max-w-3xl mx-auto">
-                  Upload any content. Get AI-powered summaries, quizzes, flashcards, and a smart chatbot that understands
-                  your material.
-                </p>
+        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white mb-6">
+          Upload your contents📚. Let AI Work for You✨. <span className="text-blue-600">10x your Learning</span>
+        </h1>
+         <p className="text-base md:text-xl text-gray-300 mb-10 max-w-3xl mx-auto">
+          AI that understands your PDFs, YouTube videos, websites, live recordings, and images—and writes notes, exams, mindmaps, 
+          podcast summaries, flashcards, and answers your questions instantly.
+        </p>
+
               <div className="mb-12">
                 <Button size="lg" className="bg-blue-600/80 hover:bg-blue-700/80 text-white text-lg px-12 py-4 h-auto backdrop-blur-sm border border-blue-500/50 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105" asChild>
                   <Link href="/signup">Get Started</Link>

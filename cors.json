@@ -1,0 +1,21 @@
+[
+  {
+    "origin": [
+      "https://blumenote.com",
+      "https://www.blumenote.com"
+    ],
+    "method": [
+      "GET",
+      "HEAD",
+      "OPTIONS"
+    ],
+    "responseHeader": [
+      "Content-Type",
+      "Range",
+      "Accept-Ranges",
+      "Content-Range",
+      "Access-Control-Allow-Origin"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
