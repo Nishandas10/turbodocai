@@ -12,7 +12,7 @@ interface FloatingToolbarProps {
   onFormatting: (format: string) => void
   onLink: () => void
   onAddComment: () => void
-  onAskTurbo: () => void
+  onAskBlume: () => void
 }
 
 export default function FloatingToolbar({
@@ -21,7 +21,7 @@ export default function FloatingToolbar({
   onFormatting,
   onLink,
   onAddComment,
-  onAskTurbo
+  onAskBlume
 }: FloatingToolbarProps) {
   if (!show) return null
 
@@ -71,12 +71,12 @@ export default function FloatingToolbar({
         <span>Add comment</span>
       </button>
       <button 
-        onClick={onAskTurbo}
+        onClick={onAskBlume}
         className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm flex items-center space-x-1 transition-colors"
-        title="Ask Turbo"
+        title="Ask Blume"
       >
         <Star className="h-3 w-3" />
-        <span>Ask Turbo</span>
+        <span>Ask Blume</span>
       </button>
     </div>
   )

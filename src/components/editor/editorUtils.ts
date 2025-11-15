@@ -138,6 +138,6 @@ export const handleAddComment = () => {
   alert("💬 Comment feature: This would add a comment to the selected text");
 };
 
-export const handleAskTurbo = () => {
-  alert("🚀 Ask Turbo: This would open the AI assistant for the selected text");
+export const handleAskBlume = () => {
+  alert("🚀 Ask Blume: This would open the AI assistant for the selected text");
 };
