@@ -14,7 +14,6 @@ export default function Navbar() {
         <div className="bg-gray-900/55 backdrop-blur-xl border border-gray-700/60 rounded-full px-8 py-2.5 flex items-center justify-between max-w-4xl w-full shadow-lg">
           {/* Logo and Brand */}
           <div className="flex items-center space-x-2">
-            <PenTool className="h-5 w-5 text-white" />
             <span className="text-white font-medium text-sm">BlumeNote AI</span>
           </div>
 

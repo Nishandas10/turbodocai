@@ -10,7 +10,7 @@ import { getUserOnboarding, saveUserOnboarding } from "@/lib/firestore";
 import type { CompetitiveExamType, HeardFromType, MainUseType, PersonaType } from "@/lib/types";
 
 const PERSONA_OPTIONS: PersonaType[] = [
-  "University Student",
+  "Student",
   "Prepare for Competitive Exam",
   "Working Professional",
   "Casual Learner",
@@ -21,6 +21,7 @@ const COMPETITIVE_EXAMS: CompetitiveExamType[] = [
   "UPSC/State PSC",
   "SSC",
   "Banking",
+  "University Entrance Exams",
   "CAT",
   "NEET",
   "Engineering exams",
@@ -29,14 +30,15 @@ const COMPETITIVE_EXAMS: CompetitiveExamType[] = [
 ];
 
 const MAIN_USE_OPTIONS: MainUseType[] = [
-  "Turn your documents into summaries",
-  "AI Chat",
-  "Quizes",
-  "Podcast",
-  "Record lectures and meets with AI",
-  "Turn Youtube Videos and Websites into editable notes",
-  "Create tests and exams",
-  "Learn and chat with AI Web",
+  "Summarize Your Documents with AI",
+  "AI Chat Assistant",
+  "Generate Quizzes Instantly",
+  "AI-Powered Podcast Summaries",
+  "Record & Transcribe Lectures/Meetings",
+  "Convert YouTube Videos & Websites into Editable Notes",
+  "Create Tests & Exams Automatically",
+  "Learn & Explore with AI on the Web",
+  "All the above",
 ];
 
 const HEARD_FROM_OPTIONS: HeardFromType[] = [
@@ -58,7 +60,7 @@ export default function OnboardingPage() {
   const [persona, setPersona] = useState<PersonaType | "">("");
   const [examType, setExamType] = useState<CompetitiveExamType | "">("");
   const [course, setCourse] = useState("");
-  const [mainUse, setMainUse] = useState<MainUseType | "">("");
+  const [mainUses, setMainUses] = useState<MainUseType[]>([]);
   const [heardFrom, setHeardFrom] = useState<HeardFromType | "">("");
 
   // Redirect if already completed
@@ -87,14 +89,14 @@ export default function OnboardingPage() {
   }, [user?.uid, loading]);
 
   const needsExam = persona === "Prepare for Competitive Exam";
-  const needsCourse = persona === "University Student";
+  const needsCourse = persona === "Student";
 
   const canSubmit = useMemo(() => {
-    if (!persona || !mainUse || !heardFrom) return false;
+    if (!persona || mainUses.length === 0 || !heardFrom) return false;
     if (needsExam && !examType) return false;
     if (needsCourse && !course.trim()) return false;
     return true;
-  }, [persona, mainUse, heardFrom, needsExam, examType, needsCourse, course]);
+  }, [persona, mainUses, heardFrom, needsExam, examType, needsCourse, course]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +107,8 @@ export default function OnboardingPage() {
         persona: persona as PersonaType,
         ...(needsExam ? { examType: examType as CompetitiveExamType } : {}),
         ...(needsCourse ? { course: course.trim() } : {}),
-        mainUse: mainUse as MainUseType,
+        // Save selected main uses
+        mainUses: mainUses as MainUseType[],
         heardFrom: heardFrom as HeardFromType,
       });
       router.replace("/dashboard");
@@ -224,18 +227,49 @@ export default function OnboardingPage() {
               <div className="h-7 w-7 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-xs font-medium ring-1 ring-indigo-600/30 group-hover:ring-indigo-500/50 transition">2</div>
               <h2 className="text-sm font-medium text-gray-200 tracking-wide">Your goals</h2>
             </div>
-            <label className="block text-xs font-medium uppercase tracking-wide text-gray-400 mb-2">How do you mainly aim to use Blumenotes?</label>
-            <div className="relative">
-              <select
-                className="onboarding-select w-full h-12 bg-gradient-to-r from-gray-800/70 to-gray-800/40 backdrop-blur rounded-xl px-4 pr-12 text-gray-100 border border-gray-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/60 focus:border-indigo-500/60 transition appearance-none text-sm shadow-inner"
-                value={mainUse}
-                onChange={(e) => setMainUse(e.target.value as MainUseType | "")}
-                required
-              >
-                <option value="" disabled>Select an option</option>
-                {MAIN_USE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 pointer-events-none" />
+            <label className="block text-xs font-medium uppercase tracking-wide text-gray-400 mb-2">How do you mainly aim to use Blumenotes? (Select one or more)</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {MAIN_USE_OPTIONS.map((option) => {
+                const isAll = option === "All the above";
+                const checked = isAll
+                  ? mainUses.length > 0 && MAIN_USE_OPTIONS.filter(o => o !== "All the above").every(o => mainUses.includes(o as MainUseType))
+                  : mainUses.includes(option as MainUseType);
+                const handleToggle = () => {
+                  if (isAll) {
+                    // Select all specific options (exclude the "All the above" token itself)
+                    const allSpecific = MAIN_USE_OPTIONS.filter(o => o !== "All the above") as MainUseType[];
+                    const allSelected = allSpecific.every(o => mainUses.includes(o));
+                    setMainUses(allSelected ? [] : allSpecific);
+                  } else {
+                    setMainUses((prev) =>
+                      prev.includes(option as MainUseType)
+                        ? prev.filter((o) => o !== option)
+                        : [...prev, option as MainUseType]
+                    );
+                  }
+                };
+                return (
+                  <button
+                    type="button"
+                    key={option}
+                    onClick={handleToggle}
+                    className={
+                      `text-left px-4 py-3 rounded-xl border text-sm transition shadow-inner ` +
+                      (checked
+                        ? "bg-indigo-600/20 border-indigo-500/60 text-indigo-200 hover:bg-indigo-600/25"
+                        : "bg-gradient-to-r from-gray-800/70 to-gray-800/40 border-gray-700/60 text-gray-200 hover:border-gray-600")
+                    }
+                    aria-pressed={checked}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className={`mt-0.5 h-4 w-4 rounded border ${checked ? 'bg-indigo-500 border-indigo-400' : 'border-gray-500'} flex items-center justify-center shrink-0`}> 
+                        {checked && <span className="block h-2 w-2 bg-white rounded-sm" />}
+                      </div>
+                      <span>{option}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </section>
 

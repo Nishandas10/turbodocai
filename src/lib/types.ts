@@ -251,7 +251,7 @@ export interface CreateSpaceTestData {
 
 // Onboarding Types
 export type PersonaType =
-  | "University Student"
+  | "Student"
   | "Prepare for Competitive Exam"
   | "Working Professional"
   | "Casual Learner"
@@ -261,6 +261,7 @@ export type CompetitiveExamType =
   | "UPSC/State PSC"
   | "SSC"
   | "Banking"
+  | "University Entrance Exams"
   | "CAT"
   | "NEET"
   | "Engineering exams"
@@ -268,14 +269,15 @@ export type CompetitiveExamType =
   | "Other Govt exams";
 
 export type MainUseType =
-  | "Turn your documents into summaries"
-  | "AI Chat"
-  | "Quizes"
-  | "Podcast"
-  | "Record lectures and meets with AI"
-  | "Turn Youtube Videos and Websites into editable notes"
-  | "Create tests and exams"
-  | "Learn and chat with AI Web";
+  | "Summarize Your Documents with AI"
+  | "AI Chat Assistant"
+  | "Generate Quizzes Instantly"
+  | "AI-Powered Podcast Summaries"
+  | "Record & Transcribe Lectures/Meetings"
+  | "Convert YouTube Videos & Websites into Editable Notes"
+  | "Create Tests & Exams Automatically"
+  | "Learn & Explore with AI on the Web"
+  | "All the above";
 
 export type HeardFromType =
   | "Friend or Colleague"
@@ -292,7 +294,8 @@ export interface OnboardingData {
   examType?: CompetitiveExamType;
   // Conditional field: only for university student
   course?: string;
-  mainUse: MainUseType;
+  // Allow multiple primary use cases
+  mainUses: MainUseType[];
   heardFrom: HeardFromType;
   completedAt: Timestamp;
 }
