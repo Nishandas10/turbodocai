@@ -3,7 +3,7 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
-import { MessageSquare, Zap, Headphones, FileAudio, Pencil, Brain, GitBranch, PenTool, Eye, Share2, Move, Plus, Lock, FileUp, Settings2, RefreshCcw, BarChart3, Timer, Globe, Mic, Camera, Link2, LayoutDashboard, FilePlus, Compass, Layers, Tags, Sparkles, Users } from "lucide-react"
+import { MessageSquare, Zap, Headphones, FileAudio, Pencil, Brain, GitBranch, PenTool, Eye, Share2, Move, Plus, Lock, FileUp, Settings2, RefreshCcw, BarChart3, Timer, Globe, Mic, Camera, Link2, LayoutDashboard, FilePlus} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
 import Navbar from "./components/navbar"

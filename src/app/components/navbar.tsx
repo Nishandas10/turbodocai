@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Menu, X, PenTool } from "lucide-react"
+import { Menu, X} from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export default function Navbar() {
