@@ -104,25 +104,58 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
     const text = inputValue.trim();
     if (!text || !user?.uid) return;
     if (!chatId) {
-      // First message: create Firestore user message optimistically after cloud function call
+      // First message: proactively create chat & user message so we can subscribe and stream immediately
       setSending(true);
       try {
+        // 1) Create chat doc (document-based path if documentId exists, else global chats)
+        let cid: string;
+        if (documentId) {
+          const chatRef = await addDoc(
+            collection(db, "documents", ownerId || user.uid, "userDocuments", documentId, "chats"),
+            { createdAt: serverTimestamp(), updatedAt: serverTimestamp(), userId: user.uid }
+          );
+          cid = chatRef.id;
+          setChatId(cid);
+          try { localStorage.setItem(`doc_chat_${user.uid}_${documentId}`, cid); } catch {}
+
+          // 2) Add user's first message
+          await addDoc(collection(db, "documents", ownerId || user.uid, "userDocuments", documentId, "chats", cid, "messages"), {
+            role: "user",
+            content: text,
+            userId: user.uid,
+            createdAt: serverTimestamp(),
+          });
+          await setDoc(doc(db, "documents", ownerId || user.uid, "userDocuments", documentId, "chats", cid), { updatedAt: serverTimestamp() }, { merge: true });
+        } else {
+          const chatRef = await addDoc(collection(db, "chats"), { createdAt: serverTimestamp(), updatedAt: serverTimestamp(), userId: user.uid });
+          cid = chatRef.id;
+          setChatId(cid);
+          // Optional: could persist to localStorage under a non-doc key if needed
+
+          await addDoc(collection(db, "chats", cid, "messages"), {
+            role: "user",
+            content: text,
+            userId: user.uid,
+            createdAt: serverTimestamp(),
+          });
+          await setDoc(doc(db, "chats", cid), { updatedAt: serverTimestamp() }, { merge: true });
+        }
+
+        // 3) Trigger backend streaming; do not await so Firestore updates stream into UI
         const call = httpsCallable(functions, "sendChatMessage");
-        const result = await call({
+        void call({
           userId: user.uid,
           prompt: text,
+          chatId: cid,
           language: 'en',
           docIds: documentId ? [documentId] : [],
           docOwnerId: ownerId || user.uid,
         });
-        const data = result.data as { success: boolean; data?: { chatId: string }; error?: string };
-        if (!data.success || !data.data?.chatId) throw new Error(data.error || 'chat creation failed');
-        setChatId(data.data.chatId);
-        localStorage.setItem(`doc_chat_${user.uid}_${documentId}`, data.data.chatId);
+
         setInputValue("");
         resetSpeech();
       } catch (e) {
-        console.error("sendChatMessage initial failed", e);
+        console.error("initial chat setup failed", e);
         alert("Failed to start chat");
       } finally {
         setSending(false);

@@ -295,13 +295,20 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         }
         let cid = chatId
         if (!cid) {
-          const call = httpsCallable(functions, 'sendChatMessage')
-          const resp = await call({ userId: user.uid, prompt: text, language: 'en', docIds: [documentId], docOwnerId: effOwner || user.uid })
-          const data = resp.data as { success: boolean; data?: { chatId: string }; error?: string }
-          if (!data.success || !data.data?.chatId) throw new Error(data.error || 'Failed to start chat')
-          cid = data.data.chatId
+          // Create a new chat document immediately so we can subscribe and stream the very first reply
+          const chatsCol = collection(db, 'documents', user.uid, 'userDocuments', documentId, 'chats')
+          const chatRef = await addDoc(chatsCol, { createdAt: serverTimestamp(), updatedAt: serverTimestamp(), userId: user.uid })
+          cid = chatRef.id
           setChatId(cid)
           try { localStorage.setItem(`doc_chat_${user.uid}_${documentId}`, cid) } catch {}
+
+          // Optimistically add the user's first message so the UI updates immediately
+          await addDoc(collection(db, 'documents', user.uid, 'userDocuments', documentId, 'chats', cid, 'messages'), { role: 'user', content: text, userId: user.uid, createdAt: serverTimestamp() })
+          await setDoc(doc(db, 'documents', user.uid, 'userDocuments', documentId, 'chats', cid), { updatedAt: serverTimestamp() }, { merge: true })
+
+          // Trigger backend streaming for this chat; don't await so Firestore updates stream into the UI
+          const call = httpsCallable(functions, 'sendChatMessage')
+          void call({ userId: user.uid, prompt: text, chatId: cid, language: 'en', docIds: [documentId], docOwnerId: effOwner || user.uid })
         } else {
           // Optimistic user message commit to Firestore (server will stream the assistant reply)
           if (!documentId) {
