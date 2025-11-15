@@ -1545,16 +1545,38 @@ export const sendChatMessage = onCall(
       try {
         // Prefer OpenAI file_search when vector stores are in context
         if (vectorStoreIds.length) {
-          logger.info("Using vector store file_search", { vectorStoreIds });
-
-          // Create assistant with file_search tool; we'll restrict to the selected files via attachments
-          const assistant = await openai.beta.assistants.create({
-            name: "Document Assistant",
-            instructions: baseInstruction,
-            tools: [{ type: "file_search" }],
-            model: "gpt-4o-mini",
-            temperature: 0.2,
+          const chosenVectorModel = thinkMode ? "o3-mini" : "gpt-4o-mini";
+          logger.info("Using vector store file_search", {
+            vectorStoreIds,
+            thinkMode,
+            chosenVectorModel,
           });
+
+          // Attempt to create assistant with desired model; fall back if tooling unsupported
+          let assistant: any;
+          try {
+            assistant = await openai.beta.assistants.create({
+              name: thinkMode
+                ? "Document Reasoning Assistant"
+                : "Document Assistant",
+              instructions: baseInstruction,
+              tools: [{ type: "file_search" }],
+              model: chosenVectorModel,
+              temperature: thinkMode ? 0.2 : 0.2,
+            });
+          } catch (toolErr) {
+            logger.warn(
+              "Primary assistant creation failed; falling back to gpt-4o-mini",
+              toolErr as any
+            );
+            assistant = await openai.beta.assistants.create({
+              name: "Document Assistant (Fallback)",
+              instructions: baseInstruction,
+              tools: [{ type: "file_search" }],
+              model: "gpt-4o-mini",
+              temperature: 0.2,
+            });
+          }
 
           // Create thread with conversation history
           const thread = await openai.beta.threads.create({
