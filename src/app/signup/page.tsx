@@ -180,11 +180,11 @@ export default function SignupPage() {
               {/* Legal Text */}
               <div className="mt-6 text-xs text-gray-500 text-center leading-relaxed">
                 By continuing, you agree to our{" "}
-                <Link href="#" className="text-blue-400 hover:underline">
+                <Link href="/terms-conditions" className="text-blue-400 hover:underline">
                   Terms of Service
                 </Link>{" "}
                 and{" "}
-                <Link href="#" className="text-blue-400 hover:underline">
+                <Link href="/privacy-policy" className="text-blue-400 hover:underline">
                   Privacy Policy
                 </Link>
                 , and to receive periodic emails with updates.
