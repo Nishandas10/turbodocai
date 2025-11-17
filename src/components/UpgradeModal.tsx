@@ -4,13 +4,16 @@
 import { X, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PRO_FEATURES, PRICING } from "@/lib/pricing"
-import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { createPortal } from "react-dom"
+import { useAuth } from "@/contexts/AuthContext"
+import { updateUserSubscription } from "@/lib/firestore"
 
 export default function UpgradeModal(props: any) {
   const { open, onClose } = props as { open: boolean; onClose: () => void }
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly")
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(false)
   // Lock background scroll while modal is open
   useEffect(() => {
     if (!open) return
@@ -22,20 +25,114 @@ export default function UpgradeModal(props: any) {
     }
   }, [open])
 
-  if (!open) return null
-
   const yearlyActive = billingCycle === "yearly"
   const monthlyPrice = PRICING.monthly.price
   const yearlyPriceTotal = PRICING.yearly.price
   const yearlyPricePerMonth = Math.round(yearlyPriceTotal / 12)
 
+  const handleUpgrade = useCallback(async () => {
+    try {
+      setLoading(true)
+      const amount = yearlyActive ? yearlyPriceTotal : monthlyPrice
+      const plan = yearlyActive ? "yearly" : "monthly"
+
+      const res = await fetch("/api/payments/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount, plan }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error || "Failed to create payment order")
+      }
+      const { order, keyId } = await res.json() as { order: { id: string; amount: number; currency: string }, keyId: string }
+
+      type RazorpayHandlerPayload = {
+        razorpay_order_id: string;
+        razorpay_payment_id: string;
+        razorpay_signature: string;
+      }
+      type RazorpayOptions = {
+        key: string;
+        amount: number;
+        currency: string;
+        name: string;
+        description: string;
+        order_id: string;
+        handler: (response: RazorpayHandlerPayload) => Promise<void> | void;
+        prefill?: { name?: string; email?: string; contact?: string };
+        theme?: { color?: string };
+        readonly?: { name?: boolean; email?: boolean; contact?: boolean };
+        hidden?: { email?: boolean; contact?: boolean };
+      }
+
+      const options: RazorpayOptions = {
+        key: keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: "BlumeNote",
+        description: plan === "yearly" ? "Pro Yearly Subscription" : "Pro Monthly Subscription",
+        order_id: order.id,
+        handler: async (response: RazorpayHandlerPayload) => {
+          try {
+            const verifyRes = await fetch("/api/payments/verify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...response,
+                userId: user?.uid,
+                plan,
+              }),
+            })
+            const verify = await verifyRes.json()
+            if (!verifyRes.ok || !verify?.success) {
+              throw new Error(verify?.error || "Payment verification failed")
+            }
+            // Update subscription on Firestore client-side
+            if (user?.uid) {
+              await updateUserSubscription(user.uid, "premium")
+            }
+            alert("Payment successful! Your plan has been upgraded.")
+            onClose()
+          } catch (e: any) {
+            alert(e?.message || "Payment verification failed.")
+          }
+        },
+        prefill: {
+          name: user?.displayName || "User",
+          email: user?.email || "",
+          // Do not pass contact since we are not collecting phone numbers
+          // contact: undefined,
+        },
+        // Hide and lock phone field so users are not asked for it
+        hidden: { contact: true },
+        readonly: { contact: true },
+        theme: { color: "#6366F1" },
+      }
+
+      const RazorpayCtor = (window as unknown as { Razorpay: new (options: RazorpayOptions) => { open: () => void } }).Razorpay
+      const rzp = new RazorpayCtor(options)
+      rzp.open()
+    } catch (e: any) {
+      alert(e?.message || "Unable to start payment.")
+    } finally {
+      setLoading(false)
+    }
+  }, [monthlyPrice, yearlyPriceTotal, yearlyActive, user, onClose])
+
+  if (!open) return null
+
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 md:p-8" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-[9999] flex items-start md:items-center justify-center p-4 md:p-8 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+    >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* Centered modal */}
-      <div className="relative w-full max-w-3xl max-h-[100vh] bg-[#111214] text-gray-100 rounded-xl shadow-2xl border border-gray-800 flex flex-col overflow-hidden animate-in fade-in zoom-in">
+      <div className="relative w-full max-w-lg md:max-w-3xl max-h-[100vh] md:max-h-[100vh] bg-[#111214] text-gray-100 rounded-xl shadow-2xl border border-gray-800 flex flex-col overflow-y-auto animate-in fade-in zoom-in">
         {/* Close button */}
         <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 p-2 rounded-md hover:bg-white/5">
           <X className="h-5 w-5" />
@@ -94,8 +191,12 @@ export default function UpgradeModal(props: any) {
             </button>
           </div>
 
-          <Button asChild className="w-full h-14 text-base font-semibold bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-lg">
-            <Link href="/signup">✨ Upgrade Now ✨</Link>
+          <Button
+            disabled={loading}
+            onClick={handleUpgrade}
+            className="w-full h-14 text-base font-semibold bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-lg disabled:opacity-60"
+          >
+            {loading ? "Processing..." : "✨ Upgrade Now ✨"}
           </Button>
           <p className="text-center text-xs text-gray-400">Join thousands of learners leveling up with BlumeNote.</p>
         </div>
