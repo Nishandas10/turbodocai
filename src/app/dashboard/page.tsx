@@ -29,6 +29,7 @@ import DocumentUploadModal from "../components/DocumentUploadModal"
 import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
+import UpgradeModal from "@/components/UpgradeModal"
 import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, updateDocument, deleteDocument, listenToUserChats, getUserOnboarding } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
@@ -81,6 +82,7 @@ export default function Dashboard() {
   
   // Track onboarding check state
   const [onboardingChecked, setOnboardingChecked] = useState(false)
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
     lang: 'en-US',
@@ -660,9 +662,17 @@ export default function Dashboard() {
         {/* Main Content */}
         <div className="flex-1 p-8 overflow-y-auto">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">Welcome {username}</h1>
-            <p className="text-muted-foreground">Create new notes</p>
+          <div className="mb-8 flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-foreground mb-2">Welcome {username}</h1>
+              <p className="text-muted-foreground">Create new notes</p>
+            </div>
+            <button 
+              onClick={() => setShowUpgrade(true)}
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg font-medium shadow-lg transition-all duration-200 hover:shadow-xl"
+            >
+              Upgrade
+            </button>
           </div>
 
           {/* Create New Notes Section */}
@@ -1192,6 +1202,9 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Modals */}
+        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       </div>
     </ProtectedRoute>
   )

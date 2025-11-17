@@ -78,7 +78,9 @@ export default function SignupPage() {
       <div className="relative z-10">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white">BlumeNote AI</h1>
+          <Link href="/" className="inline-block">
+            <h1 className="text-4xl font-bold text-white cursor-pointer">BlumeNote AI</h1>
+          </Link>
         </div>
 
         {/* Main Card */}
