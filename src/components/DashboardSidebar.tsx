@@ -28,6 +28,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
+import UpgradeModal from "@/components/UpgradeModal"
 import { listenToUserDocuments, listenToUserSpaces, updateSpace, deleteSpace, listenToMindMaps, listenToUserChats } from "@/lib/firestore"
 import type { Document as AppDocument, Space as SpaceType, MindMap, Chat } from "@/lib/types"
 import {
@@ -48,6 +49,7 @@ type Props = {
 export default function DashboardSidebar({ onSearchClick, onAddContentClick, onCreateSpaceClick }: Props) {
   const { user, signOut } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
+  const [showUpgrade, setShowUpgrade] = useState(false)
   const { theme, setTheme } = useTheme()
   const [recents, setRecents] = useState<AppDocument[]>([])
   const [mindmaps, setMindmaps] = useState<MindMap[]>([])
@@ -349,14 +351,12 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
                   <span>Settings</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/pricing" className="w-full">
-                  <Crown className="h-4 w-4" />
-                  <span>Pricing</span>
-                </Link>
+              <DropdownMenuItem onSelect={() => { setShowUpgrade(true) }}>
+                <Crown className="h-4 w-4" />
+                <span>Pricing</span>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href="#" className="w-full">
+                <Link href="/notes" className="w-full">
                   <Clock className="h-4 w-4" />
                   <span>History</span>
                 </Link>
@@ -394,6 +394,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
       {feedbackOpen && (
         <FeedbackModal onClose={() => setFeedbackOpen(false)} />
       )}
+      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </aside>
   )
 }

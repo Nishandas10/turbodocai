@@ -5,11 +5,23 @@ import { X, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PRO_FEATURES, PRICING } from "@/lib/pricing"
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 
 export default function UpgradeModal(props: any) {
   const { open, onClose } = props as { open: boolean; onClose: () => void }
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly")
+  // Lock background scroll while modal is open
+  useEffect(() => {
+    if (!open) return
+    const { body } = document
+    const previousOverflow = body.style.overflow
+    body.style.overflow = "hidden"
+    return () => {
+      body.style.overflow = previousOverflow
+    }
+  }, [open])
+
   if (!open) return null
 
   const yearlyActive = billingCycle === "yearly"
@@ -17,8 +29,8 @@ export default function UpgradeModal(props: any) {
   const yearlyPriceTotal = PRICING.yearly.price
   const yearlyPricePerMonth = Math.round(yearlyPriceTotal / 12)
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 md:p-8" role="dialog" aria-modal="true">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
@@ -88,6 +100,7 @@ export default function UpgradeModal(props: any) {
           <p className="text-center text-xs text-gray-400">Join thousands of learners leveling up with BlumeNote.</p>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
