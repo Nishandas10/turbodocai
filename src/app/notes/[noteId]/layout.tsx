@@ -16,6 +16,7 @@ import {
   DropdownMenuCheckboxItem,
 } from '@/components/ui/dropdown-menu'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import UpgradeModal from '@/components/UpgradeModal'
 
 export default function NoteLayout({ children }: { children: React.ReactNode }) {
   const [aiPanelWidth, setAiPanelWidth] = useState(400)
@@ -29,6 +30,7 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
   const search = useSearchParams()
   const { user, signOut } = useAuth()
   const { theme, setTheme } = useTheme()
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   const noteId = params?.noteId as string
   const ownerId = search?.get('owner') || undefined
@@ -133,9 +135,9 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
             </nav>
 
             {/* Upgrade to Premium */}
-            <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white mb-8">
+            <Button onClick={() => setShowUpgrade(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white mb-8">
               <Star className="h-4 w-4 mr-2" />
-              {!sidebarCollapsed && "Upgrade to Premium"}
+              {!sidebarCollapsed && "Upgrade to BlumeNote Pro"}
             </Button>
           </div>
 
@@ -233,6 +235,9 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
             )}
           </>
         )}
+
+        {/* Upgrade Modal */}
+        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       </div>
     </ProtectedRoute>
   )
