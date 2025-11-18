@@ -8,6 +8,8 @@ import { uploadCameraSnapshot, uploadImageFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
 import { toast } from "@/components/ui/sonner"
+import UpgradeModal from "@/components/UpgradeModal"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 interface CameraModalProps {
   isOpen: boolean
@@ -31,6 +33,7 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
   const onCloseRef = useRef<(() => void) | undefined>(onClose)
   const { user } = useAuth()
   const router = useRouter()
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   // Keep latest onClose without forcing re-renders
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
@@ -123,6 +126,12 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
 
     setIsUploading(true)
     try {
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        setIsUploading(false)
+        return
+      }
       const result = await uploadCameraSnapshot(capturedImage, user.uid, {
         title: `Camera Snapshot ${new Date().toLocaleString()}`,
         tags: ['camera', 'snapshot']
@@ -198,6 +207,12 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
     if (!imageFile || !user?.uid || isUploading) return
     setIsUploading(true)
     try {
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        setIsUploading(false)
+        return
+      }
       const result = await uploadImageFile(imageFile, user.uid, {
         title: imageFile.name.replace(/\.[^/.]+$/, ''),
         tags: ['image', 'uploaded']
@@ -416,6 +431,7 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
             )}
           </div>
         </div>
+        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       </div>
     </div>
   )

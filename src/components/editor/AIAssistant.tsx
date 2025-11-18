@@ -19,6 +19,8 @@ import MarkdownMessage from '@/components/MarkdownMessage'
 import { db, functions } from '@/lib/firebase'
 import { collection, onSnapshot, orderBy, query, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
+import UpgradeModal from '@/components/UpgradeModal'
+import { checkUploadAndChatPermission } from '@/lib/planLimits'
 
 interface ChatMsg {
   id: string
@@ -56,6 +58,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
   const userEditedRef = useRef<boolean>(false)
   const userEditTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const storageKey = `aiAssistant:messages:${documentId || 'global'}:${effOwner || user?.uid || 'anon'}`
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   // Keep shared owner consistent with notes page behavior
   useEffect(() => {
@@ -296,6 +299,11 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
         let cid = chatId
         if (!cid) {
           // Create a new chat document immediately so we can subscribe and stream the very first reply
+          const gate = await checkUploadAndChatPermission(user.uid)
+          if (!gate.allowed) {
+            setShowUpgrade(true)
+            return
+          }
           const chatsCol = collection(db, 'documents', user.uid, 'userDocuments', documentId, 'chats')
           const chatRef = await addDoc(chatsCol, { createdAt: serverTimestamp(), updatedAt: serverTimestamp(), userId: user.uid })
           cid = chatRef.id
@@ -545,6 +553,7 @@ export default function AIAssistant({ onCollapse, isCollapsed = false }: AIAssis
       </div>
 
       {/* Footer branding removed */}
+      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </div>
   )
 }

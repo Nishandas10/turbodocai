@@ -3,10 +3,12 @@ import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { PRO_FEATURES, FREE_TRIAL_FEATURES } from "@/lib/pricing"
+import { useRouter } from "next/navigation"
 
 export default function Pricing() {
   // Billing cycle toggle
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("monthly")
+  const router = useRouter()
 
   const isYearly = billingCycle === "yearly"
 
@@ -104,6 +106,7 @@ export default function Pricing() {
                       ? "bg-blue-600 hover:bg-blue-700 text-white"
                       : "border-blue-400 text-blue-400 hover:bg-blue-400/10"
                   }`}
+                  onClick={() => router.push('/dashboard')}
                 >
                   {plan.buttonText}
                 </Button>

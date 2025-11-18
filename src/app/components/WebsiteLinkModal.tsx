@@ -9,6 +9,8 @@ import { createWebsiteDocument } from "@/lib/firestore"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
 import { toast } from "@/components/ui/sonner"
+import UpgradeModal from "@/components/UpgradeModal"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function WebsiteLinkModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
@@ -22,6 +24,7 @@ export default function WebsiteLinkModal(props: any) {
   const [processingToastId, setProcessingToastId] = useState<string | number | null>(null)
   const { user } = useAuth()
   const router = useRouter()
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   const isValidUrl = (url: string) => {
     try {
@@ -53,6 +56,13 @@ export default function WebsiteLinkModal(props: any) {
     if (!isValidUrl(websiteLink)) {
       alert('Please enter a valid website URL');
       return;
+    }
+
+    // Plan/usage gate
+    const gate = await checkUploadAndChatPermission(user.uid)
+    if (!gate.allowed) {
+      setShowUpgrade(true)
+      return
     }
 
     setIsProcessing(true)
@@ -239,6 +249,7 @@ export default function WebsiteLinkModal(props: any) {
             </div>
           )}
         </div>
+        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       </div>
     </div>
   )

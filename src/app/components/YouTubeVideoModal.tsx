@@ -9,6 +9,8 @@ import { createYouTubeDocument } from "@/lib/firestore"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
 import { toast } from "@/components/ui/sonner"
+import UpgradeModal from "@/components/UpgradeModal"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function YouTubeVideoModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
@@ -23,6 +25,7 @@ export default function YouTubeVideoModal(props: any) {
   const [isFinished, setIsFinished] = useState<boolean>(false)
   const router = useRouter()
   const { user } = useAuth()
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   const isValidYouTubeUrl = (url: string) => {
     const regex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)[a-zA-Z0-9_-]+/;
@@ -35,6 +38,13 @@ export default function YouTubeVideoModal(props: any) {
     if (!isValidYouTubeUrl(youtubeLink)) {
       alert('Please enter a valid YouTube URL');
       return;
+    }
+
+    // Plan/usage gate
+    const gate = await checkUploadAndChatPermission(user.uid)
+    if (!gate.allowed) {
+      setShowUpgrade(true)
+      return
     }
 
     setIsProcessing(true)
@@ -206,6 +216,7 @@ export default function YouTubeVideoModal(props: any) {
           )}
         </div>
       </div>
+      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </div>
   )
 } 

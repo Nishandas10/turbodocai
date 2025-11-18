@@ -9,6 +9,8 @@ import { uploadDocumentFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from 'next/navigation'
 import { toast } from "@/components/ui/sonner"
+import UpgradeModal from "@/components/UpgradeModal"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function DocumentUploadModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
@@ -25,6 +27,7 @@ export default function DocumentUploadModal(props: any) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { user } = useAuth()
   const router = useRouter()
+  const [showUpgrade, setShowUpgrade] = useState(false)
   // Removed generated summary preview per user request
   const [showDocAlert, setShowDocAlert] = useState<boolean>(false)
   const [blockedDocName, setBlockedDocName] = useState<string>("")
@@ -89,6 +92,12 @@ export default function DocumentUploadModal(props: any) {
 
     setIsUploading(true)
     try {
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        setIsUploading(false)
+        return
+      }
       const result = await uploadDocumentFile(selectedFile, user.uid, {
         title: selectedFile.name.replace(/\.[^/.]+$/, ""), // Remove file extension
         tags: ['uploaded'],
@@ -214,6 +223,7 @@ export default function DocumentUploadModal(props: any) {
   if (!isOpen) return null
 
   return (
+    <>
     <div 
       className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
       onClick={onClose}
@@ -375,5 +385,7 @@ export default function DocumentUploadModal(props: any) {
         </div>
       </div>
     </div>
+    <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+    </>
   )
 } 

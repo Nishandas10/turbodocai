@@ -544,12 +544,22 @@ export default function NotebookEditor(props: NotebookEditorProps) {
     if (doc.summary) {
         setSummary(doc.summary)
       } else if ((doc.processingStatus === 'completed' || doc.status === 'ready') && user?.uid) {
+        // Skip auto summary generation for brand-new blank documents
+        const fileSize = (doc.metadata?.fileSize ?? 0)
+        const rawEmpty = !doc.content?.raw || doc.content.raw.trim().length === 0
+        const processedEmpty = !doc.content?.processed || doc.content.processed.trim().length === 0
+        const hasBlankTag = Array.isArray(doc.tags) && doc.tags.includes('blank-document')
+        const isBlank = fileSize === 0 && rawEmpty && processedEmpty && hasBlankTag
+        if (isBlank) {
+          // Do not attempt summary generation; blank documents start directly in editor
+        } else {
         // Attempt auto-fetch once after processing if no stored summary
         try {
           const auto = await generateDocumentSummaryWithRetry(noteId, user.uid, 350)
           setSummary(auto)
         } catch (e:any) {
           console.warn('Auto summary failed:', e?.message)
+        }
         }
       }
       const localStorageKey = `document_${noteId}_lexical`

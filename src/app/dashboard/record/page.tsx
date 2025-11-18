@@ -19,10 +19,13 @@ import { useAuth } from "@/contexts/AuthContext"
 import { uploadRecordingFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { useRouter } from "next/navigation"
+import UpgradeModal from "@/components/UpgradeModal"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function RecordPage() {
   const { user } = useAuth()
   const router = useRouter()
+  const [showUpgrade, setShowUpgrade] = useState(false)
   const [searchModalOpen, setSearchModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Array<{
@@ -58,6 +61,7 @@ export default function RecordPage() {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const rafRef = useRef<number | null>(null)
+  const resizeHandlerRef = useRef<(() => void) | null>(null)
 
   // Mock search results - in real app this would come from API
   const mockDocuments: Array<{
@@ -127,6 +131,15 @@ export default function RecordPage() {
 
   const startRecording = async () => {
     try {
+      // Enforce free plan limits before allowing recording (which leads to a new upload)
+      if (user) {
+        const gate = await checkUploadAndChatPermission(user.uid)
+        if (!gate.allowed) {
+          setShowUpgrade(true)
+          return
+        }
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { deviceId: selectedDevice ? { exact: selectedDevice } : undefined } 
       })
@@ -181,8 +194,30 @@ export default function RecordPage() {
         sourceRef.current = source
         const analyser = audioContext.createAnalyser()
         analyser.fftSize = 2048
+        analyser.smoothingTimeConstant = 0.8
         analyserRef.current = analyser
         source.connect(analyser)
+
+        // Ensure canvas is sized crisply for devicePixelRatio and resizes with window
+        const ensureCanvasSize = () => {
+          const canvas = canvasRef.current
+          if (!canvas) return
+          const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1))
+          const displayWidth = canvas.clientWidth || 800
+          const displayHeight = canvas.clientHeight || 192
+          const nextW = Math.max(1, Math.floor(displayWidth * dpr))
+          const nextH = Math.max(1, Math.floor(displayHeight * dpr))
+          if (canvas.width !== nextW || canvas.height !== nextH) {
+            canvas.width = nextW
+            canvas.height = nextH
+          }
+        }
+        const handleResize = () => {
+          ensureCanvasSize()
+        }
+        ensureCanvasSize()
+        window.addEventListener('resize', handleResize)
+        resizeHandlerRef.current = handleResize
 
         const draw = () => {
           const canvas = canvasRef.current
@@ -191,28 +226,43 @@ export default function RecordPage() {
           const ctx = canvas.getContext('2d')
           if (!ctx) return
 
-          const WIDTH = canvas.width
-          const HEIGHT = canvas.height
-          ctx.clearRect(0, 0, WIDTH, HEIGHT)
+          const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1))
+          const width = (canvas.width / dpr) | 0
+          const height = (canvas.height / dpr) | 0
+          // Reset transform then scale once per frame for crisp lines
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          ctx.clearRect(0, 0, width, height)
+
+          // Baseline
+          ctx.lineWidth = 1
+          ctx.strokeStyle = 'rgba(100,116,139,0.35)' // slate-500/35
+          ctx.beginPath()
+          ctx.moveTo(0, height / 2)
+          ctx.lineTo(width, height / 2)
+          ctx.stroke()
 
           const bufferLength = analyserNode.fftSize
           const dataArray = new Uint8Array(bufferLength)
           analyserNode.getByteTimeDomainData(dataArray)
 
+          // Waveform
+          const gradient = ctx.createLinearGradient(0, 0, width, 0)
+          gradient.addColorStop(0, '#7c3aed') // violet-600
+          gradient.addColorStop(1, '#22d3ee') // cyan-400
           ctx.lineWidth = 2
-          ctx.strokeStyle = '#a78bfa' // purple-400
+          ctx.strokeStyle = gradient
           ctx.beginPath()
 
-          const sliceWidth = WIDTH / bufferLength
+          const sliceWidth = width / bufferLength
           let x = 0
           for (let i = 0; i < bufferLength; i++) {
-            const v = dataArray[i] / 128.0
-            const y = (v * HEIGHT) / 2
+            const v = dataArray[i] / 128.0 // 0..2
+            const y = (v * height) / 2 // center around baseline
             if (i === 0) ctx.moveTo(x, y)
             else ctx.lineTo(x, y)
             x += sliceWidth
           }
-          ctx.lineTo(WIDTH, HEIGHT / 2)
+          ctx.lineTo(width, height / 2)
           ctx.stroke()
 
           rafRef.current = requestAnimationFrame(draw)
@@ -269,6 +319,11 @@ export default function RecordPage() {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
+      }
+      // Remove resize listener and reset handler
+      if (resizeHandlerRef.current) {
+        window.removeEventListener('resize', resizeHandlerRef.current)
+        resizeHandlerRef.current = null
       }
       try {
         sourceRef.current?.disconnect()
@@ -403,6 +458,13 @@ export default function RecordPage() {
                           return
                         }
                         try {
+                          // Enforce free plan limits on upload (creating a new document)
+                          const gate = await checkUploadAndChatPermission(user.uid)
+                          if (!gate.allowed) {
+                            setShowUpgrade(true)
+                            return
+                          }
+
                           setIsUploading(true)
                           const uid = user.uid
                           const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -595,6 +657,8 @@ export default function RecordPage() {
             </div>
           </div>
         )}
+        {/* Upgrade Modal for plan limits */}
+        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       </div>
     </ProtectedRoute>
   )

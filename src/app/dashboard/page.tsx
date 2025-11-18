@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   X,
   Brain,
+  Crown,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
@@ -30,7 +31,7 @@ import YouTubeVideoModal from "../components/YouTubeVideoModal"
 import WebsiteLinkModal from "../components/WebsiteLinkModal"
 import DashboardSidebar from "@/components/DashboardSidebar"
 import UpgradeModal from "@/components/UpgradeModal"
-import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, updateDocument, deleteDocument, listenToUserChats, getUserOnboarding } from "@/lib/firestore"
+import { createSpace, listenToUserSpaces, listenToSpaceDocuments, updateSpace, deleteSpace, updateDocument, deleteDocument, listenToUserChats, getUserOnboarding, getUserProfile } from "@/lib/firestore"
 import { useRouter } from "next/navigation"
 import { listenToUserDocuments } from "@/lib/firestore"
 import type { Document as UserDoc, Space as SpaceType, Chat } from "@/lib/types"
@@ -44,6 +45,7 @@ import PptxThumbnail from "@/components/PptxThumbnail"
 import WebsiteThumbnail from "@/components/WebsiteThumbnail"
 import ChatThumbnail from "@/components/ChatThumbnail"
 import AudioThumbnail from "@/components/AudioThumbnail"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -83,6 +85,7 @@ export default function Dashboard() {
   // Track onboarding check state
   const [onboardingChecked, setOnboardingChecked] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
+  const [subscription, setSubscription] = useState<'free'|'premium'|'unknown'>('unknown')
 
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
     lang: 'en-US',
@@ -181,6 +184,18 @@ export default function Dashboard() {
     }
     run()
   }, [user?.uid, router])
+  // Fetch subscription
+  useEffect(() => {
+    const run = async () => {
+      if (!user?.uid) return
+      try {
+        const profile = await getUserProfile(user.uid)
+        const sub: 'free'|'premium'|undefined = profile?.subscription as ('free'|'premium'|undefined)
+        setSubscription(sub || 'free')
+      } catch { setSubscription('unknown') }
+    }
+    run()
+  }, [user?.uid])
 
   // Note: we do not early-return here to avoid conditional Hooks order.
 
@@ -474,6 +489,13 @@ export default function Dashboard() {
       const initial = prompt.trim()
       setPrompt('')
 
+      // Plan/usage gate before creating a new chat
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        return
+      }
+
       // Create chat immediately
       const callCreate = httpsCallable(functions, 'createChat')
       const createRes = (await callCreate({
@@ -511,6 +533,13 @@ export default function Dashboard() {
     }
 
     try {
+      // Enforce free plan limits for creating a blank document
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        return
+      }
+
       // Import Firebase functions directly
       const { createDocument } = await import('@/lib/firestore')
       const { uploadDocument } = await import('@/lib/storage')
@@ -667,12 +696,19 @@ export default function Dashboard() {
               <h1 className="text-3xl font-bold text-foreground mb-2">Welcome {username}</h1>
               <p className="text-muted-foreground">Create new notes</p>
             </div>
-            <button 
-              onClick={() => setShowUpgrade(true)}
-              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg font-medium shadow-lg transition-all duration-200 hover:shadow-xl"
-            >
-              Upgrade
-            </button>
+            {subscription === 'premium' ? (
+              <div className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 text-white rounded-lg font-medium shadow-lg flex items-center gap-2 select-none">
+                <Crown className="h-4 w-4" />
+                <span>Premium</span>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setShowUpgrade(true)}
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg font-medium shadow-lg transition-all duration-200 hover:shadow-xl"
+              >
+                Upgrade
+              </button>
+            )}
           </div>
 
           {/* Create New Notes Section */}
@@ -1204,7 +1240,9 @@ export default function Dashboard() {
         )}
 
         {/* Modals */}
-        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+        {subscription === 'premium' ? null : (
+          <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+        )}
       </div>
     </ProtectedRoute>
   )
