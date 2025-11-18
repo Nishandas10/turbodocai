@@ -233,11 +233,11 @@ export default function NotesPage() {
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
-                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                                className="absolute top-2 right-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
                                 onClick={(e) => { e.stopPropagation() }}
                                 aria-label="Document menu"
                               >
-                                <MoreVertical className="h-4 w-4 text-black" />
+                                <MoreVertical className="h-4 w-4 text-card-foreground" />
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
@@ -291,14 +291,14 @@ export default function NotesPage() {
                             </div>
                           </div>
                         </div>
-                        <div className="absolute inset-0">
+                        <div className="absolute inset-0 pointer-events-none">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
-                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                                className="absolute top-2 right-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted pointer-events-auto"
                                 onClick={(e) => { e.stopPropagation() }}
                               >
-                                <MoreVertical className="h-4 w-4" />
+                                <MoreVertical className="h-4 w-4 text-card-foreground" />
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" onClick={(e)=> e.stopPropagation()} className="w-40">
@@ -352,14 +352,14 @@ export default function NotesPage() {
                           </div>
                         </div>
                       </div>
-                      <div className="absolute inset-0">
+                      <div className="absolute inset-0 pointer-events-none">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button
-                              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                              className="absolute top-2 right-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted pointer-events-auto"
                               onClick={(e) => { e.stopPropagation() }}
                             >
-                              <MoreVertical className="h-4 w-4" />
+                              <MoreVertical className="h-4 w-4 text-card-foreground" />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" onClick={(e)=> e.stopPropagation()} className="w-40">

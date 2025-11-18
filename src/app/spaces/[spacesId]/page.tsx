@@ -349,17 +349,17 @@ export default function SpacePage() {
 
           {/* Space header and quick actions */}
           <div className="max-w-6xl mx-auto mt-2">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
               <h2 className="text-lg font-semibold text-foreground">{space?.name || `${username}'s Space`}</h2>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setCreateExamOpen(true)} className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/15">
+              <div className="flex items-center gap-2 flex-wrap mt-2 sm:mt-0 w-full sm:w-auto">
+                <button onClick={() => setCreateExamOpen(true)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/15">
                   <span>Create Test</span>
                   <ChevronRight className="h-4 w-4" />
                 </button>
                 <button
                   disabled={!latestSessionId}
                   onClick={() => latestSessionId && window.location.assign(`/spaces/${spaceId}/test/results?session=${latestSessionId}`)}
-                  className={`hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-blue-600 dark:text-blue-300 ${latestSessionId ? 'hover:bg-blue-50 dark:hover:bg-blue-950/30 border-blue-300/60 bg-blue-500/10' : 'opacity-40 cursor-not-allowed border-border'} `}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-blue-600 dark:text-blue-300 ${latestSessionId ? 'hover:bg-blue-50 dark:hover:bg-blue-950/30 border-blue-300/60 bg-blue-500/10' : 'opacity-40 cursor-not-allowed border-border'} `}
                   title={latestSessionId ? 'View latest test results' : 'No test results yet'}
                 >
                   <BarChart3 className="h-4 w-4" />

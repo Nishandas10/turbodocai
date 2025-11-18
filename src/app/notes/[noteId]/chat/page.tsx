@@ -31,10 +31,13 @@ export default function ChatPage() {
   const [verifyingPdf, setVerifyingPdf] = useState<boolean>(false);
   const [verifiedPdfUrl, setVerifiedPdfUrl] = useState<string | null>(null);
   // Split state for resizable panes (0.3 <= split <= 0.7)
-  const [split, setSplit] = useState<number>(0.6);
+  const [split, setSplit] = useState<number>(0.5);
   const draggingRef = useRef<boolean>(false);
   // Website preview zoom (0.5x - 2x)
   const [websiteZoom, setWebsiteZoom] = useState<number>(1);
+  // Mobile responsive states
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  // No mobile view toggle; users can drag the divider. Split is clamped between 10% and 90%.
 
   useEffect(() => {
     // Keep shared owner consistent with notes page behavior
@@ -254,9 +257,15 @@ export default function ChatPage() {
       const el = containerRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const ratio = Math.max(0.3, Math.min(0.7, x / rect.width));
-      setSplit(ratio);
+      if (isMobile) {
+        const y = e.clientY - rect.top;
+        const ratio = Math.max(0.1, Math.min(0.9, y / rect.height));
+        setSplit(ratio);
+      } else {
+        const x = e.clientX - rect.left;
+        const ratio = Math.max(0.1, Math.min(0.9, x / rect.width));
+        setSplit(ratio);
+      }
     };
     const onMouseUp = () => { draggingRef.current = false; };
     window.addEventListener('mousemove', onMouseMove);
@@ -265,14 +274,26 @@ export default function ChatPage() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
+  }, [isMobile]);
+
+  // Detect mobile viewport and update on resize
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const MOBILE_BP = 768;
+    const update = () => setIsMobile(window.innerWidth < MOBILE_BP);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
   }, []);
 
   return (
-    <div ref={containerRef} className="h-full w-full flex overflow-hidden">
-      {/* Left: PDF viewer or placeholder */}
+    <div ref={containerRef} className={`h-full w-full flex overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
+      {/* Document preview pane */}
       <div
-        className="hidden md:flex h-full border-r border-border bg-background"
-        style={{ width: `${Math.round(split * 100)}%` }}
+        className={isMobile
+          ? `w-full border-b border-border bg-background`
+          : `hidden md:flex h-full border-r border-border bg-background`}
+        style={isMobile ? { height: `${Math.round(split * 100)}%` } : { width: `${Math.round(split * 100)}%` }}
       >
         {loading ? (
           <div className="h-full w-full flex items-center justify-center text-muted-foreground">
@@ -501,19 +522,31 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Divider (md+) */}
-      <div
-        className="hidden md:block w-1 bg-border hover:bg-blue-500 cursor-col-resize"
-        onMouseDown={onMouseDownDivider}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize panels"
-      />
+      {/* Divider: vertical on desktop, draggable horizontal on mobile */}
+      {isMobile ? (
+        <div
+          className="md:hidden h-2 w-full bg-border hover:bg-blue-500 cursor-row-resize flex items-center justify-center"
+          onMouseDown={onMouseDownDivider}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize panels"
+        >
+          <div className="h-0.5 w-10 bg-muted-foreground/50 rounded-full" />
+        </div>
+      ) : (
+        <div
+          className="hidden md:block w-1 bg-border hover:bg-blue-500 cursor-col-resize"
+          onMouseDown={onMouseDownDivider}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panels"
+        />
+      )}
 
-      {/* Right: Chat */}
+      {/* Chat pane */}
       <div
-        className="flex-1 min-w-0 h-full"
-        style={{ width: `${Math.round((1 - split) * 100)}%` }}
+        className={`${isMobile ? 'w-full' : 'flex-1 min-w-0 h-full'}`}
+        style={isMobile ? { height: `${Math.round((1 - split) * 100)}%` } : { width: `${Math.round((1 - split) * 100)}%` }}
       >
         <DocumentChat documentId={noteId} documentTitle={doc?.title || "Your Document"} ownerId={effOwner || user?.uid} />
       </div>
