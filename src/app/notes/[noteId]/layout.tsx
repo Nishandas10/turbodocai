@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import UpgradeModal from '@/components/UpgradeModal'
+import { getUserProfile } from '@/lib/firestore'
+import { Crown } from 'lucide-react'
 
 export default function NoteLayout({ children }: { children: React.ReactNode }) {
   const [aiPanelWidth, setAiPanelWidth] = useState(400)
@@ -31,6 +33,7 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
   const { user, signOut } = useAuth()
   const { theme, setTheme } = useTheme()
   const [showUpgrade, setShowUpgrade] = useState(false)
+  const [subscription, setSubscription] = useState<'free'|'premium'|'unknown'>('unknown')
 
   const noteId = params?.noteId as string
   const ownerId = search?.get('owner') || undefined
@@ -47,6 +50,19 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
       }
     } catch {}
   }, [noteId, ownerId])
+
+  // Fetch subscription status for current user (owner perspective)
+  useEffect(() => {
+    const run = async () => {
+      if (!user?.uid) return
+      try {
+        const profile = await getUserProfile(user.uid)
+        const sub: 'free'|'premium'|undefined = profile?.subscription as ('free'|'premium'|undefined)
+        setSubscription(sub || 'free')
+      } catch { setSubscription('unknown') }
+    }
+    run()
+  }, [user?.uid])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -135,10 +151,17 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
             </nav>
 
             {/* Upgrade to Premium */}
-            <Button onClick={() => setShowUpgrade(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white mb-8">
-              <Star className="h-4 w-4 mr-2" />
-              {!sidebarCollapsed && "Upgrade to BlumeNote Pro"}
-            </Button>
+            {subscription === 'premium' ? (
+              <div className="w-full bg-gradient-to-r from-amber-500 to-yellow-500 text-white mb-8 rounded-md px-3 py-2 flex items-center justify-center gap-2 select-none">
+                <Crown className="h-4 w-4" />
+                {!sidebarCollapsed && <span>Premium</span>}
+              </div>
+            ) : (
+              <Button onClick={() => setShowUpgrade(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white mb-8">
+                <Star className="h-4 w-4 mr-2" />
+                {!sidebarCollapsed && "Upgrade to BlumeNote Pro"}
+              </Button>
+            )}
           </div>
 
           {/* User footer / Auth */}
@@ -237,7 +260,9 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
         )}
 
         {/* Upgrade Modal */}
-        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+        {subscription === 'premium' ? null : (
+          <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+        )}
       </div>
     </ProtectedRoute>
   )

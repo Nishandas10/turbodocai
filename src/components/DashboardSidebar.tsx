@@ -29,7 +29,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
 import UpgradeModal from "@/components/UpgradeModal"
-import { listenToUserDocuments, listenToUserSpaces, updateSpace, deleteSpace, listenToMindMaps, listenToUserChats } from "@/lib/firestore"
+import { listenToUserDocuments, listenToUserSpaces, updateSpace, deleteSpace, listenToMindMaps, listenToUserChats, getUserProfile } from "@/lib/firestore"
 import type { Document as AppDocument, Space as SpaceType, MindMap, Chat } from "@/lib/types"
 import {
   DropdownMenu,
@@ -50,6 +50,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
   const { user, signOut } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
+  const [subscription, setSubscription] = useState<'free'|'premium'|'unknown'>('unknown')
   const { theme, setTheme } = useTheme()
   const [recents, setRecents] = useState<AppDocument[]>([])
   const [mindmaps, setMindmaps] = useState<MindMap[]>([])
@@ -88,6 +89,19 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
     if (!user?.uid) return
     const unsub = listenToUserSpaces(user.uid, (sps) => setSpaces(sps))
     return unsub
+  }, [user?.uid])
+
+  // Fetch subscription status
+  useEffect(() => {
+    const run = async () => {
+      if (!user?.uid) return
+      try {
+        const profile = await getUserProfile(user.uid)
+        const sub: 'free'|'premium'|undefined = profile?.subscription as ('free'|'premium'|undefined)
+        setSubscription(sub || 'free')
+      } catch { setSubscription('unknown') }
+    }
+    run()
   }, [user?.uid])
 
   // (Optional) Add counts here if needed later
@@ -320,7 +334,16 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
         {/* Plan badge */}
         {!collapsed && (
           <div className="px-4 pt-3">
-            <div className="text-center text-xs text-sidebar-accent-foreground border rounded-md py-1.5">Free Plan</div>
+            <div className="text-center text-xs text-sidebar-accent-foreground border rounded-md py-1.5">
+              {subscription === 'premium' ? (
+                <span className="inline-flex items-center gap-1">
+                  <Crown className="h-3.5 w-3.5 text-yellow-500" />
+                  Premium
+                </span>
+              ) : (
+                'Free Plan'
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -351,10 +374,17 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
                   <span>Settings</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => { setShowUpgrade(true) }}>
-                <Crown className="h-4 w-4" />
-                <span>Pricing</span>
-              </DropdownMenuItem>
+              {subscription === 'premium' ? (
+                <DropdownMenuItem disabled>
+                  <Crown className="h-4 w-4 text-yellow-500" />
+                  <span>Premium</span>
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onSelect={() => { setShowUpgrade(true) }}>
+                  <Crown className="h-4 w-4" />
+                  <span>Pricing</span>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem asChild>
                 <Link href="/notes" className="w-full">
                   <Clock className="h-4 w-4" />
@@ -394,7 +424,9 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
       {feedbackOpen && (
         <FeedbackModal onClose={() => setFeedbackOpen(false)} />
       )}
-      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+      {subscription === 'premium' ? null : (
+        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
+      )}
     </aside>
   )
 }
