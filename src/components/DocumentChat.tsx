@@ -295,7 +295,7 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
           </Button>
         </div>
         <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-          <span>Enter to send, Shift+Enter for newline</span>
+          <span className="hidden sm:inline">Enter to send, Shift+Enter for newline</span>
           {speechSupported && (
             <span className="truncate max-w-[60%]" aria-live="polite">{listening ? (interimTranscript || 'Listening…') : ''}</span>
           )}
