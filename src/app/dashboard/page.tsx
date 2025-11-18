@@ -519,6 +519,13 @@ export default function Dashboard() {
     }
 
     try {
+      // Enforce free plan limits for creating a blank document
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        return
+      }
+
       // Import Firebase functions directly
       const { createDocument } = await import('@/lib/firestore')
       const { uploadDocument } = await import('@/lib/storage')
