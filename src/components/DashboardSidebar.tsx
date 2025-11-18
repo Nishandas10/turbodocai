@@ -11,6 +11,7 @@ import {
   Clock,
   Box,
   ThumbsUp,
+  Home,
   BookOpen,
   ChevronLeft,
   LogOut,
@@ -204,7 +205,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
             }}
             className={`w-full flex items-center ${collapsed ? "justify-center gap-0 px-2" : "gap-3 px-3"} py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground`}
           >
-            <Plus className="h-4 w-4" />
+            <Home className="h-4 w-4" />
             {!collapsed && <span className="text-sm">Add content</span>}
           </button>
           {/* Mind Maps */}
