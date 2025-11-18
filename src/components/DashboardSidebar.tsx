@@ -48,7 +48,10 @@ type Props = {
 
 export default function DashboardSidebar({ onSearchClick, onAddContentClick, onCreateSpaceClick }: Props) {
   const { user, signOut } = useAuth()
+  // Sidebar collapsed state. Default will be overridden for mobile on mount.
   const [collapsed, setCollapsed] = useState(false)
+  // Track if the user manually toggled; if not, responsive resize can still auto-adjust.
+  const [userToggled, setUserToggled] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
   const [subscription, setSubscription] = useState<'free'|'premium'|'unknown'>('unknown')
   const { theme, setTheme } = useTheme()
@@ -104,6 +107,36 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
     run()
   }, [user?.uid])
 
+  // Responsive: collapse by default on initial mount for mobile (<768px)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const MOBILE_BREAKPOINT = 768
+    if (window.innerWidth < MOBILE_BREAKPOINT) {
+      setCollapsed(true)
+    }
+  }, [])
+
+  // Auto adjust on resize ONLY until user manually toggles.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const MOBILE_BREAKPOINT = 768
+    const handler = () => {
+      if (userToggled) return
+      if (window.innerWidth < MOBILE_BREAKPOINT) {
+        setCollapsed(true)
+      } else {
+        setCollapsed(false)
+      }
+    }
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [userToggled])
+
+  const handleToggle = () => {
+    setCollapsed(c => !c)
+    setUserToggled(true)
+  }
+
   // (Optional) Add counts here if needed later
 
   const renderTypeIcon = (type: AppDocument["type"]) => {
@@ -151,8 +184,9 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
           <div className="text-sidebar-foreground font-semibold text-xl leading-none">BlumeNote AI</div>
         )}
         <button
-          onClick={() => setCollapsed((c) => !c)}
-          className="p-2 rounded-md hover:bg-sidebar-accent text-sidebar-accent-foreground"
+          onClick={handleToggle}
+          className="p-2 rounded-md hover:bg-sidebar-accent text-sidebar-accent-foreground focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sidebar-accent"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <ChevronLeft className={`h-4 w-4 transition-transform ${collapsed ? "rotate-180" : ""}`} />

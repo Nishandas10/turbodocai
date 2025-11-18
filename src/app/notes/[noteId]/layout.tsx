@@ -24,8 +24,12 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
   const [aiPanelWidth, setAiPanelWidth] = useState(400)
   const [isDragging, setIsDragging] = useState(false)
   const resizeRef = useRef<HTMLDivElement>(null)
+  // Left editor sidebar collapsed state; will auto-collapse on mobile initially.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // Track if user has manually toggled; before that we allow responsive resize behavior.
+  const [sidebarUserToggled, setSidebarUserToggled] = useState(false)
   const [aiCollapsed, setAiCollapsed] = useState(false)
+  const [aiUserToggled, setAiUserToggled] = useState(false)
   const params = useParams()
   const pathname = usePathname()
   const router = useRouter()
@@ -63,6 +67,61 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
     }
     run()
   }, [user?.uid])
+
+  // Auto-collapse AI assistant for mobile on initial mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const MOBILE_BP = 768
+    if (window.innerWidth < MOBILE_BP) {
+      setAiCollapsed(true)
+    }
+  }, [])
+
+  // Responsive expand/collapse until user manually toggles
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const MOBILE_BP = 768
+    const handler = () => {
+      if (aiUserToggled) return
+      if (window.innerWidth < MOBILE_BP) {
+        setAiCollapsed(true)
+      } else {
+        setAiCollapsed(false)
+      }
+    }
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [aiUserToggled])
+
+  // Auto-collapse sidebar on initial mount for mobile (<768px)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const MOBILE_BP = 768
+    if (window.innerWidth < MOBILE_BP) {
+      setSidebarCollapsed(true)
+    }
+  }, [])
+
+  // Responsive collapse/expand until user manually toggles.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const MOBILE_BP = 768
+    const handler = () => {
+      if (sidebarUserToggled) return
+      if (window.innerWidth < MOBILE_BP) {
+        setSidebarCollapsed(true)
+      } else {
+        setSidebarCollapsed(false)
+      }
+    }
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [sidebarUserToggled])
+
+  const handleSidebarToggle = () => {
+    setSidebarCollapsed(c => !c)
+    setSidebarUserToggled(true)
+  }
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -107,7 +166,12 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
           <div className="p-4 flex-1 overflow-y-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
             {/* App Name and Collapse Button */}
             <div className="flex items-center justify-between mb-8">
-              <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="flex items-center space-x-2 hover:bg-sidebar-accent rounded-lg p-2 transition-colors cursor-pointer group">
+              <button
+                onClick={handleSidebarToggle}
+                className="flex items-center space-x-2 hover:bg-sidebar-accent rounded-lg p-2 transition-colors cursor-pointer group focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sidebar-accent"
+                aria-label={sidebarCollapsed ? 'Expand editor sidebar' : 'Collapse editor sidebar'}
+                title={sidebarCollapsed ? 'Expand editor sidebar' : 'Collapse editor sidebar'}
+              >
                 <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center group-hover:bg-blue-700 transition-colors flex-shrink-0">
                   <span className="text-white font-bold text-sm">DOC</span>
                 </div>
@@ -240,7 +304,7 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
 
                 {/* Right Sidebar - AI Assistant */}
                 <div className="bg-card text-card-foreground border-l border-border flex flex-col relative overflow-hidden transition-all duration-300 ease-in-out" style={{ width: `${aiPanelWidth}px`, transition: 'width 300ms ease-in-out' }}>
-                  <AIAssistant onCollapse={() => setAiCollapsed(true)} />
+                  <AIAssistant onCollapse={() => { setAiCollapsed(true); setAiUserToggled(true) }} />
                 </div>
               </>
             )}
@@ -248,8 +312,8 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
             {/* When collapsed, remove sidebar entirely and show a floating chat button */}
             {aiCollapsed && (
               <button
-                onClick={() => setAiCollapsed(false)}
-                className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-blue-600 hover:bg-blue-700 rounded-full flex items-center justify-center text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110"
+                onClick={() => { setAiCollapsed(false); setAiUserToggled(true) }}
+                className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-blue-600 hover:bg-blue-700 rounded-full flex items-center justify-center text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600"
                 title="Open AI Assistant"
                 aria-label="Open AI Assistant"
               >

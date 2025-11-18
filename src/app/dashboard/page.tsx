@@ -1076,11 +1076,11 @@ export default function Dashboard() {
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
-                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
+                                className="absolute top-2 right-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-muted"
                                 onClick={(e) => e.stopPropagation()}
                                 aria-label="Document menu"
                               >
-                                <MoreHorizontal className="h-4 w-4 text-black" />
+                                <MoreHorizontal className="h-4 w-4 text-card-foreground" />
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()} className="w-56">
