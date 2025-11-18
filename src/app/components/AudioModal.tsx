@@ -9,6 +9,8 @@ import { useAuth } from "@/contexts/AuthContext"
 import { uploadAudioFile } from "@/lib/fileUploadService"
 import { waitAndGenerateSummary } from "@/lib/ragService"
 import { toast } from "@/components/ui/sonner"
+import UpgradeModal from "@/components/UpgradeModal"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function AudioModal(props: any) {
   const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
@@ -23,6 +25,7 @@ export default function AudioModal(props: any) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const { user } = useAuth()
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   const handleRecordAudio = () => {
     onClose() // Close the modal first
@@ -64,6 +67,12 @@ export default function AudioModal(props: any) {
 
     setIsUploading(true)
     try {
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        setIsUploading(false)
+        return
+      }
       const result = await uploadAudioFile(audioFile, user.uid, {
         title: audioFile.name.replace(/\.[^/.]+$/, ""), // Remove file extension
         tags: ['audio', 'uploaded'],
@@ -225,6 +234,7 @@ export default function AudioModal(props: any) {
           </div>
         </div>
       </div>
+      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </div>
   )
 } 

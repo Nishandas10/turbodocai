@@ -7,6 +7,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
 import { db, functions } from "@/lib/firebase";
+import UpgradeModal from "@/components/UpgradeModal";
+import { checkUploadAndChatPermission } from "@/lib/planLimits";
 import { collection, onSnapshot, orderBy, query, addDoc, serverTimestamp, doc, setDoc, type Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
@@ -31,6 +33,7 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   // Speech to text (same UX as original component)
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
@@ -107,6 +110,13 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
       // First message: proactively create chat & user message so we can subscribe and stream immediately
       setSending(true);
       try {
+        // Plan/usage gate for creating a new chat
+        const gate = await checkUploadAndChatPermission(user.uid);
+        if (!gate.allowed) {
+          setShowUpgrade(true);
+          setSending(false);
+          return;
+        }
         // 1) Create chat doc (document-based path if documentId exists, else global chats)
         let cid: string;
         if (documentId) {
@@ -291,6 +301,7 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
           )}
         </div>
       </div>
+      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </div>
   );
 }

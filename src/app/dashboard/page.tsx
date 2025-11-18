@@ -44,6 +44,7 @@ import PptxThumbnail from "@/components/PptxThumbnail"
 import WebsiteThumbnail from "@/components/WebsiteThumbnail"
 import ChatThumbnail from "@/components/ChatThumbnail"
 import AudioThumbnail from "@/components/AudioThumbnail"
+import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -473,6 +474,13 @@ export default function Dashboard() {
     try {
       const initial = prompt.trim()
       setPrompt('')
+
+      // Plan/usage gate before creating a new chat
+      const gate = await checkUploadAndChatPermission(user.uid)
+      if (!gate.allowed) {
+        setShowUpgrade(true)
+        return
+      }
 
       // Create chat immediately
       const callCreate = httpsCallable(functions, 'createChat')
