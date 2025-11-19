@@ -17,15 +17,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Blumenote – AI Notes Assistant, Summaries, Flashcards , Quizzes, Podcasts, and More",
+  title: "Blumenote | AI Notes Assistant, Summaries, Flashcards , Quizzes, Podcasts, Mindmaps and More",
   description:
-    "Upload PDFs, documents, webpages, YouTube videos, or write your own notes with the AI-powered editor.Transform any content into summaries, quizzes, flashcards, podcasts, and smart study notes using AI. Study smarter with Blumenote.",
+    "Upload PDFs, documents, webpages, YouTube videos, Mindmaps or write your own notes with the AI-powered editor.Transform any content into summaries, quizzes, flashcards, podcasts, mindmaps and smart study notes using AI. Study smarter with Blumenote.",
   keywords: [
     "AI notes",
     "AI summarizer",
     "flashcards generator",
     "quiz generator",
     "study tool",
+    "AI Mindmap generator",
     "PDF summarizer",
     "note taking app",
     "AI study assistant",
@@ -41,7 +42,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Blumenote – Turn Any Content Into Smart Study Notes",
     description:
-      "Upload content → Get AI Assistant that writes summaries, quizzes, flashcards, podcasts, and more. Study smarter with Blumenote.",
+      "Upload any content → Get AI Assistant that writes summaries, quizzes, flashcards, podcasts, mindmaps and more. Study smarter with Blumenote.",
     url: "https://blumenote.com",
     siteName: "Blumenote",
     images: [
