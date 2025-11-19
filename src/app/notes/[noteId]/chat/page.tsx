@@ -33,6 +33,7 @@ export default function ChatPage() {
   // Split state for resizable panes (0.3 <= split <= 0.7)
   const [split, setSplit] = useState<number>(0.5);
   const draggingRef = useRef<boolean>(false);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
   // Website preview zoom (0.5x - 2x)
   const [websiteZoom, setWebsiteZoom] = useState<number>(1);
   // Mobile responsive states
@@ -248,11 +249,13 @@ export default function ChatPage() {
   // Resizer handlers (md+ only)
   const onMouseDownDivider = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     draggingRef.current = true;
+    setIsDragging(true);
     e.preventDefault();
   }, []);
 
   const onTouchStartDivider = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     draggingRef.current = true;
+    setIsDragging(true);
     e.preventDefault();
   }, []);
 
@@ -291,8 +294,8 @@ export default function ChatPage() {
       // prevent the page from scrolling while dragging
       try { e.preventDefault(); } catch {}
     };
-    const onMouseUp = () => { draggingRef.current = false; };
-    const onTouchEnd = () => { draggingRef.current = false; };
+  const onMouseUp = () => { draggingRef.current = false; setIsDragging(false); };
+  const onTouchEnd = () => { draggingRef.current = false; setIsDragging(false); };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -553,25 +556,28 @@ export default function ChatPage() {
 
       {/* Divider: vertical on desktop, draggable horizontal on mobile */}
       {isMobile ? (
+        // Larger touch target for mobile dragging (48px tall)
         <div
-          className="md:hidden h-3 w-full bg-border hover:bg-blue-500 cursor-row-resize flex items-center justify-center select-none"
+          className={`md:hidden h-12 w-full ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-row-resize flex items-center justify-center select-none touch-none transition-colors`}
           onMouseDown={onMouseDownDivider}
           onTouchStart={onTouchStartDivider}
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize panels"
         >
-          <div className="h-0.5 w-10 bg-muted-foreground/50 rounded-full" />
+          <div className={`h-1 w-14 ${isDragging ? 'bg-white' : 'bg-muted-foreground/50'} rounded-full transition-colors`} />
         </div>
       ) : (
         <div
-          className="hidden md:block w-1 bg-border hover:bg-blue-500 cursor-col-resize"
+          className={`hidden md:flex w-4 ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-col-resize items-center justify-center select-none touch-none transition-colors`}
           onMouseDown={onMouseDownDivider}
           onTouchStart={onTouchStartDivider}
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize panels"
-        />
+        >
+          <div className={`w-0.5 h-10 ${isDragging ? 'bg-white' : 'bg-muted-foreground/50'} rounded-full transition-colors`} />
+        </div>
       )}
 
       {/* Chat pane */}
