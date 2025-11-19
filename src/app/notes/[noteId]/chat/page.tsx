@@ -308,14 +308,20 @@ export default function ChatPage() {
     };
   }, [isMobile]);
 
-  // Detect mobile viewport and update on resize
+  // Detect mobile viewport; set initial split (desktop 60%, mobile 50%); subsequent resizes won't override user-adjusted split
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const MOBILE_BP = 768;
-    const update = () => setIsMobile(window.innerWidth < MOBILE_BP);
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    const isMob = window.innerWidth < MOBILE_BP;
+    setIsMobile(isMob);
+    // Set initial ratio based on device type
+    setSplit(isMob ? 0.5 : 0.6);
+    const onResize = () => {
+      // Only update isMobile state; don't force split after initial mount
+      setIsMobile(window.innerWidth < MOBILE_BP);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   return (
