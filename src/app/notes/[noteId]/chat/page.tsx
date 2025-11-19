@@ -558,7 +558,7 @@ export default function ChatPage() {
       {isMobile ? (
         // Larger touch target for mobile dragging (48px tall)
         <div
-          className={`md:hidden h-7 w-full ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-row-resize flex items-center justify-center select-none touch-none transition-colors`}
+          className={`md:hidden h-5 w-full ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-row-resize flex items-center justify-center select-none touch-none transition-colors`}
           onMouseDown={onMouseDownDivider}
           onTouchStart={onTouchStartDivider}
           role="separator"
