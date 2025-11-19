@@ -308,14 +308,20 @@ export default function ChatPage() {
     };
   }, [isMobile]);
 
-  // Detect mobile viewport and update on resize
+  // Detect mobile viewport; set initial split (desktop 60%, mobile 50%); subsequent resizes won't override user-adjusted split
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const MOBILE_BP = 768;
-    const update = () => setIsMobile(window.innerWidth < MOBILE_BP);
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    const isMob = window.innerWidth < MOBILE_BP;
+    setIsMobile(isMob);
+    // Set initial ratio based on device type
+    setSplit(isMob ? 0.5 : 0.6);
+    const onResize = () => {
+      // Only update isMobile state; don't force split after initial mount
+      setIsMobile(window.innerWidth < MOBILE_BP);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   return (
@@ -558,18 +564,18 @@ export default function ChatPage() {
       {isMobile ? (
         // Larger touch target for mobile dragging (48px tall)
         <div
-          className={`md:hidden h-12 w-full ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-row-resize flex items-center justify-center select-none touch-none transition-colors`}
+          className={`md:hidden h-5 w-full ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-row-resize flex items-center justify-center select-none touch-none transition-colors`}
           onMouseDown={onMouseDownDivider}
           onTouchStart={onTouchStartDivider}
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize panels"
         >
-          <div className={`h-1 w-14 ${isDragging ? 'bg-white' : 'bg-muted-foreground/50'} rounded-full transition-colors`} />
+          <div className={`h-0.5 w-10 ${isDragging ? 'bg-white' : 'bg-muted-foreground/50'} rounded-full transition-colors`} />
         </div>
       ) : (
         <div
-          className={`hidden md:flex w-4 ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-col-resize items-center justify-center select-none touch-none transition-colors`}
+          className={`hidden md:flex w-1 ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-col-resize items-center justify-center select-none touch-none transition-colors`}
           onMouseDown={onMouseDownDivider}
           onTouchStart={onTouchStartDivider}
           role="separator"
