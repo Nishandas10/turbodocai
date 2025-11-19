@@ -251,6 +251,11 @@ export default function ChatPage() {
     e.preventDefault();
   }, []);
 
+  const onTouchStartDivider = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    draggingRef.current = true;
+    e.preventDefault();
+  }, []);
+
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!draggingRef.current) return;
@@ -267,12 +272,36 @@ export default function ChatPage() {
         setSplit(ratio);
       }
     };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!draggingRef.current) return;
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const t = e.touches[0];
+      if (!t) return;
+      if (isMobile) {
+        const y = t.clientY - rect.top;
+        const ratio = Math.max(0.1, Math.min(0.9, y / rect.height));
+        setSplit(ratio);
+      } else {
+        const x = t.clientX - rect.left;
+        const ratio = Math.max(0.1, Math.min(0.9, x / rect.width));
+        setSplit(ratio);
+      }
+      // prevent the page from scrolling while dragging
+      try { e.preventDefault(); } catch {}
+    };
     const onMouseUp = () => { draggingRef.current = false; };
+    const onTouchEnd = () => { draggingRef.current = false; };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd);
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
     };
   }, [isMobile]);
 
@@ -525,8 +554,9 @@ export default function ChatPage() {
       {/* Divider: vertical on desktop, draggable horizontal on mobile */}
       {isMobile ? (
         <div
-          className="md:hidden h-2 w-full bg-border hover:bg-blue-500 cursor-row-resize flex items-center justify-center"
+          className="md:hidden h-3 w-full bg-border hover:bg-blue-500 cursor-row-resize flex items-center justify-center select-none"
           onMouseDown={onMouseDownDivider}
+          onTouchStart={onTouchStartDivider}
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize panels"
@@ -537,6 +567,7 @@ export default function ChatPage() {
         <div
           className="hidden md:block w-1 bg-border hover:bg-blue-500 cursor-col-resize"
           onMouseDown={onMouseDownDivider}
+          onTouchStart={onTouchStartDivider}
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize panels"
