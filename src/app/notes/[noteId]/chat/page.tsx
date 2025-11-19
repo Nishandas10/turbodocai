@@ -565,11 +565,11 @@ export default function ChatPage() {
           aria-orientation="horizontal"
           aria-label="Resize panels"
         >
-          <div className={`h-1 w-14 ${isDragging ? 'bg-white' : 'bg-muted-foreground/50'} rounded-full transition-colors`} />
+          <div className={`h-0.5 w-10 ${isDragging ? 'bg-white' : 'bg-muted-foreground/50'} rounded-full transition-colors`} />
         </div>
       ) : (
         <div
-          className={`hidden md:flex w-4 ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-col-resize items-center justify-center select-none touch-none transition-colors`}
+          className={`hidden md:flex w-1 ${isDragging ? 'bg-blue-500' : 'bg-border'} hover:bg-blue-500 cursor-col-resize items-center justify-center select-none touch-none transition-colors`}
           onMouseDown={onMouseDownDivider}
           onTouchStart={onTouchStartDivider}
           role="separator"
