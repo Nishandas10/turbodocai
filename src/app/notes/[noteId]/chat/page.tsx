@@ -315,7 +315,8 @@ export default function ChatPage() {
     const isMob = window.innerWidth < MOBILE_BP;
     setIsMobile(isMob);
     // Set initial ratio based on device type
-  setSplit(isMob ? 0.5 : 0.7);
+  // Desktop default 65% preview / 35% chat; mobile remains 50/50
+  setSplit(isMob ? 0.5 : 0.65);
     const onResize = () => {
       // Only update isMobile state; don't force split after initial mount
       setIsMobile(window.innerWidth < MOBILE_BP);
