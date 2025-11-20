@@ -33,6 +33,8 @@ export default function YouTubeVideoModal(props: any) {
   }
 
   const handleGenerateNotes = async () => {
+    // Immediate guard to prevent rapid double taps
+    if (isProcessing) return
     if (!youtubeLink.trim() || !user?.uid) return
 
     if (!isValidYouTubeUrl(youtubeLink)) {
@@ -40,14 +42,17 @@ export default function YouTubeVideoModal(props: any) {
       return;
     }
 
+    // Lock UI BEFORE async calls so fast second tap is ignored
+    setIsProcessing(true)
+
     // Plan/usage gate
     const gate = await checkUploadAndChatPermission(user.uid)
     if (!gate.allowed) {
       setShowUpgrade(true)
+      setIsProcessing(false)
       return
     }
 
-    setIsProcessing(true)
     setIsFinished(false)
     try {
       const documentId = await createYouTubeDocument(user.uid, youtubeLink, undefined, spaceId)
@@ -89,6 +94,7 @@ export default function YouTubeVideoModal(props: any) {
     } catch (error) {
       console.error('Error saving YouTube video:', error)
       setProcessingStatus('Failed to save YouTube video. Please try again.')
+      setIsProcessing(false)
     }
   }
 
