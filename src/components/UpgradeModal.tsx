@@ -127,9 +127,15 @@ export default function UpgradeModal(props: any) {
       className="fixed inset-0 z-[9999] flex items-start md:items-center justify-center p-4 md:p-8 overflow-y-auto"
       role="dialog"
       aria-modal="true"
+      onClick={(e) => {
+        // Only close if clicking the backdrop itself, not bubbled events
+        if (e.target === e.currentTarget) {
+          onClose()
+        }
+      }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
 
       {/* Centered modal */}
       <div className="relative w-full max-w-lg md:max-w-3xl max-h-[100vh] md:max-h-[100vh] bg-[#111214] text-gray-100 rounded-xl shadow-2xl border border-gray-800 flex flex-col overflow-y-auto animate-in fade-in zoom-in">
