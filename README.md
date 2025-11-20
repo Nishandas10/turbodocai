@@ -29,6 +29,15 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Free plan usage thresholds
+
+For free tier accounts the upgrade modal is now triggered once you reach either of these limits (whichever comes first):
+
+- 3 documents created (`documentsCreated >= 3`)
+- 3 AI chats started (`aiChatsUsed >= 3`)
+
+After hitting the first threshold the modal will appear to encourage upgrading; further uploads or chat creations are gated. Premium accounts are unaffected.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
