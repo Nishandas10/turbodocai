@@ -1376,6 +1376,27 @@ export const createWebsiteDocument = async (
   const domain = getDomainFromUrl(url);
   const defaultTitle = title || `Website - ${domain}`;
 
+  // Server-side dedupe: prevent duplicate website docs for same URL (and optional space) due to rapid taps.
+  try {
+    const userDocumentsRef = collection(
+      db,
+      COLLECTIONS.DOCUMENTS,
+      userId,
+      "userDocuments"
+    );
+    const existingQ = query(userDocumentsRef, where("metadata.url", "==", url));
+    const existingSnap = await getDocs(existingQ);
+    const existing = existingSnap.docs.find((d) => {
+      const data = d.data() as { type?: string; spaceId?: string };
+      return data.type === "website" && (!spaceId || data.spaceId === spaceId);
+    });
+    if (existing) {
+      return existing.id; // Reuse existing document id
+    }
+  } catch (e) {
+    console.warn("Website dedupe query failed; proceeding", e);
+  }
+
   const document: Omit<Document, "id"> = {
     userId,
     title: defaultTitle,
@@ -1404,7 +1425,13 @@ export const createWebsiteDocument = async (
     userId,
     "userDocuments"
   );
-  const docRef = await addDoc(userDocumentsRef, document);
+  const docRef = await addDoc(userDocumentsRef, {
+    ...document,
+    metadata: {
+      ...document.metadata,
+      domain,
+    },
+  });
 
   // Update user analytics
   await incrementUserAnalytics(userId, {
