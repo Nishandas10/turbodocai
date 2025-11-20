@@ -138,9 +138,10 @@ export default function YouTubeVideoModal(props: any) {
   if (!isOpen) return null
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-  onClick={onClose}
+      // Prevent accidental close while upgrade modal is open (subscription flow)
+      onClick={() => { if (!showUpgrade) onClose() }}
     >
       <div 
         className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"

@@ -1,7 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useCallback } from "react"
-import { createPortal } from 'react-dom'
+import React, { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import dynamic from 'next/dynamic'
@@ -30,6 +29,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
 import UpgradeModal from "@/components/UpgradeModal"
+import FeedbackModal from "@/components/FeedbackModal"
 import { listenToUserDocuments, listenToUserSpaces, updateSpace, deleteSpace, listenToMindMaps, listenToUserChats, getUserProfile } from "@/lib/firestore"
 import type { Document as AppDocument, Space as SpaceType, MindMap, Chat } from "@/lib/types"
 import {
@@ -457,7 +457,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
         <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       )}
       {feedbackOpen && (
-        <FeedbackModal onClose={() => setFeedbackOpen(false)} />
+        <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       )}
       {subscription === 'premium' ? null : (
         <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
@@ -466,33 +466,4 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
   )
 }
 
-// Lightweight feedback modal (portal-less; top-level in sidebar root with high z-index)
-function FeedbackModal({ onClose }: { onClose: () => void }) {
-  const escHandler = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }, [onClose])
-  useEffect(() => {
-    document.body.style.overflow = 'hidden'
-    window.addEventListener('keydown', escHandler)
-    return () => {
-      document.body.style.overflow = ''
-      window.removeEventListener('keydown', escHandler)
-    }
-  }, [escHandler])
-  const modal = (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
-      {/* Backdrop behind the card */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h2 className="text-sm font-medium">Feedback</h2>
-          <button onClick={onClose} className="text-xs px-2 py-1 rounded-md hover:bg-muted">Close</button>
-        </div>
-        <iframe
-          title="Feedback Form"
-          src="https://form.jotform.com/250843541251451"
-          className="flex-1 w-full h-full bg-white"
-        />
-      </div>
-    </div>
-  )
-  return createPortal(modal, document.body)
-}
+

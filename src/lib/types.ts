@@ -77,6 +77,8 @@ export interface Document {
   // AI summary fields
   summary?: string;
   summaryUpdatedAt?: Timestamp;
+  // User rating of the AI-generated summary (1-5). Stored adjacent to summary per request.
+  summaryRating?: number;
 }
 
 // File Upload Types
@@ -153,7 +155,29 @@ export interface UpdateDocumentData {
   status?: Document["status"];
   summary?: string;
   summaryUpdatedAt?: Timestamp;
+  summaryRating?: number;
   spaceId?: string;
+}
+
+// Feedback collection: /feedback/{feedbackId}
+export type FeedbackType =
+  | "website"
+  | "summaries"
+  | "chat"
+  | "podcast"
+  | "flashcard"
+  | "quizzes"
+  | "mindmaps"
+  | "exams";
+
+export interface Feedback {
+  id: string;
+  userId: string;
+  email: string;
+  type: FeedbackType; // which feature the feedback is about
+  rating?: number; // 1-5 optional if user only leaves text
+  message?: string; // optional; user text input / feature request
+  createdAt: Timestamp;
 }
 
 // Mind Map Types

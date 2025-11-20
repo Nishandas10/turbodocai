@@ -35,6 +35,7 @@ import type {
   CreateSpaceTestData,
   Chat,
   OnboardingData,
+  Feedback,
 } from "./types";
 import { db } from "./firebase";
 
@@ -48,6 +49,7 @@ const COLLECTIONS = {
   CHATS: "chats",
   SPACES: "spaces",
   TESTS: "tests",
+  FEEDBACK: "feedback",
 } as const;
 
 // ===== USER OPERATIONS =====
@@ -106,6 +108,31 @@ export const updateUserSubscription = async (
   subscription: "free" | "premium"
 ): Promise<void> => {
   await updateUserProfile(userId, { subscription });
+};
+
+// ===== FEEDBACK OPERATIONS =====
+/**
+ * Create a feedback entry in /feedback/{autoId}
+ */
+export const createFeedback = async (
+  userId: string,
+  email: string,
+  type: Feedback["type"],
+  rating?: number,
+  message?: string
+): Promise<string> => {
+  const ref = collection(db, COLLECTIONS.FEEDBACK);
+  const payload: Omit<Feedback, "id"> = {
+    userId,
+    email,
+    type,
+    // Only include rating if provided
+    ...(typeof rating === "number" ? { rating } : {}),
+    ...(message && message.trim().length ? { message: message.trim() } : {}),
+    createdAt: Timestamp.now(),
+  };
+  const docRef = await addDoc(ref, payload);
+  return docRef.id;
 };
 
 // ===== DOCUMENT OPERATIONS =====

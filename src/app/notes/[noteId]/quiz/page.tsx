@@ -1,11 +1,13 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { CheckCircle, XCircle, RotateCcw, Trophy, Target, Loader2, SlidersHorizontal } from 'lucide-react'
 import { generateQuiz, type QuizQuestion, generateFlashcards, type Flashcard, evaluateLongAnswer } from '@/lib/ragService'
 import { Button } from '@/components/ui/button'
+import SummaryRating from '@/components/SummaryRating'
+import { createFeedback } from '@/lib/firestore'
 
 export default function QuizPage() {
   const params = useParams()
@@ -31,6 +33,8 @@ export default function QuizPage() {
   const [qType, setQType] = useState<'mcq' | 'long'>('mcq')
   const [count, setCount] = useState<number>(10)
   const [prefsOpen, setPrefsOpen] = useState(false)
+  const [quizRating, setQuizRating] = useState<number | undefined>()
+  const [ratingSubmitting, setRatingSubmitting] = useState(false)
 
   useEffect(() => {
     if (!noteId || !user?.uid) return
@@ -147,6 +151,19 @@ export default function QuizPage() {
     setDifficulty(newDifficulty)
     resetQuiz()
   }
+
+  const handleQuizRating = useCallback(async (rating: number) => {
+    if (!user?.uid || !noteId) return;
+    setQuizRating(rating);
+    setRatingSubmitting(true);
+    try {
+      await createFeedback(user.uid, user.email || '', 'quizzes', rating, '');
+    } catch (e) {
+      console.warn('Failed to save quiz rating', e);
+    } finally {
+      setRatingSubmitting(false);
+    }
+  }, [user?.uid, user?.email, noteId]);
 
   // Removed auto-advance for MCQ to require explicit user action
   // Sync view state when navigating MCQ questions
@@ -322,7 +339,7 @@ export default function QuizPage() {
     <div className="h-full flex flex-col bg-background">
       {/* Header */}
       <div className="border-b border-border p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center space-x-3">
             <Target className="h-6 w-6 text-orange-600" />
             <div>
@@ -332,10 +349,19 @@ export default function QuizPage() {
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setPrefsOpen(true)}>
-            <SlidersHorizontal className="h-4 w-4 mr-2" />
-            Preferences
-          </Button>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <SummaryRating
+              value={quizRating}
+              onChange={handleQuizRating}
+              disabled={!user?.uid || !noteId}
+              loading={ratingSubmitting}
+              label="Rate this quiz:"
+            />
+            <Button variant="outline" size="sm" onClick={() => setPrefsOpen(true)}>
+              <SlidersHorizontal className="h-4 w-4 mr-2" />
+              Preferences
+            </Button>
+          </div>
         </div>
       </div>
 

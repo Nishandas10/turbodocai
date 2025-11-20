@@ -138,6 +138,32 @@ service cloud.firestore {
       }
     }
 
+    // Feedback collection: /feedback/{feedbackId}
+    // Allow authenticated users to create a feedback document about their own experience.
+    // Reads could be restricted (owner-only) or opened for analytics; here allow owner read only.
+    match /feedback/{feedbackId} {
+      // Create: authenticated user only; ownership + either a valid rating OR a non-empty message.
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.type is string
+        && request.resource.data.type in ['website', 'summaries', 'chat', 'podcast', 'flashcard', 'quizzes', 'mindmaps', 'exams']
+        && request.resource.data.email is string
+        && (
+            (
+              request.resource.data.rating is int &&
+              request.resource.data.rating >= 1 &&
+              request.resource.data.rating <= 5
+            ) || (
+              request.resource.data.message is string &&
+              request.resource.data.message.size() > 0
+            )
+          );
+      // Read: owner only (could be widened later for admin analytics)
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      // No client updates or deletes (immutable feedback)
+      allow update, delete: if false;
+    }
+
     // Tests nested collections:
     // Path: /tests/{userId}/spaces/{spaceId}/tests/{testId}
     match /tests/{userId}/spaces/{spaceId}/tests/{testId} {
