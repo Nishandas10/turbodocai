@@ -175,8 +175,8 @@ export interface Feedback {
   userId: string;
   email: string;
   type: FeedbackType; // which feature the feedback is about
-  rating: number; // 1-5
-  message: string; // user text input / feature request
+  rating?: number; // 1-5 optional if user only leaves text
+  message?: string; // optional; user text input / feature request
   createdAt: Timestamp;
 }
 

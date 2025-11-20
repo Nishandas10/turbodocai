@@ -118,18 +118,20 @@ export const createFeedback = async (
   userId: string,
   email: string,
   type: Feedback["type"],
-  rating: number,
-  message: string
+  rating?: number,
+  message?: string
 ): Promise<string> => {
   const ref = collection(db, COLLECTIONS.FEEDBACK);
-  const docRef = await addDoc(ref, {
+  const payload: Omit<Feedback, "id"> = {
     userId,
     email,
     type,
-    rating,
-    message,
+    // Only include rating if provided
+    ...(typeof rating === "number" ? { rating } : {}),
+    ...(message && message.trim().length ? { message: message.trim() } : {}),
     createdAt: Timestamp.now(),
-  } as Omit<Feedback, "id">);
+  };
+  const docRef = await addDoc(ref, payload);
   return docRef.id;
 };
 

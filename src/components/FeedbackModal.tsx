@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { createFeedback } from '@/lib/firestore'
 import { useAuth } from '@/contexts/AuthContext'
 import SummaryRating from './SummaryRating'
@@ -14,14 +15,20 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submittedId, setSubmittedId] = useState<string | null>(null)
-  // Allow submitting with just a rating; message optional
-  const canSubmit = !!user?.uid && !!rating && !submitting
+  // Allow submitting if either a rating OR a non-empty message is present
+  const canSubmit = !!user?.uid && !submitting && ((typeof rating === 'number' && rating >= 1) || message.trim().length > 0)
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || !user?.uid) return
     setSubmitting(true)
     try {
-      const id = await createFeedback(user.uid, user.email || '', 'website', rating!, message.trim())
+      const id = await createFeedback(
+        user.uid,
+        user.email || '',
+        'website',
+        typeof rating === 'number' ? rating : undefined,
+        message.trim().length ? message.trim() : undefined
+      )
       setSubmittedId(id)
       // Reset local state
       setMessage('')
@@ -38,8 +45,8 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
 
   if (!open) return null
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+  const modalContent = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg p-6 relative">
         <button
           onClick={onClose}
@@ -90,4 +97,6 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
       </div>
     </div>
   )
+
+  return createPortal(modalContent, document.body)
 }
