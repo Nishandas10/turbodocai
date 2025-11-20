@@ -1280,6 +1280,30 @@ export const createYouTubeDocument = async (
   const videoId = getYouTubeVideoId(url);
   const defaultTitle = videoId ? `YouTube Video - ${videoId}` : "YouTube Video";
 
+  // Client-side dedupe: if user already created a YouTube doc for this exact URL, reuse it.
+  // This mitigates rapid double-taps on mobile before the button disables.
+  try {
+    const userDocumentsRef = collection(
+      db,
+      COLLECTIONS.DOCUMENTS,
+      userId,
+      "userDocuments"
+    );
+    // Query by stored URL (equality). We avoid adding additional where clauses to reduce need for composite indexes.
+    const existingQ = query(userDocumentsRef, where("metadata.url", "==", url));
+    const existingSnap = await getDocs(existingQ);
+    const existing = existingSnap.docs.find((d) => {
+      const data = d.data() as { type?: string; spaceId?: string };
+      return data.type === "youtube" && (!spaceId || data.spaceId === spaceId);
+    });
+    if (existing) {
+      return existing.id; // Skip creating duplicate
+    }
+  } catch (e) {
+    // Fail-open: if query fails we proceed to create the document.
+    console.warn("YouTube dedupe query failed; proceeding", e);
+  }
+
   const document: Omit<Document, "id"> = {
     userId,
     title: title || defaultTitle,
@@ -1308,7 +1332,13 @@ export const createYouTubeDocument = async (
     userId,
     "userDocuments"
   );
-  const docRef = await addDoc(userDocumentsRef, document);
+  const docRef = await addDoc(userDocumentsRef, {
+    ...document,
+    metadata: {
+      ...document.metadata,
+      youtubeVideoId: videoId || null,
+    },
+  });
 
   // Update user analytics
   await incrementUserAnalytics(userId, {
