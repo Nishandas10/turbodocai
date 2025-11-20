@@ -21,7 +21,7 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
     if (!canSubmit || !user?.uid) return
     setSubmitting(true)
     try {
-      const id = await createFeedback(user.uid, user.email || '', rating!, message.trim())
+      const id = await createFeedback(user.uid, user.email || '', 'website', rating!, message.trim())
       setSubmittedId(id)
       // Reset local state
       setMessage('')

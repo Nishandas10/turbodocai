@@ -7,6 +7,8 @@ import { generateFlashcards, Flashcard, checkProcessingStatus } from '@/lib/ragS
 import { db } from '@/lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
+import SummaryRating from '@/components/SummaryRating';
+import { createFeedback } from '@/lib/firestore';
 
 // Tailwind helper color tokens rely on your dark theme.
 // This version provides a study-centric UI similar to the provided screenshot:
@@ -29,6 +31,8 @@ export default function FlashcardsPage() {
   const [error, setError] = useState<string | null>(null);
   const [processingStatus, setProcessingStatus] = useState<string>('pending');
   const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
+  const [flashcardRating, setFlashcardRating] = useState<number | undefined>();
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   // Effective owner resolution for shared docs (anyone with link)
   const ownerId = search?.get('owner') || undefined;
@@ -257,6 +261,18 @@ export default function FlashcardsPage() {
 
   const toggleAnswer = () => setShowAnswer((v) => !v);
 
+  const handleFlashcardRating = useCallback(async (rating: number) => {
+    if (!user?.uid || !noteId) return;
+    setFlashcardRating(rating);
+    setRatingSubmitting(true);
+    try {
+      await createFeedback(user.uid, user.email || '', 'flashcard', rating, '');
+    } catch (e) {
+      console.warn('Failed to save flashcard rating', e);
+    } finally {
+      setRatingSubmitting(false);
+    }
+  }, [user?.uid, user?.email, noteId]);
 
   const resetProgress = () => {
     setCurrentCardIndex(0);
@@ -305,30 +321,39 @@ export default function FlashcardsPage() {
             {flashcards.length === 0 && (processingStatus === 'completed' || processingStatus === 'ready') && !loading && 'No flashcards yet — regenerate?'}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => fetchFlashcards({ force: true })}
-            disabled={loading || !noteId || !user}
-            className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {loading ? 'Generating' : 'Regenerate'}
-          </button>
-          <button
-            onClick={resetProgress}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-muted/40"
-          >
-            <RotateCcw className="h-4 w-4" /> Reset
-          </button>
-          {(processingStatus === 'processing' && !processingProgress) && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <SummaryRating
+            value={flashcardRating}
+            onChange={handleFlashcardRating}
+            disabled={!user?.uid || !noteId}
+            loading={ratingSubmitting}
+            label="Rate flashcards:"
+          />
+          <div className="flex items-center gap-2">
             <button
-              onClick={resetDocumentStatus}
-              className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300 hover:bg-amber-500/20"
-              title="Reset stuck processing status"
+              onClick={() => fetchFlashcards({ force: true })}
+              disabled={loading || !noteId || !user}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
             >
-              🔧 Fix Status
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {loading ? 'Generating' : 'Regenerate'}
             </button>
-          )}
+            <button
+              onClick={resetProgress}
+              className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-muted/40"
+            >
+              <RotateCcw className="h-4 w-4" /> Reset
+            </button>
+            {(processingStatus === 'processing' && !processingProgress) && (
+              <button
+                onClick={resetDocumentStatus}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300 hover:bg-amber-500/20"
+                title="Reset stuck processing status"
+              >
+                🔧 Fix Status
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

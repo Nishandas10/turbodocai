@@ -117,6 +117,7 @@ export const updateUserSubscription = async (
 export const createFeedback = async (
   userId: string,
   email: string,
+  type: Feedback["type"],
   rating: number,
   message: string
 ): Promise<string> => {
@@ -124,6 +125,7 @@ export const createFeedback = async (
   const docRef = await addDoc(ref, {
     userId,
     email,
+    type,
     rating,
     message,
     createdAt: Timestamp.now(),

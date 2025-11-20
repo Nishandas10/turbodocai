@@ -160,10 +160,21 @@ export interface UpdateDocumentData {
 }
 
 // Feedback collection: /feedback/{feedbackId}
+export type FeedbackType =
+  | "website"
+  | "summaries"
+  | "chat"
+  | "podcast"
+  | "flashcard"
+  | "quizzes"
+  | "mindmaps"
+  | "exams";
+
 export interface Feedback {
   id: string;
   userId: string;
   email: string;
+  type: FeedbackType; // which feature the feedback is about
   rating: number; // 1-5
   message: string; // user text input / feature request
   createdAt: Timestamp;

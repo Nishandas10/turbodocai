@@ -145,6 +145,8 @@ service cloud.firestore {
       // Create: authenticated user only; enforce ownership and basic field constraints.
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid
+        && request.resource.data.type is string
+        && request.resource.data.type in ['website', 'summaries', 'chat', 'podcast', 'flashcard', 'quizzes', 'mindmaps', 'exams']
         && request.resource.data.rating is int
         && request.resource.data.rating >= 1
         && request.resource.data.rating <= 5

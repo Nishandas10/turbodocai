@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Send, Loader2, Brain, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,6 +11,8 @@ import UpgradeModal from "@/components/UpgradeModal";
 import { checkUploadAndChatPermission } from "@/lib/planLimits";
 import { collection, onSnapshot, orderBy, query, addDoc, serverTimestamp, doc, setDoc, type Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
+import SummaryRating from "./SummaryRating";
+import { createFeedback } from "@/lib/firestore";
 
 interface FirestoreChatMessage {
   id?: string;
@@ -34,6 +36,21 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [chatRating, setChatRating] = useState<number | undefined>(undefined);
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+
+  const handleChatRating = useCallback(async (rating: number) => {
+    if (!user?.uid || !documentId) return;
+    setChatRating(rating);
+    setRatingSubmitting(true);
+    try {
+      await createFeedback(user.uid, user.email || '', 'chat', rating, '');
+    } catch (e) {
+      console.warn('Failed to save chat rating', e);
+    } finally {
+      setRatingSubmitting(false);
+    }
+  }, [user?.uid, user?.email, documentId]);
 
   // Speech to text (same UX as original component)
   const { supported: speechSupported, listening, interimTranscript, start: startSpeech, stop: stopSpeech, reset: resetSpeech } = useSpeechToText({
@@ -223,13 +240,23 @@ export default function DocumentChat({ documentId, documentTitle, ownerId }: Doc
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="p-4 border-b border-border bg-card">
-        <div className="flex items-center gap-2">
-          <Brain className="h-5 w-5 text-blue-500" />
-          <h3 className="font-semibold text-card-foreground">
-            {documentId ? `Chat with ${documentTitle}` : 'Chat with Your Documents'}
-          </h3>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Brain className="h-5 w-5 text-blue-500" />
+            <h3 className="font-semibold text-card-foreground">
+              {documentId ? `Chat with ${documentTitle}` : 'Chat with Your Documents'}
+            </h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <SummaryRating
+              value={chatRating}
+              onChange={handleChatRating}
+              disabled={!user?.uid || !documentId}
+              loading={ratingSubmitting}
+              label="Rate this chat:"
+            />
+          </div>
         </div>
-        <p className="text-sm text-muted-foreground mt-1">Context-grounded AI answers based on indexed document content.</p>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map(m => (

@@ -5,6 +5,7 @@ export interface SummaryRatingProps {
   onChange: (value: number) => void
   disabled?: boolean
   loading?: boolean
+  label?: string // optional label text
 }
 
 /**
@@ -13,7 +14,7 @@ export interface SummaryRatingProps {
  * - Hover previews selection.
  * - Disabled when summary is not present or user cannot edit (still shows existing value).
  */
-export default function SummaryRating({ value, onChange, disabled, loading }: SummaryRatingProps) {
+export default function SummaryRating({ value, onChange, disabled, loading, label = 'Rate summary:' }: SummaryRatingProps) {
   const [hover, setHover] = useState<number | null>(null)
   const effective = hover !== null ? hover : (value || 0)
 
@@ -22,8 +23,8 @@ export default function SummaryRating({ value, onChange, disabled, loading }: Su
   }, [disabled, hover])
 
   return (
-    <div className="flex items-center gap-1" aria-label="Rate summary" title={disabled ? 'Rating disabled' : 'Rate the summary'}>
-      <span className="text-xs text-muted-foreground select-none">Rate summary:</span>
+    <div className="flex items-center gap-1" aria-label={label} title={disabled ? 'Rating disabled' : label}>
+      <span className="text-xs text-muted-foreground select-none">{label}</span>
       {[1,2,3,4,5].map((n) => {
         const filled = n <= effective
         return (

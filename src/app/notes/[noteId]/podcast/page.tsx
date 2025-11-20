@@ -1,10 +1,12 @@
 "use client"
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Headphones, Loader2, Download } from 'lucide-react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { generatePodcast as generatePodcastApi } from '@/lib/ragService'
+import SummaryRating from '@/components/SummaryRating'
+import { createFeedback } from '@/lib/firestore'
 
 export default function PodcastPage() {
   const params = useParams()
@@ -24,6 +26,21 @@ export default function PodcastPage() {
   const [error, setError] = useState<string | null>(null)
   const [isMuted, setIsMuted] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const [podcastRating, setPodcastRating] = useState<number | undefined>(undefined)
+  const [ratingSubmitting, setRatingSubmitting] = useState(false)
+
+  const handlePodcastRating = useCallback(async (rating: number) => {
+    if (!user?.uid || !noteId) return
+    setPodcastRating(rating)
+    setRatingSubmitting(true)
+    try {
+      await createFeedback(user.uid, user.email || '', 'podcast', rating, '')
+    } catch (e) {
+      console.warn('Failed to save podcast rating', e)
+    } finally {
+      setRatingSubmitting(false)
+    }
+  }, [user?.uid, user?.email, noteId])
 
   // Resolve and persist effective owner for shared links
   useEffect(() => {
@@ -138,16 +155,25 @@ export default function PodcastPage() {
                 <p className="text-xs text-muted-foreground">AI-generated audio summaries of your notes</p>
               </div>
             </div>
-            {audioUrl && (
-              <a
-                href={audioUrl}
-                download
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </a>
-            )}
+            <div className="flex items-center gap-3">
+              <SummaryRating
+                value={podcastRating}
+                onChange={handlePodcastRating}
+                disabled={!user?.uid || !noteId}
+                loading={ratingSubmitting}
+                label="Rate this podcast:"
+              />
+              {audioUrl && (
+                <a
+                  href={audioUrl}
+                  download
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>
