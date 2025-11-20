@@ -96,7 +96,7 @@ export default function Home() {
           <div className="container mx-auto px-4 relative z-10">
             <div className="text-center max-w-4xl mx-auto">
         <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white mb-6">
-          Upload your contents📚. Let AI Work for You✨. <span className="text-blue-600">10x your Learning</span>
+          Upload any content📚. Let AI Work for You✨. <span className="text-blue-600">10x your Productivity</span>
         </h1>
          <p className="text-base md:text-xl text-gray-300 mb-10 max-w-3xl mx-auto">
           AI that understands your PDFs, YouTube videos, websites, live recordings, and images—and writes notes, exams, mindmaps, 
@@ -118,7 +118,7 @@ export default function Home() {
                       <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
                     </span>
                     <span className="text-gray-300">
-                      <span className="font-semibold text-white">17,857+</span> users getting ahead of the competition
+                      <span className="font-semibold text-white">17,857+</span> users getting ahead with BlumeNote AI
                     </span>
                   </div>
                 </div>
@@ -131,7 +131,7 @@ export default function Home() {
   <section className="py-8 relative">
           <div className="container mx-auto px-4 text-center mb-12">
             <h2 className="text-lg md:text-xl font-medium text-white mb-4">
-              BlumeNote AI is trusted by students and professionals at
+              BlumeNote AI is trusted by students, professionals and MSMEs
             </h2>
           </div>
 
