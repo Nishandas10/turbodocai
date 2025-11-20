@@ -298,8 +298,21 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden">
+    <div 
+      className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center"
+      onClick={(e) => {
+        // Don't close if upgrade modal is showing
+        if (showUpgrade) return
+        // Only close if clicking the backdrop itself
+        if (e.target === e.currentTarget) {
+          handleClose()
+        }
+      }}
+    >
+      <div 
+        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Modal Header */}
         <div className="p-4 border-b border-border flex items-center justify-between">
           <h2 className="text-xl font-semibold text-card-foreground">Camera</h2>

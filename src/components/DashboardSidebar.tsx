@@ -25,6 +25,7 @@ import {
   Image as ImageIcon,
   MoreHorizontal,
   GitBranch,
+  Menu,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useTheme } from "@/contexts/ThemeContext"
@@ -178,21 +179,34 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
   }
 
   return (
-    <aside className={`bg-sidebar border-r border-sidebar-border ${collapsed ? "w-16" : "w-64"} h-screen flex flex-col transition-all duration-300 sticky top-0`}>
-      {/* Header */}
-      <div className="px-3 pt-4 pb-2 flex items-center justify-between">
-        {!collapsed && (
-          <div className="text-sidebar-foreground font-semibold text-xl leading-none">BlumeNote AI</div>
-        )}
+    <div className={`relative ${collapsed ? 'w-0' : 'w-64'} transition-[width] duration-300 flex-shrink-0`}>
+      {collapsed && (
         <button
           onClick={handleToggle}
-          className="p-2 rounded-md hover:bg-sidebar-accent text-sidebar-accent-foreground focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sidebar-accent"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="fixed top-4 left-4 z-[1200] p-2 rounded-md bg-sidebar-accent text-sidebar-accent-foreground shadow focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sidebar-accent"
+          aria-label="Open sidebar"
+          title="Open sidebar"
         >
-          <ChevronLeft className={`h-4 w-4 transition-transform ${collapsed ? "rotate-180" : ""}`} />
+          <Menu className="h-5 w-5" />
         </button>
-      </div>
+      )}
+      <aside className={`bg-sidebar border-r border-sidebar-border w-64 h-screen flex flex-col transition-transform duration-300 sticky top-0 ${collapsed ? '-translate-x-full' : 'translate-x-0'} z-[1100]`}>
+        {/* Header (hidden when collapsed via translate) */}
+        <div className="px-3 pt-4 pb-2 flex items-center justify-between">
+          {!collapsed && (
+            <div className="text-sidebar-foreground font-semibold text-xl leading-none">BlumeNote AI</div>
+          )}
+          {!collapsed && (
+            <button
+              onClick={handleToggle}
+              className="p-2 rounded-md hover:bg-sidebar-accent text-sidebar-accent-foreground focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sidebar-accent"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          )}
+        </div>
 
       <div className="flex-1 overflow-y-auto px-2" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
         {/* Primary actions */}
@@ -462,7 +476,8 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
       {subscription === 'premium' ? null : (
         <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       )}
-    </aside>
+      </aside>
+    </div>
   )
 }
 

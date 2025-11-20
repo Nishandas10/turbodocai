@@ -691,7 +691,7 @@ export default function Dashboard() {
         {/* Main Content */}
         <div className="flex-1 p-8 overflow-y-auto">
           {/* Header */}
-          <div className="mb-8 flex items-center justify-between">
+          <div className="mb-8 mt-10 flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-foreground mb-2">Welcome {username}</h1>
               <p className="text-muted-foreground">Create new notes</p>

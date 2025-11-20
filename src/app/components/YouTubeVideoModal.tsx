@@ -140,8 +140,15 @@ export default function YouTubeVideoModal(props: any) {
   return (
     <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-      // Prevent accidental close while upgrade modal is open (subscription flow)
-      onClick={() => { if (!showUpgrade) onClose() }}
+      // Only close on direct backdrop click, not when child elements clicked
+      onClick={(e) => {
+        // Don't close if upgrade modal is showing
+        if (showUpgrade) return
+        // Only close if clicking the backdrop itself
+        if (e.target === e.currentTarget) {
+          onClose()
+        }
+      }}
     >
       <div 
         className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
