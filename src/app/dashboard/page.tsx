@@ -805,7 +805,7 @@ export default function Dashboard() {
               <div className="flex items-center gap-3 px-4 pt-3">
                 <textarea
                   className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2 resize-none min-h-10 max-h-40"
-                  placeholder={`Greetings ${username}`}
+                  placeholder={`Hi ${username}! Ask me anything...`}
                   value={effectivePromptValue}
                   onChange={(e) => {
                     const v = e.target.value

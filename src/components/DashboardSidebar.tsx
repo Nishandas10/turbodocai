@@ -190,7 +190,7 @@ export default function DashboardSidebar({ onSearchClick, onAddContentClick, onC
           <Menu className="h-5 w-5" />
         </button>
       )}
-      <aside className={`bg-sidebar border-r border-sidebar-border w-64 h-screen flex flex-col transition-transform duration-300 sticky top-0 ${collapsed ? '-translate-x-full' : 'translate-x-0'} z-[1100]`}>
+  <aside className={`bg-sidebar border-r border-sidebar-border w-64 h-screen flex flex-col transition-transform duration-300 sticky top-0 ${collapsed ? '-translate-x-full' : 'translate-x-0'} z-[40]`}>
         {/* Header (hidden when collapsed via translate) */}
         <div className="px-3 pt-4 pb-2 flex items-center justify-between">
           {!collapsed && (
