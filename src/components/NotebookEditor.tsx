@@ -15,6 +15,7 @@ import { $createListNode, $createListItemNode } from '@lexical/list'
 import { TOGGLE_LINK_COMMAND, $createLinkNode } from '@lexical/link'
 import { getDocument as getFirestoreDocument, updateDocument as updateFirestoreDocument } from '@/lib/firestore'
 import { generateDocumentSummaryWithRetry } from '@/lib/ragService'
+import SummaryRating from './SummaryRating'
 
 declare global {
   interface Window {
@@ -507,6 +508,7 @@ export default function NotebookEditor(props: NotebookEditorProps) {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [loadedLexicalState, setLoadedLexicalState] = useState<unknown>(null)
   const [summary, setSummary] = useState('')
+  const [summaryRating, setSummaryRating] = useState<number | undefined>(undefined)
   const [docType, setDocType] = useState<string>('text')
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -540,10 +542,14 @@ export default function NotebookEditor(props: NotebookEditorProps) {
       }
       setCanEdit(!!editable)
       setTitle(doc.title || 'Untitled Document')
-      // Load existing summary if present
-    if (doc.summary) {
+      // Load existing summary & rating if present
+      if (doc.summary) {
         setSummary(doc.summary)
       } else if ((doc.processingStatus === 'completed' || doc.status === 'ready') && user?.uid) {
+      // Existing rating (1-5)
+      if (typeof (doc as any).summaryRating === 'number') {
+        setSummaryRating((doc as any).summaryRating)
+      }
         // Skip auto summary generation for brand-new blank documents
         const fileSize = (doc.metadata?.fileSize ?? 0)
         const rawEmpty = !doc.content?.raw || doc.content.raw.trim().length === 0
@@ -675,6 +681,17 @@ export default function NotebookEditor(props: NotebookEditorProps) {
   const handleTitleChange = useCallback((t: string) => { setTitle(t); debouncedSave(t, content) }, [debouncedSave, content])
   const handleContentChange = useCallback((c: string, lexicalState?: unknown) => { setContent(c); debouncedSave(title, c, lexicalState) }, [debouncedSave, title])
 
+  // Handle rating update
+  const handleSummaryRatingChange = useCallback(async (rating: number) => {
+    if (!noteId || !ownerId) return
+    setSummaryRating(rating)
+    try {
+      await updateFirestoreDocument(noteId, ownerId, { summaryRating: rating })
+    } catch (e) {
+      console.warn('Failed to save summary rating', e)
+    }
+  }, [noteId, ownerId])
+
   useEffect(() => () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }, [])
 
   // Removed manual regenerate summary action
@@ -698,21 +715,31 @@ export default function NotebookEditor(props: NotebookEditorProps) {
     <div className="h-full bg-background flex overflow-hidden flex-col">
       {/* Header with inline title, share & actions */}
       <div className="border-b border-border p-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          {/* Left: Inline title edit + auto-save */}
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-foreground">✏️</span>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => handleTitleChange(e.target.value)}
-              className="text-foreground bg-transparent border border-transparent focus:border-border rounded px-2 py-1 text-lg font-medium outline-none min-w-[12rem]"
-              placeholder="Untitled Document"
-              disabled={!canEdit}
-            />
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          {/* Left cluster: Title + Summary Rating */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
+            <div className="flex items-center gap-2 min-w-0 w-full">
+              <span className="text-foreground">✏️</span>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => handleTitleChange(e.target.value)}
+                className="text-foreground bg-transparent border border-transparent focus:border-border rounded px-2 py-1 text-lg font-medium outline-none min-w-[12rem]"
+                placeholder="Untitled Document"
+                disabled={!canEdit}
+              />
+            </div>
+            <div className="w-full sm:w-auto mt-1 sm:mt-0">
+              <SummaryRating
+                value={summaryRating}
+                onChange={handleSummaryRatingChange}
+                disabled={!user?.uid || !summary}
+                loading={isSaving}
+              />
+            </div>
           </div>
 
-          {/* Right: actions aligned to right edge */}
+          {/* Right cluster: actions */}
           <div className="flex items-center gap-2 ml-auto">
             {/* Export button with options */}
             <ExportButton

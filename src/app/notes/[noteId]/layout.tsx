@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import UpgradeModal from '@/components/UpgradeModal'
+import FeedbackModal from '@/components/FeedbackModal'
 import { getUserProfile } from '@/lib/firestore'
 import { Crown } from 'lucide-react'
 
@@ -38,6 +39,7 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
   const { theme, setTheme } = useTheme()
   const [showUpgrade, setShowUpgrade] = useState(false)
   const [subscription, setSubscription] = useState<'free'|'premium'|'unknown'>('unknown')
+  const [showFeedback, setShowFeedback] = useState(false)
 
   const noteId = params?.noteId as string
   const ownerId = search?.get('owner') || undefined
@@ -226,6 +228,14 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
                 {!sidebarCollapsed && "Upgrade to BlumeNote Pro"}
               </Button>
             )}
+            {/* Feedback Button */}
+            <Button
+              onClick={() => setShowFeedback(true)}
+              className="w-full bg-black hover:bg-black/80 text-white mb-8"
+            >
+              {!sidebarCollapsed && 'Share Feedback'}
+              {sidebarCollapsed && 'FB'}
+            </Button>
           </div>
 
           {/* User footer / Auth */}
@@ -327,6 +337,7 @@ export default function NoteLayout({ children }: { children: React.ReactNode }) 
         {subscription === 'premium' ? null : (
           <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
         )}
+        <FeedbackModal open={showFeedback} onClose={() => setShowFeedback(false)} />
       </div>
     </ProtectedRoute>
   )
