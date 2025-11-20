@@ -51,6 +51,8 @@ export default function WebsiteLinkModal(props: any) {
   }
 
   const handleGenerateNotes = async () => {
+    // Early guard to prevent rapid double taps on mobile
+    if (isProcessing) return
     if (!websiteLink.trim() || !user?.uid) return
 
     if (!isValidUrl(websiteLink)) {
@@ -58,14 +60,16 @@ export default function WebsiteLinkModal(props: any) {
       return;
     }
 
+    // Lock UI before async calls
+    setIsProcessing(true)
+
     // Plan/usage gate
     const gate = await checkUploadAndChatPermission(user.uid)
     if (!gate.allowed) {
       setShowUpgrade(true)
+      setIsProcessing(false)
       return
     }
-
-    setIsProcessing(true)
     try {
       const normalizedUrl = normalizeUrl(websiteLink)
       const documentId = await createWebsiteDocument(user.uid, normalizedUrl, undefined, spaceId)
@@ -125,8 +129,9 @@ export default function WebsiteLinkModal(props: any) {
     } catch (error) {
       console.error('Error saving website:', error)
       setProcessingStatus('Failed to save website. Please try again.')
+      setIsProcessing(false)
     } finally {
-      // isProcessing is stopped after wait/generation completes above
+      // isProcessing is stopped after wait/generation completes above (or in catch)
     }
   }
 
