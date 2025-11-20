@@ -13,7 +13,7 @@ import { FORMAT_TEXT_COMMAND, TextFormatType, $getSelection, $isRangeSelection, 
 import { $createHeadingNode } from '@lexical/rich-text'
 import { $createListNode, $createListItemNode } from '@lexical/list'
 import { TOGGLE_LINK_COMMAND, $createLinkNode } from '@lexical/link'
-import { getDocument as getFirestoreDocument, updateDocument as updateFirestoreDocument } from '@/lib/firestore'
+import { getDocument as getFirestoreDocument, updateDocument as updateFirestoreDocument, createFeedback } from '@/lib/firestore'
 import { generateDocumentSummaryWithRetry } from '@/lib/ragService'
 import SummaryRating from './SummaryRating'
 
@@ -683,14 +683,14 @@ export default function NotebookEditor(props: NotebookEditorProps) {
 
   // Handle rating update
   const handleSummaryRatingChange = useCallback(async (rating: number) => {
-    if (!noteId || !ownerId) return
+    if (!noteId || !user?.uid) return
     setSummaryRating(rating)
     try {
-      await updateFirestoreDocument(noteId, ownerId, { summaryRating: rating })
+      await createFeedback(user.uid, user.email || '', 'summaries', rating, '')
     } catch (e) {
       console.warn('Failed to save summary rating', e)
     }
-  }, [noteId, ownerId])
+  }, [noteId, user?.uid, user?.email])
 
   useEffect(() => () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }, [])
 
@@ -716,31 +716,29 @@ export default function NotebookEditor(props: NotebookEditorProps) {
       {/* Header with inline title, share & actions */}
       <div className="border-b border-border p-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          {/* Left cluster: Title + Summary Rating */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
-            <div className="flex items-center gap-2 min-w-0 w-full">
-              <span className="text-foreground">✏️</span>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => handleTitleChange(e.target.value)}
-                className="text-foreground bg-transparent border border-transparent focus:border-border rounded px-2 py-1 text-lg font-medium outline-none min-w-[12rem]"
-                placeholder="Untitled Document"
-                disabled={!canEdit}
-              />
-            </div>
-            <div className="w-full sm:w-auto mt-1 sm:mt-0">
-              <SummaryRating
-                value={summaryRating}
-                onChange={handleSummaryRatingChange}
-                disabled={!user?.uid || !summary}
-                loading={isSaving}
-              />
-            </div>
+          {/* Left cluster: Title only (rating moved to right actions) */}
+          <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto">
+            <span className="text-foreground">✏️</span>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => handleTitleChange(e.target.value)}
+              className="text-foreground bg-transparent border border-transparent focus:border-border rounded px-2 py-1 text-lg font-medium outline-none min-w-[12rem]"
+              placeholder="Untitled Document"
+              disabled={!canEdit}
+            />
           </div>
 
-          {/* Right cluster: actions */}
-          <div className="flex items-center gap-2 ml-auto">
+          {/* Right cluster: rating + actions */}
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            {/* Summary rating now positioned before export/share */}
+            <SummaryRating
+              value={summaryRating}
+              onChange={handleSummaryRatingChange}
+              disabled={!user?.uid || !summary}
+              loading={isSaving}
+              label="Rate summary:"
+            />
             {/* Export button with options */}
             <ExportButton
               onExportDoc={() => {

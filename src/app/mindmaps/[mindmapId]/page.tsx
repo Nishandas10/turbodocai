@@ -1,11 +1,13 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { listenToMindMap } from "@/lib/firestore";
 import type { MindMap } from "@/lib/types";
 import MindMapGraph from "@/components/MindMapGraph";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
+import SummaryRating from "@/components/SummaryRating";
+import { createFeedback } from "@/lib/firestore";
 
 export default function MindMapDetailPage() {
   const params = useParams();
@@ -15,6 +17,21 @@ export default function MindMapDetailPage() {
   const [mindmap, setMindmap] = useState<MindMap | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mindmapRating, setMindmapRating] = useState<number | undefined>(undefined);
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+
+  const handleMindmapRating = useCallback(async (rating: number) => {
+    if (!user?.uid || !mindmapId) return;
+    setMindmapRating(rating);
+    setRatingSubmitting(true);
+    try {
+      await createFeedback(user.uid, user.email || '', 'mindmaps', rating, '');
+    } catch (e) {
+      console.warn('Failed to save mindmap rating', e);
+    } finally {
+      setRatingSubmitting(false);
+    }
+  }, [user?.uid, user?.email, mindmapId]);
 
   useEffect(() => {
     if (!mindmapId || authLoading) return;
@@ -46,13 +63,22 @@ export default function MindMapDetailPage() {
 
   return (
     <div className="flex flex-col h-screen p-4 gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{mindmap?.title || (error ? 'Mind Map' : 'Loading...')}</h1>
           <p className="text-xs text-muted-foreground">{error ? error : `Status: ${mindmap?.status || 'loading'}`}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => router.push("/mindmaps")}>Back</Button>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <SummaryRating
+            value={mindmapRating}
+            onChange={handleMindmapRating}
+            disabled={!user?.uid || !mindmapId}
+            loading={ratingSubmitting}
+            label="Rate this mindmap:"
+          />
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => router.push("/mindmaps")}>Back</Button>
+          </div>
         </div>
       </div>
       <div className="flex-1 min-h-0">

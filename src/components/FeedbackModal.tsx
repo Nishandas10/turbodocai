@@ -61,6 +61,7 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
               onChange={(v) => setRating(v)}
               disabled={!user?.uid}
               loading={submitting}
+              label="Rate Blumenote:"
             />
           </div>
           <div>
