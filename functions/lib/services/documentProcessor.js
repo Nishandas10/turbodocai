@@ -27,6 +27,68 @@ class DocumentProcessor {
         }
     }
     /**
+     * Extract text and metadata from PDF using pdf-parse
+     * Returns both the extracted text and page count for scanned PDF detection
+     */
+    async extractTextFromPDFWithMetadata(buffer) {
+        try {
+            const data = await (0, pdf_parse_1.default)(buffer);
+            firebase_functions_1.logger.info(`Extracted text from PDF: ${data.numpages} pages, ${data.text.length} characters`);
+            // Clean up the text
+            const cleanedText = this.cleanExtractedText(data.text);
+            return {
+                text: cleanedText,
+                pageCount: data.numpages,
+            };
+        }
+        catch (error) {
+            firebase_functions_1.logger.error("Error extracting text from PDF:", error);
+            throw new Error("Failed to extract text from PDF");
+        }
+    }
+    /**
+     * Check if a PDF is likely scanned/handwritten by analyzing the text extraction quality
+     * @param extractedText - Text extracted via pdf-parse
+     * @param pageCount - Number of pages in the PDF
+     * @returns true if the PDF appears to be scanned/handwritten
+     */
+    isScannedOrHandwritten(extractedText, pageCount) {
+        // If extracted text is too short relative to page count, likely scanned
+        const avgCharsPerPage = extractedText.length / pageCount;
+        // Typical text-based PDFs have at least 500-1000 chars per page
+        // Scanned PDFs will have very little to no text
+        const MIN_CHARS_PER_PAGE = 100;
+        if (avgCharsPerPage < MIN_CHARS_PER_PAGE) {
+            firebase_functions_1.logger.info(`PDF appears to be scanned: ${avgCharsPerPage.toFixed(0)} chars/page (threshold: ${MIN_CHARS_PER_PAGE})`);
+            return true;
+        }
+        // Check for common OCR artifacts or gibberish
+        const hasLowTextQuality = this.checkTextQuality(extractedText);
+        if (hasLowTextQuality) {
+            firebase_functions_1.logger.info("PDF has low text quality, likely scanned");
+            return true;
+        }
+        firebase_functions_1.logger.info(`PDF appears to be text-based: ${avgCharsPerPage.toFixed(0)} chars/page`);
+        return false;
+    }
+    /**
+     * Check if extracted text appears to be low quality or gibberish
+     */
+    checkTextQuality(text) {
+        var _a;
+        if (!text || text.trim().length < 50)
+            return true;
+        // Calculate ratio of alphanumeric characters to total characters
+        const alphanumeric = ((_a = text.match(/[a-zA-Z0-9]/g)) === null || _a === void 0 ? void 0 : _a.length) || 0;
+        const total = text.length;
+        const alphanumericRatio = alphanumeric / total;
+        // If less than 50% alphanumeric, likely low quality
+        if (alphanumericRatio < 0.5) {
+            return true;
+        }
+        return false;
+    }
+    /**
      * Extract text from DOCX buffer using mammoth
      */
     async extractTextFromDOCX(buffer) {

@@ -253,11 +253,13 @@ async function transcribeAudioBuffer(buffer, fileName, mimeType, onProgress) {
 }
 // Initialize services (they will be created when functions are called)
 const createServices = () => {
+    const apiKey = process.env.OPENAI_API_KEY || "";
     return {
         documentProcessor: new services_1.DocumentProcessor(),
         embeddingService: new services_1.EmbeddingService(),
         queryService: new services_1.QueryService(),
         translationService: new services_1.TranslationService(),
+        ocrService: new services_1.OCRService(apiKey),
     };
 };
 // ===== Topic classification config & helpers =====
@@ -747,8 +749,51 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
             const fileBuffer = await downloadFileFromStorage(documentData.metadata.storagePath);
             if (docType === "pdf") {
                 firebase_functions_1.logger.info("Extracting text from PDF...");
-                extractedText =
-                    await createServices().documentProcessor.extractTextFromPDF(fileBuffer);
+                // First, try regular PDF text extraction
+                const pdfResult = await createServices().documentProcessor.extractTextFromPDFWithMetadata(fileBuffer);
+                // Check if the PDF is scanned/handwritten
+                const isScanned = createServices().documentProcessor.isScannedOrHandwritten(pdfResult.text, pdfResult.pageCount);
+                if (isScanned) {
+                    firebase_functions_1.logger.info("PDF detected as scanned/handwritten. Using OCR pipeline...");
+                    // Update progress to indicate OCR processing
+                    await db
+                        .collection("documents")
+                        .doc(userId)
+                        .collection("userDocuments")
+                        .doc(documentId)
+                        .set({
+                        processingStatus: "processing",
+                        processingProgress: 25,
+                        processingMessage: "Performing OCR on scanned document...",
+                    }, { merge: true });
+                    // Use OCR service to extract text from scanned PDF
+                    extractedText =
+                        await createServices().ocrService.extractTextFromScannedPDFChunked(fileBuffer, async (progress) => {
+                            // Map OCR progress (0-100) to overall document processing progress (25-60)
+                            const mapped = 25 + Math.round((progress / 100) * 35);
+                            try {
+                                await db
+                                    .collection("documents")
+                                    .doc(userId)
+                                    .collection("userDocuments")
+                                    .doc(documentId)
+                                    .set({
+                                    processingProgress: mapped,
+                                    processingMessage: `OCR processing: ${progress}% complete`,
+                                }, { merge: true });
+                            }
+                            catch (e) {
+                                firebase_functions_1.logger.warn("Failed to update OCR progress", e);
+                            }
+                        }, 5 // Process 5 pages at a time
+                        );
+                    firebase_functions_1.logger.info(`OCR extraction completed: ${extractedText.length} characters`);
+                }
+                else {
+                    // Use regular text extraction for text-based PDFs
+                    extractedText = pdfResult.text;
+                    firebase_functions_1.logger.info(`Regular PDF text extraction: ${extractedText.length} characters`);
+                }
             }
             else if (docType === "docx") {
                 firebase_functions_1.logger.info("Extracting text from DOCX via Mammoth...");

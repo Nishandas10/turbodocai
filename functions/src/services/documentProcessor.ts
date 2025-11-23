@@ -27,6 +27,88 @@ export class DocumentProcessor {
   }
 
   /**
+   * Extract text and metadata from PDF using pdf-parse
+   * Returns both the extracted text and page count for scanned PDF detection
+   */
+  async extractTextFromPDFWithMetadata(
+    buffer: Buffer
+  ): Promise<{ text: string; pageCount: number }> {
+    try {
+      const data = await pdf(buffer);
+
+      logger.info(
+        `Extracted text from PDF: ${data.numpages} pages, ${data.text.length} characters`
+      );
+
+      // Clean up the text
+      const cleanedText = this.cleanExtractedText(data.text);
+
+      return {
+        text: cleanedText,
+        pageCount: data.numpages,
+      };
+    } catch (error) {
+      logger.error("Error extracting text from PDF:", error);
+      throw new Error("Failed to extract text from PDF");
+    }
+  }
+
+  /**
+   * Check if a PDF is likely scanned/handwritten by analyzing the text extraction quality
+   * @param extractedText - Text extracted via pdf-parse
+   * @param pageCount - Number of pages in the PDF
+   * @returns true if the PDF appears to be scanned/handwritten
+   */
+  isScannedOrHandwritten(extractedText: string, pageCount: number): boolean {
+    // If extracted text is too short relative to page count, likely scanned
+    const avgCharsPerPage = extractedText.length / pageCount;
+
+    // Typical text-based PDFs have at least 500-1000 chars per page
+    // Scanned PDFs will have very little to no text
+    const MIN_CHARS_PER_PAGE = 100;
+
+    if (avgCharsPerPage < MIN_CHARS_PER_PAGE) {
+      logger.info(
+        `PDF appears to be scanned: ${avgCharsPerPage.toFixed(
+          0
+        )} chars/page (threshold: ${MIN_CHARS_PER_PAGE})`
+      );
+      return true;
+    }
+
+    // Check for common OCR artifacts or gibberish
+    const hasLowTextQuality = this.checkTextQuality(extractedText);
+    if (hasLowTextQuality) {
+      logger.info("PDF has low text quality, likely scanned");
+      return true;
+    }
+
+    logger.info(
+      `PDF appears to be text-based: ${avgCharsPerPage.toFixed(0)} chars/page`
+    );
+    return false;
+  }
+
+  /**
+   * Check if extracted text appears to be low quality or gibberish
+   */
+  private checkTextQuality(text: string): boolean {
+    if (!text || text.trim().length < 50) return true;
+
+    // Calculate ratio of alphanumeric characters to total characters
+    const alphanumeric = text.match(/[a-zA-Z0-9]/g)?.length || 0;
+    const total = text.length;
+    const alphanumericRatio = alphanumeric / total;
+
+    // If less than 50% alphanumeric, likely low quality
+    if (alphanumericRatio < 0.5) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Extract text from DOCX buffer using mammoth
    */
   async extractTextFromDOCX(buffer: Buffer): Promise<string> {
