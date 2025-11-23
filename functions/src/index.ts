@@ -864,7 +864,7 @@ export const processDocument = onDocumentWritten(
 
             // Use OCR service to extract text from scanned PDF
             extractedText =
-              await createServices().ocrService.extractTextFromScannedPDFChunked(
+              await createServices().ocrService.extractTextFromScannedPDF(
                 fileBuffer,
                 async (progress) => {
                   // Map OCR progress (0-100) to overall document processing progress (25-60)
@@ -885,8 +885,7 @@ export const processDocument = onDocumentWritten(
                   } catch (e) {
                     logger.warn("Failed to update OCR progress", e);
                   }
-                },
-                5 // Process 5 pages at a time
+                }
               );
 
             logger.info(

@@ -768,7 +768,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                     }, { merge: true });
                     // Use OCR service to extract text from scanned PDF
                     extractedText =
-                        await createServices().ocrService.extractTextFromScannedPDFChunked(fileBuffer, async (progress) => {
+                        await createServices().ocrService.extractTextFromScannedPDF(fileBuffer, async (progress) => {
                             // Map OCR progress (0-100) to overall document processing progress (25-60)
                             const mapped = 25 + Math.round((progress / 100) * 35);
                             try {
@@ -785,8 +785,7 @@ exports.processDocument = (0, firestore_1.onDocumentWritten)("documents/{userId}
                             catch (e) {
                                 firebase_functions_1.logger.warn("Failed to update OCR progress", e);
                             }
-                        }, 5 // Process 5 pages at a time
-                        );
+                        });
                     firebase_functions_1.logger.info(`OCR extraction completed: ${extractedText.length} characters`);
                 }
                 else {

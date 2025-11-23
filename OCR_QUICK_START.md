@@ -33,7 +33,7 @@ Upload → Extract Text → Process → Done (fast)
 **Scanned/Handwritten PDF:**
 
 ```
-Upload → Try Extract → Detect Low Quality → OCR Each Page → Merge → Process → Done (slower)
+Upload → Try Extract → Detect Low Quality → OCR All Pages (Parallel) → Merge → Process → Done (fast)
 ```
 
 ## Detection Threshold
@@ -54,8 +54,11 @@ Look for these in Firebase Functions logs:
 ⚠️ "PDF appears to be scanned: 25 chars/page (threshold: 100)"
    → Switching to OCR
 
-🔄 "Processing page 5/10"
+🔄 "Processing all 10 pages in parallel..."
    → OCR in progress
+
+✅ "All pages processed successfully"
+   → All pages rendered and sent to API
 
 ✅ "OCR extraction completed: 5432 total characters from 10 pages"
    → OCR finished successfully
@@ -63,36 +66,38 @@ Look for these in Firebase Functions logs:
 
 ## Troubleshooting
 
-| Issue              | Likely Cause          | Solution                                      |
-| ------------------ | --------------------- | --------------------------------------------- |
-| OCR not triggering | PDF has embedded text | Lower threshold in `isScannedOrHandwritten()` |
-| Timeout errors     | Too many pages        | Reduce batch size or increase timeout         |
-| Memory errors      | Large PDFs            | Process fewer pages per batch                 |
-| Poor OCR quality   | Low image resolution  | Increase scale factor in `getViewport()`      |
-| High API costs     | Too many OCR requests | Implement usage limits                        |
+| Issue              | Likely Cause           | Solution                                      |
+| ------------------ | ---------------------- | --------------------------------------------- |
+| OCR not triggering | PDF has embedded text  | Lower threshold in `isScannedOrHandwritten()` |
+| Timeout errors     | Too many pages         | Increase timeout or reduce max pages          |
+| Memory errors      | Large PDFs/many pages  | Process smaller PDFs or increase memory       |
+| Poor OCR quality   | Low image resolution   | Increase scale factor in `getViewport()`      |
+| High API costs     | Too many OCR requests  | Implement usage limits or page limits         |
+| Rate limit errors  | Too many parallel APIs | Add retry logic or reduce parallelism         |
 
 ## Configuration Options
 
 In `functions/src/services/ocrService.ts`:
 
 ```typescript
-// Image quality (line 110, 334)
+// Image quality (rendering scale)
 const viewport = page.getViewport({ scale: 2.0 }); // 1.0 to 3.0
 
-// Batch size (in index.ts, line ~855)
-extractTextFromScannedPDFChunked(fileBuffer, progressCallback, 5); // 1-10
-
-// Detection threshold (in documentProcessor.ts, line 74)
+// Detection threshold (in documentProcessor.ts)
 const MIN_CHARS_PER_PAGE = 100; // 50-200
+
+// Note: All pages now processed in parallel (no batch size setting)
 ```
 
 ## Expected Processing Times
 
 - **Text PDF (10 pages)**: ~5-10 seconds
-- **Scanned PDF (10 pages)**: ~30-60 seconds
-- **Handwritten (10 pages)**: ~40-80 seconds
+- **Scanned PDF (10 pages)**: ~15-30 seconds (all pages in parallel)
+- **Handwritten (10 pages)**: ~20-40 seconds (all pages in parallel)
 
-_Times vary based on page complexity and API response time_
+_Times vary based on page complexity, API response time, and parallel processing limits_
+
+**Note**: Parallel processing is much faster than sequential, but may hit rate limits with very large PDFs.
 
 ## API Usage
 
@@ -100,9 +105,14 @@ Each scanned page requires:
 
 - 1 OpenAI Vision API call (gpt-4o-mini)
 - ~2000 max tokens per page
+- **All pages processed simultaneously** (multiple concurrent API calls)
 - Cost: Higher than text-only processing
 
-**Recommendation**: Monitor costs and consider limits for production.
+**Recommendations**:
+
+- Monitor costs and API rate limits
+- Consider implementing page limits (e.g., max 50 pages per document)
+- Watch for OpenAI rate limit errors with large PDFs
 
 ---
 

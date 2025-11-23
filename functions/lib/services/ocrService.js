@@ -110,42 +110,23 @@ class OCRService {
             });
             const pdfDocument = await loadingTask.promise;
             const numPages = pdfDocument.numPages;
-            firebase_functions_1.logger.info(`PDF has ${numPages} pages to process with OCR`);
-            const pageTexts = [];
-            // Process each page
+            firebase_functions_1.logger.info(`PDF has ${numPages} pages to process with OCR (all at once)`);
+            // Process all pages in parallel
+            const pagePromises = [];
             for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-                try {
-                    firebase_functions_1.logger.info(`Processing page ${pageNum}/${numPages}`);
-                    // Get the page
-                    const page = await pdfDocument.getPage(pageNum);
-                    // Render page to canvas
-                    const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better OCR
-                    const canvas = (0, canvas_1.createCanvas)(viewport.width, viewport.height);
-                    const context = canvas.getContext("2d");
-                    const renderContext = {
-                        canvasContext: context,
-                        viewport: viewport,
-                    };
-                    await page.render(renderContext).promise;
-                    // Convert canvas to base64 image
-                    const imageBase64 = canvas.toDataURL("image/png").split(",")[1];
-                    const dataUrl = `data:image/png;base64,${imageBase64}`;
-                    // Perform OCR using OpenAI Vision API
-                    const ocrText = await this.performOCR(dataUrl, pageNum);
-                    pageTexts.push(ocrText);
-                    // Report progress
-                    if (progressCallback) {
-                        const progress = Math.round((pageNum / numPages) * 100);
-                        await progressCallback(progress);
-                    }
-                    firebase_functions_1.logger.info(`Page ${pageNum} OCR completed: ${ocrText.length} characters extracted`);
-                }
-                catch (pageError) {
-                    firebase_functions_1.logger.error(`Error processing page ${pageNum}:`, pageError);
-                    // Continue with other pages even if one fails
-                    pageTexts.push(`[Error processing page ${pageNum}]`);
-                }
+                pagePromises.push(this.processPageOCR(pdfDocument, pageNum).catch((error) => {
+                    firebase_functions_1.logger.error(`Error processing page ${pageNum}:`, error);
+                    return `[Error processing page ${pageNum}]`;
+                }));
             }
+            // Wait for all pages to complete
+            firebase_functions_1.logger.info(`Processing all ${numPages} pages in parallel...`);
+            const pageTexts = await Promise.all(pagePromises);
+            // Report progress after all pages are done
+            if (progressCallback) {
+                await progressCallback(100);
+            }
+            firebase_functions_1.logger.info(`All pages processed successfully`);
             // Merge all page texts
             const mergedText = this.mergePageTexts(pageTexts);
             firebase_functions_1.logger.info(`OCR extraction completed: ${mergedText.length} total characters from ${numPages} pages`);

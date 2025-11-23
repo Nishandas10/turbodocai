@@ -94,53 +94,32 @@ export class OCRService {
       const pdfDocument = await loadingTask.promise;
       const numPages = pdfDocument.numPages;
 
-      logger.info(`PDF has ${numPages} pages to process with OCR`);
+      logger.info(
+        `PDF has ${numPages} pages to process with OCR (all at once)`
+      );
 
-      const pageTexts: string[] = [];
+      // Process all pages in parallel
+      const pagePromises: Promise<string>[] = [];
 
-      // Process each page
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        try {
-          logger.info(`Processing page ${pageNum}/${numPages}`);
-
-          // Get the page
-          const page = await pdfDocument.getPage(pageNum);
-
-          // Render page to canvas
-          const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better OCR
-          const canvas = createCanvas(viewport.width, viewport.height);
-          const context = canvas.getContext("2d");
-
-          const renderContext: any = {
-            canvasContext: context,
-            viewport: viewport,
-          };
-
-          await page.render(renderContext).promise;
-
-          // Convert canvas to base64 image
-          const imageBase64 = canvas.toDataURL("image/png").split(",")[1];
-          const dataUrl = `data:image/png;base64,${imageBase64}`;
-
-          // Perform OCR using OpenAI Vision API
-          const ocrText = await this.performOCR(dataUrl, pageNum);
-          pageTexts.push(ocrText);
-
-          // Report progress
-          if (progressCallback) {
-            const progress = Math.round((pageNum / numPages) * 100);
-            await progressCallback(progress);
-          }
-
-          logger.info(
-            `Page ${pageNum} OCR completed: ${ocrText.length} characters extracted`
-          );
-        } catch (pageError) {
-          logger.error(`Error processing page ${pageNum}:`, pageError);
-          // Continue with other pages even if one fails
-          pageTexts.push(`[Error processing page ${pageNum}]`);
-        }
+        pagePromises.push(
+          this.processPageOCR(pdfDocument, pageNum).catch((error) => {
+            logger.error(`Error processing page ${pageNum}:`, error);
+            return `[Error processing page ${pageNum}]`;
+          })
+        );
       }
+
+      // Wait for all pages to complete
+      logger.info(`Processing all ${numPages} pages in parallel...`);
+      const pageTexts = await Promise.all(pagePromises);
+
+      // Report progress after all pages are done
+      if (progressCallback) {
+        await progressCallback(100);
+      }
+
+      logger.info(`All pages processed successfully`);
 
       // Merge all page texts
       const mergedText = this.mergePageTexts(pageTexts);

@@ -39,17 +39,18 @@ A new service that handles OCR processing for scanned PDFs:
 **Key Methods:**
 
 - `isScannedOrHandwritten(text, pageCount)` - Detects if a PDF is scanned based on text extraction quality
-- `extractTextFromScannedPDF(buffer, progressCallback)` - Extracts text from scanned PDFs page by page
-- `extractTextFromScannedPDFChunked(buffer, progressCallback, batchSize)` - Processes pages in batches to avoid memory issues
+- `extractTextFromScannedPDF(buffer, progressCallback)` - Extracts text from scanned PDFs by processing all pages in parallel
 - `performOCR(imageDataUrl, pageNum)` - Uses OpenAI Vision API to extract text from a single page image
+- `processPageOCR(pdfDocument, pageNum)` - Helper method to process a single page (render to image and OCR)
 
 **Features:**
 
 - Renders each PDF page to canvas at 2x scale for better OCR accuracy
-- Processes pages in batches (default: 5 pages) to manage memory
-- Reports progress for long-running OCR operations
+- **Processes all pages in parallel** for maximum speed
+- Reports progress when all pages complete
 - Handles both OpenAI Responses API and Chat Completions API as fallback
 - Preserves page numbers in extracted text for better context
+- Error handling per page (failures don't stop entire process)
 
 ### 2. Enhanced DocumentProcessor (`functions/src/services/documentProcessor.ts`)
 
@@ -75,8 +76,8 @@ The main document processing function now:
 2. Analyzes the extracted text to detect if it's scanned
 3. If scanned, routes through OCR pipeline:
    - Updates processing status with OCR-specific messages
-   - Processes pages in batches
-   - Reports progress (25% to 60% of overall processing)
+   - **Processes all pages in parallel** for fastest extraction
+   - Reports progress when complete (25% to 60% of overall processing)
    - Extracts and merges text from all pages
 4. If regular PDF, continues with extracted text
 
@@ -102,7 +103,7 @@ The OCR service uses the existing `OPENAI_API_KEY` environment variable. No addi
 
 ## Processing Limits
 
-- **Batch Size**: 5 pages processed simultaneously (configurable)
+- **Parallel Processing**: All pages processed simultaneously for maximum speed
 - **Memory**: 4GiB allocated to functions
 - **Timeout**: 540 seconds for the entire function
 - **Max Document Size**: 2.5M characters (existing limit)
@@ -112,13 +113,13 @@ The OCR service uses the existing `OPENAI_API_KEY` environment variable. No addi
 The OCR pipeline reports progress to Firestore:
 
 - **0-25%**: File download and initial processing
-- **25-60%**: OCR processing (scaled by page completion)
+- **25-60%**: OCR processing (all pages in parallel)
 - **60-100%**: Embedding, vector storage, and summary generation
 
-Users see real-time updates like:
+Users see updates like:
 
 - "Performing OCR on scanned document..."
-- "OCR processing: 40% complete"
+- "OCR processing: 100% complete" (when all pages are done)
 
 ## Error Handling
 
@@ -129,10 +130,11 @@ Users see real-time updates like:
 
 ## Performance Considerations
 
-1. **Batch Processing**: Pages are processed in batches of 5 to balance speed and memory usage
+1. **Parallel Processing**: All pages are processed simultaneously for maximum speed
 2. **Memory Management**: Canvas objects are created and destroyed per page
-3. **Progress Updates**: Asynchronous progress updates don't block OCR processing
+3. **Concurrent API Calls**: Multiple OpenAI Vision API calls run in parallel
 4. **Fallback Strategy**: If Responses API fails, falls back to Chat Completions API
+5. **Trade-off**: Faster processing but higher memory usage and concurrent API load
 
 ## Usage
 
@@ -156,8 +158,8 @@ Users will see longer processing times for scanned documents, with progress upda
 2. **Test with various page counts:**
 
    - Single page documents
-   - 5-10 page documents (one batch)
-   - 20+ page documents (multiple batches)
+   - 5-10 page documents
+   - 20+ page documents (all processed in parallel)
 
 3. **Monitor:**
    - Processing times
