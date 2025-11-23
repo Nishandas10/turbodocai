@@ -337,7 +337,7 @@ export const waitAndGenerateSummary = async (
   documentId: string,
   userId: string,
   onProgress?: (status: string, progress?: number) => void,
-  maxLength: number = 350
+  maxLength: number = 4000 // Increased to support detailed 3000+ word summaries
 ): Promise<string> => {
   await waitForProcessing(documentId, userId, onProgress);
   return generateDocumentSummaryWithRetry(documentId, userId, maxLength);
@@ -346,7 +346,7 @@ export const waitAndGenerateSummary = async (
 export const generateDocumentSummaryWithRetry = async (
   documentId: string,
   userId: string,
-  maxLength: number = 350,
+  maxLength: number = 4000, // Increased to support detailed 3000+ word summaries
   attempts: number = 8,
   initialDelayMs: number = 1600
 ): Promise<string> => {

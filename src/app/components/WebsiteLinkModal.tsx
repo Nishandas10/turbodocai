@@ -81,11 +81,14 @@ export default function WebsiteLinkModal(props: any) {
   setOptimisticProgress(0)
   setDisplayedProgress(0)
   setOptimisticTimerActive(true)
-      const tid = toast.info(
-        "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
-        { duration: 10000 }
-      )
-      setProcessingToastId(tid)
+       // Show toast after 30 seconds, keep it visible for 2 minutes
+          setTimeout(() => {
+            const tid = toast.info(
+              "Large web pages can take a bit longer. \n Hang tight, your pages are processing in the background",
+              { duration: 30000 } // 30 seconds (30,000 milliseconds)
+            )
+            setProcessingToastId(tid)
+          }, 10000) // Wait 10 seconds before showing
 
       try {
         await waitAndGenerateSummary(

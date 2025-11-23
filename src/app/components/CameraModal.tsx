@@ -223,11 +223,15 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
           setProcessingStatus('Processing: starting')
           setOptimisticProgress(0)
           setOptimisticTimerActive(true)
-          const tid = toast.info(
-            "Processing your document...\nLarger documents can take a bit longer — hang tight, it’s working its magic in the background!✨",
-            { duration: 10000 }
-          )
-          setProcessingToastId(tid)
+           // Show toast after 30 seconds, keep it visible for 2 minutes
+          setTimeout(() => {
+            const tid = toast.info(
+              "Large images can take a bit longer. \n Hang tight, your images are processing in the background",
+              { duration: 30000 } // 30 seconds (30,000 milliseconds)
+            )
+            setProcessingToastId(tid)
+          }, 10000) // Wait 10 seconds before showing
+
           try {
             await waitAndGenerateSummary(
               result.documentId,

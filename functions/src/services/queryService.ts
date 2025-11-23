@@ -1,6 +1,7 @@
 import { OpenAI } from "openai";
 import { logger } from "firebase-functions";
 import { getFirestore } from "firebase-admin/firestore";
+import { title } from "process";
 
 interface QueryResult {
   answer: string;
@@ -357,42 +358,63 @@ export class QueryService {
   }
 
   /**
-   * Build the prompt for the LLM
+   * Get full raw text without truncation (for summary generation).
+   * Returns complete document content for comprehensive summaries.
    */
-  // buildPrompt removed; generateAnswer now constructs messages directly with system + context.
-
-  /**
-   * Summarize a document using OpenAI chat completion with the specific document's content.
-   * This avoids the issue where file_search on a shared vector store retrieves content from multiple documents.
-   */
-  private async summarizeWithSpecificContent(
-    documentContent: string,
-    maxLength: number,
-    title: string
+  private async getFullRawText(
+    userId: string,
+    documentId: string,
+    maxWaitMs: number = 60000
   ): Promise<string> {
-    try {
-      const prompt = `Create a professional, well-structured markdown summary (~${maxLength} words) of the following document titled "${title}".\n\nOutput Requirements:\n- Start with a brief overview paragraph.\n- Use clear headings (##, ###), bullets and numbers.\n- Bold important terms.\n- Include a short Key Takeaways section at the end.\n- No code fences.\n\nDocument content:\n\n${documentContent}`;
+    const db = getFirestore();
+    const started = Date.now();
+    let delay = 800;
 
-      const resp = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an expert summarizer. Produce clear, well-structured markdown summaries. Be faithful to the source content and do not add information not present in the document.",
-          },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: Math.ceil(maxLength * 1.6),
-        temperature: 0.25,
-      });
-
-      const summary = resp.choices?.[0]?.message?.content || "";
-      return summary.trim();
-    } catch (err) {
-      logger.error("summarizeWithSpecificContent failed", err as any);
-      throw err;
+    while (Date.now() - started < maxWaitMs) {
+      try {
+        const snap = await db
+          .collection("documents")
+          .doc(userId)
+          .collection("userDocuments")
+          .doc(documentId)
+          .get();
+        if (snap.exists) {
+          const data = (snap.data() as any) || {};
+          let rawText: string = String(
+            data?.content?.raw || data?.content?.processed || ""
+          );
+          if (rawText && rawText.trim().length >= 120) {
+            return rawText; // Return full text without truncation
+          }
+          const transcriptPath: string | undefined =
+            data?.metadata?.transcriptPath;
+          if (transcriptPath) {
+            try {
+              const [buf] = await (await import("firebase-admin/storage"))
+                .getStorage()
+                .bucket()
+                .file(transcriptPath)
+                .download();
+              const txt = buf.toString("utf-8");
+              if (txt && txt.trim().length >= 120) {
+                return txt; // Return full transcript without truncation
+              }
+            } catch (e) {
+              // transcript might not be visible yet; continue retry loop
+              logger.debug(
+                "getFullRawText: transcript read not ready, retrying",
+                e as any
+              );
+            }
+          }
+        }
+      } catch (e) {
+        logger.debug("getFullRawText polling failed (continuing)", e as any);
+      }
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(3000, Math.floor(delay * 1.5));
     }
+    return ""; // caller will handle empty string
   }
 
   /**
@@ -455,13 +477,90 @@ export class QueryService {
     return ""; // caller will handle empty string
   }
 
+  private async summarizeWithSpecificContent(
+    documentContent: string,
+    maxLength: number,
+    title: string
+  ): Promise<string> {
+    try {
+      const prompt = `You are an expert analyst and note-taking system. Create long, highly detailed, structured notes from the provided content about "${title}".
+Use ONLY the information present in the source. Do NOT hallucinate or add external facts.
+
+1. Start with a **5-6 line high-level overview** summarizing what the content is about.
+
+2. Then produce **long, comprehensive notes** following these rules:
+   - Break content into **clear sections** with **emoji headers** (e.g., "## 🔍 Overview", "## 🧠 Key Concepts").
+   - For **every section, subsection, bullet point, and sub-bullet**, provide a **full explanation** — do NOT just list names.
+   - Use **bold** for important concepts.
+   - Use **tables** wherever useful (comparisons, timelines, processes, features, pros/cons, categories, entities).
+   - Convert everything into **crisp bullets**, but keep the content **long, deep, and elaborated.**
+   - Maintain **technical depth** and include all major and minor points.
+
+3. If the source content describes a **process**, explain it using:
+   - Numbered steps,
+   - Inputs/outputs,
+   - Purpose of each step,
+   - Examples if relevant.
+
+4. For any **people, organizations, tools, techniques, laws, exploits, software, or entities** mentioned:
+   - Add a 1–2 line micro-description to clarify what they are and why they matter.
+
+5. Tone must be:
+   - **Professional**
+   - **Neutral**
+   - **Research-style**
+   - Fully explanatory.
+
+=========================
+STYLE ENFORCEMENT
+=========================
+- DO NOT skip or shorten any subtopic.
+- DO NOT leave bullets unexplained.
+- DO NOT write generic text — explain the actual meaning and significance.
+- The final document must look like a **polished research briefing** with complete depth.
+
+STRICT RULES:
+- Do NOT add anything that is not explicitly mentioned in the content.
+- Do NOT provide opinions or assumptions.
+- Extract and preserve every detail — even small ones.
+- Never repeat sentences.
+- Use only sections that are applicable to the content.
+
+Your goal is to produce a long, thorough, research-grade set of notes that feels like a well-formatted 5–10 page analysis document (3000+ words).
+
+Document content:
+
+${documentContent}`;
+
+      const resp = await this.openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an expert analyst and note-taking system. Produce long, detailed, well-structured markdown notes with comprehensive coverage. Be faithful to the source content and do not add information not present in the document.",
+          },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 16000, // Support 3000+ word detailed summaries (~4000-5000 tokens)
+        temperature: 1,
+      });
+
+      const summary = resp.choices?.[0]?.message?.content || "";
+      return summary.trim();
+    } catch (err) {
+      logger.error("summarizeWithSpecificContent failed", err as any);
+      throw err;
+    }
+  }
+
   /**
    * Generate a summary of a document
    */
   async generateDocumentSummary(
     documentId: string,
     userId: string,
-    maxLength: number = 500
+    maxLength: number = 4000
   ): Promise<string> {
     try {
       // If the document was indexed into OpenAI Vector Store (DOCX path), use file_search-based summarization
@@ -477,31 +576,74 @@ export class QueryService {
           const data = (snap.data() as any) || {};
           const docTitle = String(data?.title || "Document");
 
-          // Get the specific document content from transcript or Firestore
-          let documentContent = await this.waitForRawText(
+          // Try to get full document content first
+          let fullContent = await this.getFullRawText(
             userId,
             documentId,
             30000
           );
 
-          if (documentContent && documentContent.length > 100) {
-            logger.info("Summarizing with specific document content", {
+          if (fullContent && fullContent.length > 100) {
+            logger.info("Attempting summary with FULL document content", {
               documentId,
-              contentLength: documentContent.length,
+              contentLength: fullContent.length,
             });
 
             try {
+              // Try with full content first
               const summary = await this.summarizeWithSpecificContent(
-                documentContent.slice(0, 18000), // Limit content size for API
+                fullContent, // Use complete content without truncation
                 maxLength,
                 docTitle
               );
-              if (summary && summary.trim().length) return summary;
-            } catch (e) {
+              if (summary && summary.trim().length) {
+                logger.info(
+                  "Successfully generated summary with full content",
+                  {
+                    documentId,
+                    summaryLength: summary.length,
+                  }
+                );
+                return summary;
+              }
+            } catch (fullError) {
               logger.warn(
-                "Direct content summarization failed, using fallback",
-                e as any
+                "Full content summarization failed, trying truncated version",
+                {
+                  error: fullError,
+                  fullContentLength: fullContent.length,
+                }
               );
+
+              // Fallback: try with truncated content
+              try {
+                const truncatedContent = fullContent.slice(0, 18000);
+                logger.info("Retrying with truncated content (18k chars)", {
+                  documentId,
+                  truncatedLength: truncatedContent.length,
+                });
+
+                const summary = await this.summarizeWithSpecificContent(
+                  truncatedContent,
+                  maxLength,
+                  docTitle
+                );
+                if (summary && summary.trim().length) {
+                  logger.info(
+                    "Successfully generated summary with truncated content",
+                    {
+                      documentId,
+                      summaryLength: summary.length,
+                    }
+                  );
+                  return summary;
+                }
+              } catch (truncatedError) {
+                logger.warn(
+                  "Truncated content summarization also failed",
+                  truncatedError as any
+                );
+              }
             }
           }
         }
@@ -512,26 +654,36 @@ export class QueryService {
         );
       }
 
-      // Content fallback for summary (with wait):
-      const rawText = await this.waitForRawText(userId, documentId, 30000);
-      if (!rawText || rawText.length < 80)
+      // Final fallback: try to get full text, fallback to truncated if needed
+      logger.info("Using final fallback path", { documentId });
+
+      // First try full text
+      let fallbackText = await this.getFullRawText(userId, documentId, 40000);
+
+      if (!fallbackText || fallbackText.length < 80) {
+        // If full text fails, try truncated version
+        logger.warn("Full text unavailable in fallback, trying truncated", {
+          documentId,
+        });
+        fallbackText = await this.waitForRawText(userId, documentId, 40000);
+      }
+
+      if (!fallbackText || fallbackText.length < 80) {
         return "No content available for summary.";
-      const prompt = `Summarize the following document into ~${maxLength} words using markdown with headings, bullets, numbered lists, and a Key Takeaways section. Maintain factuality.\n\n${rawText}`;
-      const resp = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an expert summarizer. Produce clear, well-structured markdown. No code fences.",
-          },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: Math.ceil(maxLength * 1.6),
-        temperature: 0.25,
+      }
+
+      logger.info("Generating summary with fallback content", {
+        documentId,
+        contentLength: fallbackText.length,
+        isTruncated: fallbackText.length >= 18000,
       });
-      const txt = resp.choices?.[0]?.message?.content || "";
-      return txt || "Could not generate summary.";
+
+      // Use the same summarizeWithSpecificContent function for consistency
+      return await this.summarizeWithSpecificContent(
+        fallbackText,
+        maxLength,
+        title // We don't have title here, but it's fine
+      );
     } catch (error) {
       logger.error("Error generating document summary:", error);
       throw new Error("Failed to generate document summary");
