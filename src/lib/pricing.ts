@@ -30,6 +30,6 @@ export const FREE_TRIAL_FEATURES: string[] = [
 ];
 
 export const PRICING = {
-  monthly: { currency: "INR", price: 450 },
+  monthly: { currency: "INR", price: 299 },
   yearly: { currency: "INR", price: 2999 },
 };

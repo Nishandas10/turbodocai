@@ -25,7 +25,7 @@ export default function Pricing() {
     },
     {
       name: "Pro",
-      price: isYearly ? "₹2999" : "₹450",
+      price: isYearly ? "₹2999" : "₹299",
       period: isYearly ? "/year" : "/month",
       description: "Learn at the highest level.",
       features: PRO_FEATURES,

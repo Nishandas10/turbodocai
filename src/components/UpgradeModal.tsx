@@ -11,7 +11,7 @@ import { updateUserSubscription } from "@/lib/firestore"
 
 export default function UpgradeModal(props: any) {
   const { open, onClose } = props as { open: boolean; onClose: () => void }
-  const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly")
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("monthly") // Default to monthly
   const { user } = useAuth()
   const [loading, setLoading] = useState(false)
   // Lock background scroll while modal is open
@@ -30,12 +30,12 @@ export default function UpgradeModal(props: any) {
   const yearlyPriceTotal = PRICING.yearly.price
   const yearlyPricePerMonth = Math.round(yearlyPriceTotal / 12)
 
-  const handleUpgrade = useCallback(async () => {
+  const handleUpgrade = useCallback(async (planOverride?: "monthly" | "yearly") => {
+    const plan = planOverride ?? (yearlyActive ? "yearly" : "monthly");
+    const amount = plan === "yearly" ? yearlyPriceTotal : monthlyPrice;
     try {
       setLoading(true)
-      const amount = yearlyActive ? yearlyPriceTotal : monthlyPrice
-      const plan = yearlyActive ? "yearly" : "monthly"
-
+      // ...existing code...
       const res = await fetch("/api/payments/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -71,7 +71,7 @@ export default function UpgradeModal(props: any) {
         amount: order.amount,
         currency: order.currency,
         name: "BlumeNote",
-        description: plan === "yearly" ? "Pro Yearly Subscription" : "Pro Monthly Subscription",
+        description: plan === "monthly" ? "Pro Monthly Subscription" : "Pro Yearly Subscription",
         order_id: order.id,
         handler: async (response: RazorpayHandlerPayload) => {
           try {
@@ -165,24 +165,9 @@ export default function UpgradeModal(props: any) {
         {/* Pricing options */}
         <div className="px-8 pb-8 flex flex-col gap-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* Annual */}
-            <button
-              onClick={() => setBillingCycle("yearly")}
-              className={`group rounded-lg border text-left px-6 py-5 transition-all ${yearlyActive ? 'border-green-500/70 bg-green-600/10 ring-2 ring-green-500/40' : 'border-gray-700 hover:border-gray-600'}`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-semibold text-sm flex items-center gap-2">Annual <span className="text-green-400 text-xs font-medium">(Save 45%)</span></span>
-                {yearlyActive && <span className="text-green-400 text-xs">Selected</span>}
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold">₹{yearlyPricePerMonth}</span>
-                <span className="text-gray-400 text-sm">/ month</span>
-              </div>
-              <p className="text-xs text-gray-400 mt-2">Billed yearly (₹{yearlyPriceTotal})</p>
-            </button>
             {/* Monthly */}
             <button
-              onClick={() => setBillingCycle("monthly")}
+              onClick={() => { setBillingCycle("monthly"); handleUpgrade("monthly"); }}
               className={`group rounded-lg border text-left px-6 py-5 transition-all ${!yearlyActive ? 'border-purple-500/70 bg-purple-600/10 ring-2 ring-purple-500/40' : 'border-gray-700 hover:border-gray-600'}`}
             >
               <div className="flex items-center justify-between mb-3">
@@ -195,11 +180,26 @@ export default function UpgradeModal(props: any) {
               </div>
               <p className="text-xs text-gray-400 mt-2">Billed monthly</p>
             </button>
+            {/* Annual */}
+            <button
+              onClick={() => { setBillingCycle("yearly"); handleUpgrade("yearly"); }}
+              className={`group rounded-lg border text-left px-6 py-5 transition-all ${yearlyActive ? 'border-green-500/70 bg-green-600/10 ring-2 ring-green-500/40' : 'border-gray-700 hover:border-gray-600'}`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-semibold text-sm flex items-center gap-2">Annual <span className="text-green-400 text-xs font-medium">(2 months FREE)</span></span>
+                {yearlyActive && <span className="text-green-400 text-xs">Selected</span>}
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold">₹{yearlyPricePerMonth}</span>
+                <span className="text-gray-400 text-sm">/ month</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">Billed yearly (₹{yearlyPriceTotal})</p>
+            </button>
           </div>
 
           <Button
             disabled={loading}
-            onClick={handleUpgrade}
+            onClick={() => handleUpgrade()}
             className="w-full h-14 text-base font-semibold bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-lg disabled:opacity-60"
           >
             {loading ? "Processing..." : "✨ Upgrade Now ✨"}
