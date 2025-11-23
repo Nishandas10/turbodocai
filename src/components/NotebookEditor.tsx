@@ -561,7 +561,7 @@ export default function NotebookEditor(props: NotebookEditorProps) {
         } else {
         // Attempt auto-fetch once after processing if no stored summary
         try {
-          const auto = await generateDocumentSummaryWithRetry(noteId, user.uid, 350)
+          const auto = await generateDocumentSummaryWithRetry(noteId, user.uid, 4000)
           setSummary(auto)
         } catch (e:any) {
           console.warn('Auto summary failed:', e?.message)
