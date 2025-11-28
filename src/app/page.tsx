@@ -96,32 +96,19 @@ export default function Home() {
           <div className="container mx-auto px-4 relative z-10">
             <div className="text-center max-w-4xl mx-auto">
         <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white mb-6">
-          Upload any content📚. Let AI Work for You✨. <span className="text-blue-600">10x your Productivity</span>
+         <span className="text-blue-600">AI That Studies With You ✨</span>
         </h1>
-         <p className="text-base md:text-xl text-gray-300 mb-10 max-w-3xl mx-auto">
-          AI that understands your PDFs, YouTube videos, websites, live recordings, and images—and writes notes, exams, mindmaps, 
-          podcast summaries, flashcards, and answers your questions instantly.
-        </p>
+         <h3 className="text-base md:text-2xl text-gray-300 mb-10 max-w-3xl mx-auto">
+         Upload anything and get clean notes, a writing assistant, quizzes & tests, mindmaps, flashcards, podcast-style explanations...
+        </h3>
 
-              <div className="mb-12">
+              <div className="mb-12 flex flex-col md:flex-row items-center justify-center gap-4">
                 <Button size="lg" className="bg-blue-600/80 hover:bg-blue-700/80 text-white text-lg px-12 py-4 h-auto backdrop-blur-sm border border-blue-500/50 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105" asChild>
                   <Link href="/signup">Get Started</Link>
-                  </Button>
-                <div className="mt-6 flex flex-col items-center space-y-3">
-                  <div className="flex items-center space-x-2 text-sm text-gray-300">
-                    {/* Simple avatar circles using brand accents */}
-                    <span className="flex -space-x-2">
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-purple-600 text-[10px] font-semibold text-white ring-2 ring-black">F</span>
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 text-[10px] font-semibold text-white ring-2 ring-black">R</span>
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-[10px] font-semibold text-white ring-2 ring-black">Z</span>
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
-                    </span>
-                    <span className="text-gray-300">
-                      <span className="font-semibold text-white">17,857+</span> users getting ahead with BlumeNote AI
-                    </span>
-                  </div>
-                </div>
+                </Button>
+                <Button size="lg" className="bg-transparent text-white text-lg px-12 py-4 h-auto border border-white/30 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105 hover:bg-white/10" asChild>
+                  <Link href="#features">See Features</Link>
+                </Button>
               </div>
             </div>
           </div>
@@ -131,7 +118,7 @@ export default function Home() {
   <section className="py-8 relative">
           <div className="container mx-auto px-4 text-center mb-12">
             <h2 className="text-lg md:text-xl font-medium text-white mb-4">
-              BlumeNote AI is trusted by students, professionals and MSMEs
+              BlumeNote AI is trusted by students , professionals & researchers
             </h2>
           </div>
 
