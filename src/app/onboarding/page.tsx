@@ -91,23 +91,17 @@ export default function OnboardingPage() {
   const needsExam = persona === "Prepare for Competitive Exam";
   const needsCourse = persona === "Student";
 
-  const canSubmit = useMemo(() => {
-    if (!persona || mainUses.length === 0 || !heardFrom) return false;
-    if (needsExam && !examType) return false;
-    if (needsCourse && !course.trim()) return false;
-    return true;
-  }, [persona, mainUses, heardFrom, needsExam, examType, needsCourse, course]);
+  const canSubmit = useMemo(() => true, []); // Allow continue even if fields are incomplete
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.uid || !canSubmit) return;
+    if (!user?.uid) return;
     try {
       setSubmitting(true);
       await saveUserOnboarding(user.uid, {
         persona: persona as PersonaType,
         ...(needsExam ? { examType: examType as CompetitiveExamType } : {}),
         ...(needsCourse ? { course: course.trim() } : {}),
-        // Save selected main uses
         mainUses: mainUses as MainUseType[],
         heardFrom: heardFrom as HeardFromType,
       });
