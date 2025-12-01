@@ -99,12 +99,12 @@ export default function Home() {
          One App to Learn, Revise & Practice Anything📚 <span className="text-blue-600">Study 10x faster 🚀</span>
         </h1>
          <p className="text-base md:text-xl text-gray-300 mb-10 max-w-3xl mx-auto">
-Turn any YT Video, PDF, Textbook, Website into Notes, Quizzes & Flashcards in Seconds
+         Upload any PDF, video, lecture or website — get instant notes, quizzes, flashcards and an AI tutor you can chat with.
         </p>
 
               <div className="mb-12 flex flex-col md:flex-row items-center justify-center gap-4">
                 <Button size="lg" className="bg-blue-600/80 hover:bg-blue-700/80 text-white text-lg px-12 py-4 h-auto backdrop-blur-sm border border-blue-500/50 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105" asChild>
-                  <Link href="/signup">Start Free</Link>
+                  <Link href="/start">Start Free</Link>
                 </Button>
                 <Button size="lg" className="bg-transparent text-white text-lg px-12 py-4 h-auto border border-white/30 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105 hover:bg-white/10" asChild>
                   <Link href="#features">How it&apos;s better than ChatGPT</Link>

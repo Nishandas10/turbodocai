@@ -1,7 +1,8 @@
 "use client"
+import { useState } from 'react'
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { FileText, Mic, Play, Globe, Camera, ArrowRight, AtSign, Brain, ChevronDown, ArrowUp, Plus, Search, Clock, GitBranch } from "lucide-react"
+import { FileText, Mic, Play, Globe, Camera, ArrowRight, AtSign, Brain, ChevronDown, ArrowUp, Plus, Search, Clock, GitBranch, Menu, X } from "lucide-react"
 
 
 // Prefilled sidebar replicating structure (without recents) - all actions redirect to signup
@@ -15,21 +16,23 @@ function StartSidebar({ onAction }: { onAction: () => void }) {
 				<nav className="space-y-1 mb-4">
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Plus className="h-4 w-4" /><span className="text-sm">Add content</span></button>
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><GitBranch className="h-4 w-4" /><span className="text-sm">Mind Maps</span></button>
+					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Brain className="h-4 w-4" /><span className="text-sm">Chat</span></button>
+					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><FileText className="h-4 w-4" /><span className="text-sm">Flashcard</span></button>
+					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><GitBranch className="h-4 w-4" /><span className="text-sm">Quiz</span></button>
+					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Mic className="h-4 w-4" /><span className="text-sm">Podcast</span></button>
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Search className="h-4 w-4" /><span className="text-sm">Search</span></button>
 					<button onClick={onAction} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Clock className="h-4 w-4" /><span className="text-sm">History</span></button>
 				</nav>
 						<div className="px-2 py-2">
-							<div className="text-xs uppercase tracking-wide text-sidebar-accent-foreground mb-2 select-none">Spaces</div>
+							<div className="text-xs uppercase tracking-wide text-sidebar-accent-foreground mb-2 select-none">Tests</div>
 							<div className="space-y-1">
-								<button onClick={onAction} className="w-full flex items-center gap-3 px-2 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Plus className="h-4 w-4" /><span className="text-sm">Create Space</span></button>
+								<button onClick={onAction} className="w-full flex items-center gap-3 px-2 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Plus className="h-4 w-4" /><span className="text-sm">Create Test</span></button>
 							</div>
 						</div>
 				<div className="px-4 pt-3 space-y-3">
 					<div className="text-center text-xs text-sidebar-accent-foreground border rounded-md py-1.5">Free Preview</div>
 					<p className="text-[14px] leading-relaxed text-sidebar-accent-foreground/90">
-						An AI tutor personalized to you.<br/><br/>
-						Understand your files, YouTube video, website links or recorded lecture through key concepts, familiar learning tools like flashcards, and interactive conversations.
-					</p>
+One App to Summarize, Learn, Revise & Practice Anything. Study 10x faster. <br/><br/>Upload any PDF, video, lecture or website — get instant notes, quizzes, flashcards and an AI tutor you can chat with.</p>
 				</div>
 			</div>
 			<div className="px-4 py-4 border-t border-sidebar-border">
@@ -39,8 +42,51 @@ function StartSidebar({ onAction }: { onAction: () => void }) {
 	)
 }
 
+// Mobile drawer variant (visible on small screens when opened)
+function MobileSidebar({ onAction, onClose }: { onAction: () => void; onClose: () => void }) {
+	return (
+		<div className="fixed inset-0 z-50 md:hidden">
+			<div className="absolute inset-0 bg-black/40" onClick={onClose} />
+			<aside className="relative w-64 h-full bg-sidebar border-r border-sidebar-border shadow-xl">
+				<div className="px-5 pt-4 pb-3 flex items-center justify-between">
+					<div className="text-sidebar-foreground font-semibold text-xl leading-none">BlumeNote AI</div>
+					<button onClick={onClose} aria-label="Close sidebar" className="p-2 rounded-md hover:bg-sidebar-accent/50">
+						<X className="h-5 w-5 text-sidebar-foreground" />
+					</button>
+				</div>
+				<div className="flex-1 overflow-y-auto px-2 pb-6" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+					<nav className="space-y-1 mb-4">
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Plus className="h-4 w-4" /><span className="text-sm">Add content</span></button>
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><GitBranch className="h-4 w-4" /><span className="text-sm">Mind Maps</span></button>
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Brain className="h-4 w-4" /><span className="text-sm">Chat</span></button>
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><FileText className="h-4 w-4" /><span className="text-sm">Flashcard</span></button>
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><GitBranch className="h-4 w-4" /><span className="text-sm">Quiz</span></button>
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Mic className="h-4 w-4" /><span className="text-sm">Podcast</span></button>
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Search className="h-4 w-4" /><span className="text-sm">Search</span></button>
+						<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Clock className="h-4 w-4" /><span className="text-sm">History</span></button>
+					</nav>
+					<div className="px-2 py-2">
+						<div className="text-xs uppercase tracking-wide text-sidebar-accent-foreground mb-2 select-none">Tests</div>
+						<div className="space-y-1">
+							<button onClick={() => { onAction(); onClose(); }} className="w-full flex items-center gap-3 px-2 py-2 rounded-md hover:bg-sidebar-accent text-sidebar-foreground"><Plus className="h-4 w-4" /><span className="text-sm">Create Test</span></button>
+						</div>
+					</div>
+					<div className="px-4 pt-3 space-y-3">
+						<div className="text-center text-xs text-sidebar-accent-foreground border rounded-md py-1.5">Free Preview</div>
+						<p className="text-[14px] leading-relaxed text-sidebar-accent-foreground/90">One App to Summarize, Learn, Revise & Practice Anything. Study 10x faster. <br/><br/>Upload any PDF, video, lecture or website — get instant notes, quizzes, flashcards and an AI tutor you can chat with.</p>
+					</div>
+				</div>
+				<div className="px-4 py-4 border-t border-sidebar-border">
+					<Link href="/signup" className="block w-full text-center bg-white text-black font-medium rounded-md py-2 hover:bg-gray-200 transition">Sign up</Link>
+				</div>
+			</aside>
+		</div>
+	)
+}
+
 export default function StartPage() {
 	const router = useRouter()
+	const [mobileOpen, setMobileOpen] = useState(false)
 
 	// Generic click handler for all gated widgets
 	const goSignup = () => router.push('/signup')
@@ -58,6 +104,11 @@ export default function StartPage() {
 
 	return (
 			<div className="h-screen bg-background flex overflow-hidden">
+				{/* Mobile hamburger (small screens) */}
+				<button aria-label="Open menu" onClick={() => setMobileOpen(true)} className="fixed top-4 left-4 z-50 md:hidden bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow">
+					<Menu className="h-5 w-5" />
+				</button>
+				{mobileOpen && <MobileSidebar onAction={goSignup} onClose={() => setMobileOpen(false)} />}
 				<StartSidebar onAction={goSignup} />
 				<div className="flex-1 overflow-y-auto p-8">
 				<header className="mb-10">
@@ -87,7 +138,7 @@ export default function StartPage() {
 								<div className="flex items-center gap-3 px-4 pt-3">
 									<input
 										className="flex-1 bg-transparent outline-none text-foreground placeholder-muted-foreground px-2 py-2"
-										placeholder="Greetings"
+										placeholder="Ask me anything..."
 										onFocus={goSignup}
 										readOnly
 									/>
