@@ -96,7 +96,7 @@ export default function Home() {
           <div className="container mx-auto px-4 relative z-10">
             <div className="text-center max-w-4xl mx-auto">
         <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white mb-6">
-         One App to Learn, Revise & Practice Anything📚 <span className="text-blue-600">Study 10x faster 🚀</span>
+        One App to Summarize, Make Notes, Revise & Practice Anything📚 <span className="text-blue-600">Study 10x faster with AI 🚀</span>
         </h1>
          <p className="text-base md:text-xl text-gray-300 mb-10 max-w-3xl mx-auto">
          Upload any PDF, video, lecture or website — get instant notes, quizzes, flashcards and an AI tutor you can chat with.
