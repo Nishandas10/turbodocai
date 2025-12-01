@@ -11,7 +11,7 @@ export default function Navbar() {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 py-4">
       <div className="container mx-auto px-4 flex justify-center">
-        <div className="bg-gray-900/55 backdrop-blur-xl border border-gray-700/60 rounded-full px-8 py-2.5 flex items-center justify-between max-w-4xl w-full shadow-lg">
+          <div className="bg-blue-900/10 backdrop-blur-xl border border-blue-700/20 rounded-full px-8 py-2.5 flex items-center justify-between max-w-4xl w-full shadow-lg">
           {/* Logo and Brand */}
           <div className="flex items-center space-x-2">
             <span className="text-white font-medium text-sm">BlumeNote AI</span>
@@ -51,7 +51,7 @@ export default function Navbar() {
               className="bg-transparent border border-gray-400 text-white hover:bg-white/10 text-sm px-4 py-1.5 rounded-full"
               asChild
             >
-              <Link href="/signup">Start free</Link>
+              <Link href="/start">Start free</Link>
             </Button>
           </div>
 
@@ -59,7 +59,7 @@ export default function Navbar() {
           <div className="md:hidden flex items-center space-x-2">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="text-gray-300 hover:text-blue-400 focus:outline-none"
+              className="text-blue-600 hover:text-blue-700 focus:outline-none"
             >
               {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
@@ -97,7 +97,7 @@ export default function Navbar() {
                 className="bg-blue-600 hover:bg-blue-700 text-white w-full"
                 asChild
               >
-                <Link href="/signup">Start free</Link>
+                <Link href="/start">Start free</Link>
               </Button>
             </div>
           </div>
