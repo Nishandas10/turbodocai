@@ -107,7 +107,7 @@ export default function Home() {
                   <Link href="/start">Start Free</Link>
                 </Button>
                 <Button size="lg" className="bg-transparent text-white text-lg px-12 py-4 h-auto border border-white/30 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105 hover:bg-white/10" asChild>
-                  <Link href="#features">How it&apos;s better than ChatGPT</Link>
+                  <Link href="#features">See Features</Link>
                 </Button>
               </div>
               <div className="mt-6 flex flex-col items-center space-y-3">
