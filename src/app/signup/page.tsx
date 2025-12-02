@@ -6,14 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import Link from "next/link"
 import { useAuth } from "@/contexts/AuthContext"
-import { useEmailSignIn } from "@/hooks/useEmailSignIn"
+import { Eye, EyeOff } from 'lucide-react'
 
 export default function SignupPage() {
   const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState("")
-  const { user, loading, signInWithGoogle, signInWithEmail } = useAuth()
-  const { isReturningWithLink, email: returnedEmail, handleEmailSignIn: completeEmailSignIn } = useEmailSignIn()
+  const { user, loading, signInWithGoogle, registerWithEmail } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -49,20 +50,30 @@ export default function SignupPage() {
     }
   }
 
-  const handleEmailSignIn = async (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
+    setMessage("")
     if (!email.trim()) {
       setMessage("Please enter a valid email address.")
+      return
+    }
+    if (password.length < 6) {
+      setMessage("Password must be at least 6 characters.")
       return
     }
 
     try {
       setIsLoading(true)
-      setMessage("")
-      await signInWithEmail(email.trim())
+      await registerWithEmail(email.trim(), password)
     } catch (error) {
-      console.error("Email sign-in error:", error)
-      setMessage("Failed to send sign-in link. Please try again.")
+      console.error("Registration error:", error)
+      const errMsg =
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+          ? error
+          : "Failed to create account. Please try again."
+      setMessage(errMsg)
     } finally {
       setIsLoading(false)
     }
@@ -91,12 +102,8 @@ export default function SignupPage() {
             <div className="relative">
               {/* Title */}
               <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-white mb-2">
-                  {isReturningWithLink ? "Completing Sign In" : "Welcome back"}
-                </h2>
-                <p className="text-gray-400">
-                  {isReturningWithLink ? "Processing your sign-in link..." : "Sign in to your account"}
-                </p>
+                <h2 className="text-2xl font-bold text-white mb-2">Create your account</h2>
+                <p className="text-gray-400">Sign up to BlumeNote AI</p>
               </div>
 
               {/* Message Display */}
@@ -106,56 +113,9 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* Show processing message or email prompt when returning with link */}
-              {isReturningWithLink && (
-                <div className="mb-6 p-4 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300">
-                  {returnedEmail ? (
-                    <div className="text-center">
-                      <div className="w-6 h-6 border-2 border-blue-300 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                      <p>Processing your sign-in link...</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="mb-3 text-center">It looks like you opened the sign-in link in your mail app. To complete sign-in, enter the email address you used to request the link.</p>
-                      <form
-                        onSubmit={async (e) => {
-                          e.preventDefault()
-                          try {
-                            setIsLoading(true)
-                            setMessage("")
-                            await completeEmailSignIn(email)
-                          } catch (err) {
-                            console.error(err)
-                            setMessage("Failed to complete sign-in. Please check your email and try again.")
-                          } finally {
-                            setIsLoading(false)
-                          }
-                        }}
-                        className="flex gap-2"
-                      >
-                        <Input
-                          id="complete-email"
-                          type="email"
-                          placeholder="name@example.com"
-                          className="h-11"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          disabled={isLoading}
-                          required
-                        />
-                        <Button type="submit" className="h-11 bg-blue-600 hover:bg-blue-700 text-white">Complete</Button>
-                      </form>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Email Input Section */}
-              <form onSubmit={handleEmailSignIn} className="space-y-4 mb-6">
-                <label htmlFor="email" className="text-sm font-medium text-white">
-                  Email
-                </label>
-                
+              {/* Registration Form (email + password) */}
+              <form onSubmit={handleRegister} className="space-y-4 mb-6">
+                <label htmlFor="email" className="text-sm font-medium text-white">Email</label>
                 <Input
                   id="email"
                   type="email"
@@ -163,23 +123,39 @@ export default function SignupPage() {
                   className="h-11"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  disabled={isLoading || isReturningWithLink}
+                  disabled={isLoading}
                   required
                 />
 
-                {/* Sign In Button */}
-                <Button 
+                <label htmlFor="password" className="text-sm font-medium text-white">Password</label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Pick a strong password"
+                    className="h-11 pr-10"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={isLoading}
+                    required
+                  />
+                  <button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(s => !s)} className="absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-200">
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+
+                <Button
                   type="submit"
                   className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isLoading || isReturningWithLink}
+                  disabled={isLoading}
                 >
                   {isLoading ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                      Sending link...
+                      Creating account...
                     </>
                   ) : (
-                    "Sign in with Email"
+                    "Create account"
                   )}
                 </Button>
               </form>
@@ -196,10 +172,10 @@ export default function SignupPage() {
 
               {/* Google Sign In Button */}
               <div className="mb-6">
-                <Button 
+                <Button
                   className="w-full h-11 justify-start gap-3 bg-gray-800 hover:bg-gray-700 text-white border border-gray-700 hover:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   onClick={handleGoogleSignIn}
-                  disabled={isLoading || isReturningWithLink}
+                  disabled={isLoading}
                 >
                   {isLoading ? (
                     <div className="w-5 h-5 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></div>
@@ -211,8 +187,13 @@ export default function SignupPage() {
                       <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                     </svg>
                   )}
-                  {isLoading ? "Signing in..." : "Sign in with Google"}
+                  {isLoading ? "Signing in..." : "Continue with Google"}
                 </Button>
+              </div>
+
+              <div className="text-center mt-2 mb-4 text-sm">
+                <span className="text-gray-400">Already have an account? </span>
+                <Link href="/login" className="text-blue-400 hover:underline">Log in</Link>
               </div>
 
               {/* Legal Text */}

@@ -1,7 +1,7 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signInWithEmailLink, sendSignInLinkToEmail } from 'firebase/auth';
+import { User, onAuthStateChanged, signInWithPopup, signInWithEmailLink, sendSignInLinkToEmail, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { createUserProfile, getUserProfile, initializeUserAnalytics, getUserOnboarding } from '@/lib/firestore';
@@ -10,7 +10,9 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
-  signInWithEmail: (email: string) => Promise<void>;
+  // Traditional email/password auth
+  registerWithEmail: (email: string, password: string) => Promise<void>;
+  signInWithEmail: (email: string, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -124,54 +126,85 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signInWithEmail = async (email: string) => {
+  // signInWithEmail now supports both passwordless (legacy) and traditional password-based sign in.
+  const signInWithEmail = async (email: string, password?: string) => {
     try {
       setLoading(true);
-      
-      // Check if this is a sign-in link
-      if (window.location.href.includes('apiKey')) {
-        console.log('Processing email sign-in link...');
-        
-        // User is returning with a sign-in link
-        const result = await signInWithEmailLink(auth, email, window.location.href);
+
+      // If password is provided, perform traditional email/password sign-in
+      if (password) {
+        const result = await signInWithEmailAndPassword(auth, email, password);
         if (result.user) {
-          console.log('Email sign-in successful, checking onboarding status...');
-          
-          // Check if user has completed onboarding
           try {
             const onboardingData = await getUserOnboarding(result.user.uid);
             if (onboardingData.completed) {
-              console.log('Onboarding completed, redirecting to dashboard...');
               router.push('/dashboard');
             } else {
-              console.log('Onboarding not completed, redirecting to onboarding...');
               router.push('/onboarding');
             }
           } catch (error) {
             console.error('Error checking onboarding status:', error);
-            // If error checking onboarding, redirect to onboarding to be safe
+            router.push('/onboarding');
+          }
+        }
+        return;
+      }
+
+      // Legacy: passwordless email link flow
+      if (window.location.href.includes('apiKey')) {
+        console.log('Processing email sign-in link...');
+        const result = await signInWithEmailLink(auth, email, window.location.href);
+        if (result.user) {
+          try {
+            const onboardingData = await getUserOnboarding(result.user.uid);
+            if (onboardingData.completed) {
+              router.push('/dashboard');
+            } else {
+              router.push('/onboarding');
+            }
+          } catch (error) {
+            console.error('Error checking onboarding status:', error);
             router.push('/onboarding');
           }
         }
       } else {
         console.log('Sending sign-in link to email...');
-        
-        // Send sign-in link to email
         const actionCodeSettings = {
           url: window.location.href,
           handleCodeInApp: true,
         };
-        
         await sendSignInLinkToEmail(auth, email, actionCodeSettings);
-        
-        // Save email to localStorage for when user returns
         window.localStorage.setItem('emailForSignIn', email);
-        
-        // Show success message
         alert('Check your email for the sign-in link!');
       }
     } catch (error) {
       console.error('Email sign-in error:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Register a new user with email and password
+  const registerWithEmail = async (email: string, password: string) => {
+    try {
+      setLoading(true);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      if (userCredential.user) {
+        try {
+          const onboardingData = await getUserOnboarding(userCredential.user.uid);
+          if (onboardingData.completed) {
+            router.push('/dashboard');
+          } else {
+            router.push('/onboarding');
+          }
+        } catch (error) {
+          console.error('Error checking onboarding status after registration:', error);
+          router.push('/onboarding');
+        }
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
       throw error;
     } finally {
       setLoading(false);
@@ -193,6 +226,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     signInWithGoogle,
     signInWithEmail,
+    registerWithEmail,
     signOut,
   };
 
