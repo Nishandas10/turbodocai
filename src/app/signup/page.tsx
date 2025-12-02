@@ -13,7 +13,7 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState("")
   const { user, loading, signInWithGoogle, signInWithEmail } = useAuth()
-  const { isReturningWithLink, email: savedEmail, handleEmailSignIn: completeSignIn } = useEmailSignIn()
+  const { isReturningWithLink, email: returnedEmail, handleEmailSignIn: completeEmailSignIn } = useEmailSignIn()
   const router = useRouter()
 
   useEffect(() => {
@@ -106,52 +106,48 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* If returning via sign-in link */}
+              {/* Show processing message or email prompt when returning with link */}
               {isReturningWithLink && (
-                savedEmail ? (
-                  <div className="mb-6 p-4 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-center">
-                    <div className="w-6 h-6 border-2 border-blue-300 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                    <p>Processing your sign-in link...</p>
-                  </div>
-                ) : (
-                  <div className="mb-6">
-                    <p className="text-sm text-gray-300 mb-3">It looks like you opened the sign-in link from inside an app. Please enter the same email you used to request the link to complete sign-in.</p>
-                    <form onSubmit={async (e) => {
-                      e.preventDefault();
-                      try {
-                        setIsLoading(true);
-                        setMessage("");
-                        await completeSignIn(email.trim());
-                      } catch (err) {
-                        console.error(err);
-                        setMessage("Failed to complete sign-in. Please try again.");
-                      } finally {
-                        setIsLoading(false);
-                      }
-                    }} className="space-y-4">
-                      <Input
-                        id="complete-email"
-                        type="email"
-                        placeholder="name@example.com"
-                        className="h-11"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        disabled={isLoading}
-                        required
-                      />
-                      <Button type="submit" className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white" disabled={isLoading}>
-                        {isLoading ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2 inline-block"></div>
-                            Completing sign-in...
-                          </>
-                        ) : (
-                          "Complete sign-in"
-                        )}
-                      </Button>
-                    </form>
-                  </div>
-                )
+                <div className="mb-6 p-4 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300">
+                  {returnedEmail ? (
+                    <div className="text-center">
+                      <div className="w-6 h-6 border-2 border-blue-300 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                      <p>Processing your sign-in link...</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="mb-3 text-center">It looks like you opened the sign-in link in your mail app. To complete sign-in, enter the email address you used to request the link.</p>
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault()
+                          try {
+                            setIsLoading(true)
+                            setMessage("")
+                            await completeEmailSignIn(email)
+                          } catch (err) {
+                            console.error(err)
+                            setMessage("Failed to complete sign-in. Please check your email and try again.")
+                          } finally {
+                            setIsLoading(false)
+                          }
+                        }}
+                        className="flex gap-2"
+                      >
+                        <Input
+                          id="complete-email"
+                          type="email"
+                          placeholder="name@example.com"
+                          className="h-11"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          disabled={isLoading}
+                          required
+                        />
+                        <Button type="submit" className="h-11 bg-blue-600 hover:bg-blue-700 text-white">Complete</Button>
+                      </form>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Email Input Section */}
