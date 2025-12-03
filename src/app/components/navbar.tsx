@@ -51,7 +51,7 @@ export default function Navbar() {
               className="bg-transparent border border-gray-400 text-white hover:bg-white/10 text-sm px-4 py-1.5 rounded-full"
               asChild
             >
-              <Link href="/start">Start free</Link>
+              <Link href="/signup">Start free</Link>
             </Button>
           </div>
 
@@ -97,7 +97,7 @@ export default function Navbar() {
                 className="bg-blue-600 hover:bg-blue-700 text-white w-full"
                 asChild
               >
-                <Link href="/start">Start free</Link>
+                <Link href="/signup">Start free</Link>
               </Button>
             </div>
           </div>
