@@ -104,7 +104,7 @@ export default function Home() {
 
               <div className="mb-12 flex flex-col md:flex-row items-center justify-center gap-4">
                 <Button size="lg" className="bg-blue-600/80 hover:bg-blue-700/80 text-white text-lg px-12 py-4 h-auto backdrop-blur-sm border border-blue-500/50 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105" asChild>
-                  <Link href="/start">Start Free</Link>
+                  <Link href="/signup">Start Free</Link>
                 </Button>
                 <Button size="lg" className="bg-transparent text-white text-lg px-12 py-4 h-auto border border-white/30 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105 hover:bg-white/10" asChild>
                   <Link href="#features">See Features</Link>
