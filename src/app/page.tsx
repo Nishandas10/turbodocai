@@ -23,7 +23,6 @@ export default function Home() {
     { src: "/orgs/National_Institute_of_Technology,_Nagaland_Logo.png", alt: "NIT Nagaland" },
     { src: "/orgs/Gauhati_University_Logo.png", alt: "Gauhati University" },
     { src: "/orgs/Deloitte-Logo.wine.png", alt: "Deloitte" },
-    { src: "/orgs/google-logo.png", alt: "Google" },
     { src: "/orgs/trellix.png", alt: "Trellix" },
   ]
 
