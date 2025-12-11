@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button"
 import Image from "next/image"
 import Navbar from "./components/navbar"
 import HowItWorks from "./components/how-it-works"
-import Testimonials from "./components/testimonials"
 import Pricing from "./components/pricing"
 import FAQ from "./components/faq"
 import Footer from "./components/footer"
@@ -119,9 +118,6 @@ export default function Home() {
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 text-[10px] font-semibold text-white ring-2 ring-black">R</span>
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-[10px] font-semibold text-white ring-2 ring-black">Z</span>
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
-                  </span>
-                  <span className="text-gray-300">
-                    <span className="font-semibold text-white">197,857+</span> users boost their grades with BlumeNote AI
                   </span>
                 </div>
               </div>
@@ -624,9 +620,6 @@ export default function Home() {
 
         {/* How It Works Section */}
         <HowItWorks />
-
-        {/* Testimonials Section */}
-        <Testimonials />
 
         {/* Pricing Section */}
         <Pricing />
