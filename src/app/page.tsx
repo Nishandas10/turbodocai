@@ -111,13 +111,6 @@ export default function Home() {
               <div className="mt-6 flex flex-col items-center space-y-3">
                 <div className="flex items-center space-x-2 text-sm text-gray-300">
                   {/* Simple avatar circles using brand accents */}
-                  <span className="flex -space-x-2">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-purple-600 text-[10px] font-semibold text-white ring-2 ring-black">F</span>
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 text-[10px] font-semibold text-white ring-2 ring-black">R</span>
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-[10px] font-semibold text-white ring-2 ring-black">Z</span>
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white ring-2 ring-black">A</span>
-                  </span>
                 </div>
               </div>
             </div>
