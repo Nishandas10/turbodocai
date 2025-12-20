@@ -1,15 +1,36 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import Link from "next/link";
 import { ArrowUp } from "lucide-react"
 import Image from "next/image"
+import WebsiteLinkModal from "./components/WebsiteLinkModal"
 
 export default function Home() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
+  const addMenuRef = useRef<HTMLDivElement | null>(null)
+  const [isWebsiteModalOpen, setIsWebsiteModalOpen] = useState(false)
+
+  // Close the add menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) {
+        setIsAddMenuOpen(false)
+      }
+    }
+
+    if (isAddMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [isAddMenuOpen])
 
   useEffect(() => {
     if (!loading && user) {
@@ -64,22 +85,56 @@ export default function Home() {
           </div>
         </div>
         <h1 className="text-2xl sm:text-3xl font-normal text-[#3A3A3A] mb-1">
-          What do you want to learn about?
+          What do you want to learn today?
         </h1>
         {/* Search */}
         <div className="mt-12 max-w-2xl mx-auto">
-          <div className="flex items-center gap-3 rounded-full bg-white ring-1 ring-[#cccccc] px-6 py-4">
+          <div className="flex items-center gap-3 rounded-full bg-white ring-1 ring-[#cccccc] px-6 py-4 relative">
             <input
               type="text"
               placeholder="Teach me about..."
               className="flex-1 bg-transparent outline-none text-sm text-gray-600 placeholder:text-gray-400"
             />
-            <button
-              aria-label="Add topic"
-              className="text-3xl text-gray-400 hover:text-gray-600 transition-colors leading-none"
-            >
-              +
-            </button>
+            <div ref={addMenuRef} className="relative">
+              <button
+                aria-label="Add topic"
+                onClick={() => setIsAddMenuOpen((open) => !open)}
+                className="text-3xl text-gray-400 hover:text-gray-600 transition-colors leading-none"
+              >
+                +
+              </button>
+              {isAddMenuOpen && (
+                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-white text-sm text-gray-800 border border-gray-100 shadow-sm py-2 z-20">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddMenuOpen(false)
+                      setIsWebsiteModalOpen(true)
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left"
+                  >
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs">🔗</span>
+                    <span>Add website link</span>
+                  </button>
+                  <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs">▶️</span>
+                    <span>YouTube video</span>
+                  </button>
+                  <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs">🎙️</span>
+                    <span>Record audio</span>
+                  </button>
+                  <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs">📄</span>
+                    <span>Upload docs</span>
+                  </button>
+                  <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs">📷</span>
+                    <span>Camera</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               aria-label="Search"
               className="size-10 rounded-full bg-black text-white grid place-items-center text-base hover:bg-gray-800 transition-colors"
@@ -89,6 +144,11 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <WebsiteLinkModal
+        isOpen={isWebsiteModalOpen}
+        onClose={() => setIsWebsiteModalOpen(false)}
+      />
 
       {/* Trending / Suggestions */}
       <section className="max-w-2xl mx-auto mt-12 space-y-6">
