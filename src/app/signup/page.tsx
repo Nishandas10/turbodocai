@@ -89,8 +89,8 @@ export default function SignupPage() {
       <div className="relative z-10">
         {/* Main Card */}
         <div className="w-full max-w-md">
-          <div className="bg-white rounded-xl p-8 border border-black/10 relative shadow-sm">
-            {/* Glow Effect removed for a simpler flat look */}
+          <div className="bg-white rounded-xl p-8 border border-black/10 relative">
+            {/* Flat card (no shadow/ring) */}
             <div className="relative">
               {/* Title */}
               <div className="text-center mb-8">
@@ -112,7 +112,7 @@ export default function SignupPage() {
                   id="email"
                   type="email"
                   placeholder="name@example.com"
-                  className="h-11 bg-white border border-black/10 text-gray-900 placeholder:text-gray-400"
+                  className="h-11 bg-white text-gray-900 placeholder:text-gray-400"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading}
@@ -125,13 +125,13 @@ export default function SignupPage() {
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     placeholder="Pick a strong password"
-                    className="h-11 pr-10 bg-white border border-black/10 text-gray-900 placeholder:text-gray-400"
+                    className="h-11 pr-10 bg-white text-gray-900 placeholder:text-gray-400"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={isLoading}
                     required
                   />
-                  <button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(s => !s)} className="absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-200">
+                  <button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(s => !s)} className="absolute inset-y-0 right-2 flex items-center text-gray-500 hover:text-gray-700 z-10">
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
@@ -165,7 +165,7 @@ export default function SignupPage() {
               {/* Google Sign In Button */}
               <div className="mb-6">
                 <Button
-                  className="w-full h-11 justify-start gap-3 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="w-full h-11 justify-start gap-3 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#F7D978]/20 focus-visible:border-[#F7D978]"
                   onClick={handleGoogleSignIn}
                   disabled={isLoading}
                 >

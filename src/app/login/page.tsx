@@ -70,9 +70,9 @@ export default function LoginPage() {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.06),transparent_50%)]"></div>
 
       <div className="relative z-10 w-full max-w-md">
-        <div className="bg-white rounded-xl p-8 border border-black/10 relative shadow-sm">
+  <div className="bg-white rounded-xl p-8 border border-black/10 relative">
           <div className="text-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome back</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome back to Currio</h2>
             <p className="text-gray-600">Sign in to your account</p>
           </div>
 
@@ -86,7 +86,7 @@ export default function LoginPage() {
               id="email"
               type="email"
               placeholder="name@example.com"
-              className="h-11 bg-white border border-black/10 text-gray-900 placeholder:text-gray-400"
+              className="h-11 bg-white text-gray-900 placeholder:text-gray-400"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={isLoading}
@@ -98,7 +98,7 @@ export default function LoginPage() {
               id="password"
               type="password"
               placeholder="Your password"
-              className="h-11 bg-white border border-black/10 text-gray-900 placeholder:text-gray-400"
+              className="h-11 bg-white text-gray-900 placeholder:text-gray-400"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={isLoading}
@@ -124,7 +124,7 @@ export default function LoginPage() {
 
           <div className="mb-6">
             <Button
-              className="w-full h-11 justify-start gap-3 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full h-11 justify-start gap-3 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#F7D978]/20 focus-visible:border-[#F7D978]"
               onClick={handleGoogle}
               disabled={isLoading}
             >
