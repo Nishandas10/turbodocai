@@ -8,12 +8,60 @@ import { ArrowUp } from "lucide-react"
 import Image from "next/image"
 import WebsiteLinkModal from "./components/WebsiteLinkModal"
 
+// --- NEW IMPORTS ---
+import { experimental_useObject as useObject } from "@ai-sdk/react"
+import { courseSchema, type Course } from "@/lib/schema" // Make sure this path is correct
+import CourseViewer from "@/components/CourseViewer" // Make sure this path is correct
+
 export default function Home() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  
+  // UI States
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
   const addMenuRef = useRef<HTMLDivElement | null>(null)
   const [isWebsiteModalOpen, setIsWebsiteModalOpen] = useState(false)
+  
+  // --- NEW LOGIC STATE ---
+  type Source = { type: string; content: string }
+  const [input, setInput] = useState("")
+  const [sources, setSources] = useState<Source[]>([]) 
+
+  // --- AI HOOK ---
+  const courseIdRef = useRef<string | null>(null);
+
+  const { object, submit, isLoading } = useObject({
+    api: "/api/generate",
+    schema: courseSchema,
+    fetch: async (input, init) => {
+      const res = await fetch(input, init);
+      if (res.ok) {
+        const id = res.headers.get("x-course-id");
+        if (id) courseIdRef.current = id;
+      }
+      return res;
+    },
+    onFinish: () => {
+      // MAGIC: Automatically update URL to the permanent public link without reload
+      const id = courseIdRef.current;
+      if (id) {
+        window.history.pushState({}, "", `/course/${id}`)
+      }
+    },
+  })
+
+  // --- HANDLER ---
+  const handleGenerate = () => {
+    if (!input.trim()) return
+    // Trigger the AI generation
+    submit({ prompt: input, sources: sources })
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleGenerate()
+    }
+  }
 
   // Close the add menu when clicking outside
   useEffect(() => {
@@ -50,6 +98,12 @@ export default function Home() {
   // If user is authenticated, redirect to dashboard
   if (user) {
     return null
+  }
+
+  // --- CONDITIONAL RENDERING ---
+  // If the AI has started generating (object exists) or is loading, swap the view
+  if (object || isLoading) {
+    return <CourseViewer course={object as Course} />
   }
 
   return (
@@ -89,9 +143,12 @@ export default function Home() {
         </h1>
         {/* Search */}
         <div className="mt-12 max-w-2xl mx-auto">
-          <div className="flex items-center gap-3 rounded-full bg-white ring-1 ring-[#cccccc] px-6 py-4 relative">
+          <div className="flex items-center gap-3 rounded-full bg-white ring-1 ring-[#cccccc] px-6 py-4 relative focus-within:ring-2 focus-within:ring-black/20 transition-shadow">
             <input
               type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Teach me about..."
               className="flex-1 bg-transparent outline-none text-sm text-gray-600 placeholder:text-gray-400"
             />
@@ -137,7 +194,9 @@ export default function Home() {
             </div>
             <button
               aria-label="Search"
-              className="size-10 rounded-full bg-black text-white grid place-items-center text-base hover:bg-gray-800 transition-colors"
+              onClick={handleGenerate}
+              disabled={!input.trim()}
+              className="size-10 rounded-full bg-black text-white grid place-items-center text-base hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
             </button>
@@ -148,6 +207,9 @@ export default function Home() {
       <WebsiteLinkModal
         isOpen={isWebsiteModalOpen}
         onClose={() => setIsWebsiteModalOpen(false)}
+        onLinkAdded={(url: string) => {
+          setSources((prev) => [...prev, { type: "website", content: url }])
+        }}
       />
 
       {/* Trending / Suggestions */}
@@ -158,9 +220,13 @@ export default function Home() {
             <span>↗</span>
             <span>Art of Spending Money</span>
           </div>
-          <a
-            href="#"
-            className="flex items-center justify-between gap-3 rounded-2xl bg-white ring-1 ring-black/5 px-3 py-3 hover:ring-black/10 transition-all group"
+          <button
+            onClick={() => {
+                setInput("Mastering Your Money");
+                // Optional: Auto-submit on click?
+                // submit({ prompt: "Mastering Your Money" });
+            }}
+            className="w-full flex items-center justify-between gap-3 rounded-2xl bg-white ring-1 ring-black/5 px-3 py-3 hover:ring-black/10 transition-all group"
           >
             <div className="flex items-center gap-3">
               <div className="size-10 rounded-lg bg-linear-to-br from-orange-300 to-yellow-400 grid place-items-center overflow-hidden">
@@ -169,7 +235,7 @@ export default function Home() {
               <div className="text-sm font-normal text-[#3A3A3A]">Mastering Your Money</div>
             </div>
             <div className="text-xl text-gray-300 group-hover:text-gray-400 transition-colors">›</div>
-          </a>
+          </button>
         </div>
 
         {/* Group 2 */}
@@ -178,9 +244,9 @@ export default function Home() {
             <span>↗</span>
             <span>Terminology of watches</span>
           </div>
-          <a
-            href="#"
-            className="flex items-center justify-between gap-3 rounded-2xl bg-white ring-1 ring-black/5 px-3 py-3 hover:ring-black/10 transition-all group"
+          <button
+            onClick={() => setInput("Watch Terminology Explained")}
+            className="w-full flex items-center justify-between gap-3 rounded-2xl bg-white ring-1 ring-black/5 px-3 py-3 hover:ring-black/10 transition-all group"
           >
             <div className="flex items-center gap-3">
               <div className="size-10 rounded-lg bg-linear-to-br from-orange-200 to-orange-300 grid place-items-center overflow-hidden">
@@ -189,7 +255,7 @@ export default function Home() {
               <div className="text-sm font-normal text-[#3A3A3A]">Watch Terminology Explained</div>
             </div>
             <div className="text-xl text-gray-300 group-hover:text-gray-400 transition-colors">›</div>
-          </a>
+          </button>
         </div>
 
         {/* Group 3 */}
@@ -198,9 +264,9 @@ export default function Home() {
             <span>↗</span>
             <span>mixology</span>
           </div>
-          <a
-            href="#"
-            className="flex items-center justify-between gap-3 rounded-2xl bg-white ring-1 ring-black/5 px-3 py-3 hover:ring-black/10 transition-all group"
+          <button
+             onClick={() => setInput("Cocktail Mixology Basics")}
+            className="w-full flex items-center justify-between gap-3 rounded-2xl bg-white ring-1 ring-black/5 px-3 py-3 hover:ring-black/10 transition-all group"
           >
             <div className="flex items-center gap-3">
               <div className="size-10 rounded-lg bg-linear-to-br from-purple-200 to-pink-200 grid place-items-center overflow-hidden">
@@ -209,7 +275,7 @@ export default function Home() {
               <div className="text-sm font-normal text-[#3A3A3A]">Cocktail Mixology Basics</div>
             </div>
             <div className="text-xl text-gray-300 group-hover:text-gray-400 transition-colors">›</div>
-          </a>
+          </button>
         </div>
       </section>
     </main>

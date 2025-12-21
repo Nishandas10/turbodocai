@@ -13,7 +13,7 @@ import UpgradeModal from "@/components/UpgradeModal"
 import { checkUploadAndChatPermission } from "@/lib/planLimits"
 
 export default function WebsiteLinkModal(props: any) {
-  const { isOpen, onClose, spaceId } = props as { isOpen: boolean; onClose: () => void; spaceId?: string }
+  const { isOpen, onClose, spaceId, onLinkAdded } = props as { isOpen: boolean; onClose: () => void; spaceId?: string; onLinkAdded?: (url: string) => void }
   const [websiteLink, setWebsiteLink] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingStatus, setProcessingStatus] = useState<string>("")
@@ -72,6 +72,16 @@ export default function WebsiteLinkModal(props: any) {
     }
     try {
       const normalizedUrl = normalizeUrl(websiteLink)
+
+      // If onLinkAdded is provided, just return the URL and close (Guest Mode / Course Generator)
+      if (onLinkAdded) {
+        onLinkAdded(normalizedUrl)
+        onClose()
+        setWebsiteLink("")
+        setIsProcessing(false)
+        return
+      }
+
       const documentId = await createWebsiteDocument(user.uid, normalizedUrl, undefined, spaceId)
       console.log('Website saved successfully:', documentId)
 

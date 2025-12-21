@@ -1,0 +1,339 @@
+"use client";
+import { useState } from "react";
+import React from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { BookOpen, Headphones, Play, Download } from "lucide-react";
+import { Course } from "@/lib/schema";
+import Link from "next/link";
+
+export default function CourseViewer({ course }: { course: Course }) {
+  // UI State
+  const [activeModuleIdx, setActiveModuleIdx] = useState(0);
+  const [activeSectionIdx, setActiveSectionIdx] = useState(0);
+  const [activeTab, setActiveTab] = useState<"read" | "listen">("read");
+
+  // Safety check for empty streaming data
+  const currentModule = course?.modules?.[activeModuleIdx];
+  const currentSection = currentModule?.sections?.[activeSectionIdx];
+
+  if (!course)
+    return (
+      <div className="flex h-screen items-center justify-center bg-white">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black mx-auto mb-4"></div>
+          <p className="text-gray-500">Initializing Course...</p>
+        </div>
+      </div>
+    );
+
+  return (
+    <div className="flex flex-col h-screen bg-white font-sans text-[#1A1A1A]">
+      {/* --- TOP NAVIGATION --- */}
+      <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white z-20">
+        <div className="flex items-center gap-2">
+          <Link href="/" className="text-2xl font-serif font-bold tracking-tight">Currio</Link>
+        </div>
+        <div className="flex items-center gap-3">
+          <Link 
+            href="/signup" 
+            className="px-5 py-2 text-sm font-medium bg-[#FBE7A1] hover:bg-[#F7D978] text-[#1A1A1A] rounded-full transition-colors"
+          >
+            Sign Up
+          </Link>
+          <Link 
+            href="/login" 
+            className="px-5 py-2 text-sm font-medium border border-gray-200 rounded-full text-[#1A1A1A] hover:bg-gray-50 transition-colors"
+          >
+            Log In
+          </Link>
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* --- LEFT SIDEBAR --- */}
+        <aside className="w-80 border-r border-gray-100 bg-white flex flex-col overflow-y-auto">
+          <div className="p-6">
+            {/* Course Card */}
+            <div className="bg-[#F8F6F3] rounded-xl p-4 mb-8">
+              <div className="aspect-video bg-[#E5E5E5] rounded-lg mb-4 relative overflow-hidden flex items-center justify-center">
+                <span className="text-4xl">🎓</span>
+              </div>
+              <h2 className="font-serif font-bold text-lg leading-tight text-[#1A1A1A]">
+                {course.courseTitle || "Generating..."}
+              </h2>
+            </div>
+
+            {/* Navigation */}
+            <nav className="space-y-8">
+              {course.modules?.map((module, mIdx) => (
+                <div key={mIdx}>
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">
+                    {module.moduleTitle}
+                  </h3>
+                  <div className="space-y-1">
+                    {module.sections?.map((section, sIdx) => {
+                      const isActive =
+                        mIdx === activeModuleIdx && sIdx === activeSectionIdx;
+                      return (
+                        <button
+                          key={sIdx}
+                          onClick={() => {
+                            setActiveModuleIdx(mIdx);
+                            setActiveSectionIdx(sIdx);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${
+                            isActive
+                              ? "bg-[#F8F6F3] text-black font-medium"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          {section.title}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </nav>
+          </div>
+        </aside>
+
+        {/* --- MAIN CONTENT --- */}
+        <main className="flex-1 overflow-y-auto bg-white">
+          <div className="max-w-3xl mx-auto px-12 py-12 pb-32">
+            {/* Course Header in Main Content */}
+            <div className="mb-16">
+              <h1 className="font-serif text-4xl md:text-5xl font-medium text-[#1A1A1A] mb-6 leading-tight">
+                {course.courseTitle}
+              </h1>
+              <p className="text-lg text-gray-600 leading-relaxed">
+                {course.courseDescription}
+              </p>
+            </div>
+
+            {currentSection ? (
+              <div className="animate-in fade-in duration-500">
+                {/* Section Header */}
+                <div className="mb-8">
+                  <h2 className="font-serif text-3xl font-medium text-[#1A1A1A] mb-8">
+                    {currentSection.title}
+                  </h2>
+
+                  {/* Tabs & Actions */}
+                  <div className="flex items-center justify-between border-b border-gray-200">
+                    <div className="flex gap-8">
+                      <button
+                        onClick={() => setActiveTab("read")}
+                        className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
+                          activeTab === "read"
+                            ? "border-black text-black"
+                            : "border-transparent text-gray-500 hover:text-gray-800"
+                        }`}
+                      >
+                        <BookOpen size={18} /> Explanation
+                      </button>
+                      <button
+                        onClick={() => setActiveTab("listen")}
+                        className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
+                          activeTab === "listen"
+                            ? "border-black text-black"
+                            : "border-transparent text-gray-500 hover:text-gray-800"
+                        }`}
+                      >
+                        <Headphones size={18} /> Podcast
+                      </button>
+                    </div>
+                    <div className="pb-3 flex items-center gap-3">
+                      <button className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
+                        <Download size={18} />
+                      </button>
+                      <span className="text-xs font-medium bg-gray-100 px-3 py-1.5 rounded-full text-gray-600">
+                        2 Sources
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="max-w-none">
+                  {activeTab === "read" ? (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        h1: ({ ...props }) => (
+                          <h1
+                            className="font-serif text-3xl font-medium text-[#1A1A1A] mt-12 mb-6 leading-tight"
+                            {...props}
+                          />
+                        ),
+                        h2: ({ ...props }) => (
+                          <h2
+                            className="font-serif text-2xl font-medium text-[#1A1A1A] mt-10 mb-5 leading-tight"
+                            {...props}
+                          />
+                        ),
+                        h3: ({ ...props }) => (
+                          <h3
+                            className="font-serif text-xl font-medium text-[#1A1A1A] mt-8 mb-4 leading-tight"
+                            {...props}
+                          />
+                        ),
+                        h4: ({ ...props }) => (
+                          <h4
+                            className="font-sans text-lg font-semibold text-[#1A1A1A] mt-6 mb-3"
+                            {...props}
+                          />
+                        ),
+                        p: ({ children, ...props }) => {
+                          return (
+                            <p
+                              className="text-[#1A1A1A] leading-relaxed mb-6 text-[17px]"
+                              {...props}
+                            >
+                              {children}
+                            </p>
+                          );
+                        },
+                        ul: ({ ...props }) => (
+                          <ul
+                            className="list-none mb-8 space-y-3 text-[#1A1A1A]"
+                            {...props}
+                          />
+                        ),
+                        ol: ({ ...props }) => (
+                          <ol
+                            className="list-decimal list-outside ml-6 mb-8 space-y-3 text-[#1A1A1A]"
+                            {...props}
+                          />
+                        ),
+                        li: ({ children, ...props }) => {
+                          // Check if this is a nested list item (definition-style)
+                          const hasNestedContent = React.Children.toArray(children).some(
+                            child => typeof child === 'object'
+                          );
+                          
+                          return (
+                            <li 
+                              className={`leading-relaxed text-[17px] ${
+                                hasNestedContent ? 'ml-0' : 'ml-0'
+                              }`}
+                              {...props}
+                            >
+                              <span className="inline-flex items-start">
+                                <span className="mr-3 mt-2 text-gray-400">•</span>
+                                <span className="flex-1">{children}</span>
+                              </span>
+                            </li>
+                          );
+                        },
+                        blockquote: ({ children, ...props }) => {
+                          return (
+                            <blockquote
+                              className="border-l-4 border-[#F7D978] pl-6 pr-4 py-5 my-8 bg-[#fbe7a1] text-[#1A1A1A] rounded-r-lg shadow-sm"
+                              {...props}
+                            >
+                              <div className="space-y-3">
+                                {children}
+                              </div>
+                            </blockquote>
+                          );
+                        },
+                        strong: ({ children, ...props }) => {
+                          return (
+                            <strong
+                              className="font-semibold text-[#1A1A1A]"
+                              {...props}
+                            >
+                              {children}
+                            </strong>
+                          );
+                        },
+                        em: ({ ...props }) => (
+                          <em
+                            className="text-gray-500 text-sm not-italic"
+                            {...props}
+                          />
+                        ),
+                        code: ({ ...props }) => (
+                          <code
+                            className="bg-gray-100 text-gray-800 px-2 py-0.5 rounded text-[15px] font-mono"
+                            {...props}
+                          />
+                        ),
+                        pre: ({ ...props }) => (
+                          <pre
+                            className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 overflow-x-auto"
+                            {...props}
+                          />
+                        ),
+                        hr: ({ ...props }) => (
+                          <hr
+                            className="border-t border-gray-200 my-10"
+                            {...props}
+                          />
+                        ),
+                        table: ({ ...props }) => (
+                          <div className="overflow-x-auto my-8 border border-gray-200 rounded-lg">
+                            <table className="min-w-full divide-y divide-gray-200 text-sm" {...props} />
+                          </div>
+                        ),
+                        thead: ({ ...props }) => (
+                          <thead className="bg-gray-50" {...props} />
+                        ),
+                        tbody: ({ ...props }) => (
+                          <tbody className="divide-y divide-gray-200 bg-white" {...props} />
+                        ),
+                        tr: ({ ...props }) => (
+                          <tr className="transition-colors hover:bg-gray-50/50" {...props} />
+                        ),
+                        th: ({ ...props }) => (
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider font-sans" {...props} />
+                        ),
+                        td: ({ ...props }) => (
+                          <td className="px-4 py-3 whitespace-normal text-gray-700" {...props} />
+                        ),
+                      }}
+                    >
+                      {currentSection.explanation}
+                    </ReactMarkdown>
+                  ) : (
+                    // Podcast View
+                    <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-[#E5E5E5]">
+                      <div className="flex items-center gap-5 mb-8">
+                        <button className="w-14 h-14 bg-black rounded-full flex items-center justify-center hover:scale-105 transition shadow-lg">
+                          <Play
+                            fill="white"
+                            size={24}
+                            className="ml-1 text-white"
+                          />
+                        </button>
+                        <div>
+                          <p className="font-bold text-lg text-gray-900">
+                            Audio Overview
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            AI Generated Conversation • {currentSection.readingTime} listen
+                          </p>
+                        </div>
+                      </div>
+                      <div className="prose prose-sm font-mono text-gray-600 whitespace-pre-line">
+                        {currentSection.podcastScript}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 text-gray-400 animate-pulse">
+                <div className="h-4 w-3/4 bg-gray-100 rounded mb-4"></div>
+                <div className="h-4 w-1/2 bg-gray-100 rounded"></div>
+                <p className="mt-8 text-sm">Generating course content...</p>
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
