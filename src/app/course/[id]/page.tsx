@@ -9,9 +9,15 @@ const redis = Redis.fromEnv();
 export default async function PublicCoursePage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const data = await redis.get(`course:${params.id}`);
+  const { id: courseIdSlug } = await params;
+  
+  // Extract the ID from the slug (format: title-slug-ID)
+  // We assume the ID is the last part after the last hyphen
+  const courseId = courseIdSlug.split("-").pop();
+
+  const data = await redis.get(`course:${courseId}`);
 
   if (!data) {
     return notFound();

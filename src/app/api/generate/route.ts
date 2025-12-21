@@ -2,12 +2,16 @@ import { google } from "@ai-sdk/google";
 import { streamObject } from "ai";
 import { courseSchema } from "@/lib/schema";
 import { Redis } from "@upstash/redis";
-import { nanoid } from "nanoid";
+import { customAlphabet } from "nanoid";
 
 // EDGE RUNTIME: Critical for speed and long streaming timeouts
 export const runtime = "edge";
 
 const redis = Redis.fromEnv();
+const generateId = customAlphabet(
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  10
+);
 
 type Source = {
   type: string;
@@ -31,7 +35,7 @@ export async function POST(req: Request) {
   }
 
   // Generate a unique ID for this course immediately
-  const courseId = nanoid(10);
+  const courseId = generateId();
 
   // 1. Context Preparation (Simple concatenation for text sources)
   // For production, use Jina.ai for web links or pdf-parse for docs

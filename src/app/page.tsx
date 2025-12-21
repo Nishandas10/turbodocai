@@ -13,6 +13,16 @@ import { experimental_useObject as useObject } from "@ai-sdk/react"
 import { courseSchema, type Course } from "@/lib/schema" // Make sure this path is correct
 import CourseViewer from "@/components/CourseViewer" // Make sure this path is correct
 
+function slugify(text: string) {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-") // Replace spaces with -
+    .replace(/[^\w\-]+/g, "") // Remove all non-word chars
+    .replace(/\-\-+/g, "-"); // Replace multiple - with single -
+}
+
 export default function Home() {
   const { user, loading } = useAuth()
   const router = useRouter()
@@ -41,10 +51,13 @@ export default function Home() {
       }
       return res;
     },
-    onFinish: () => {
+    onFinish: ({ object }) => {
       // MAGIC: Automatically update URL to the permanent public link without reload
       const id = courseIdRef.current;
-      if (id) {
+      if (id && object?.courseTitle) {
+        const slug = slugify(object.courseTitle);
+        window.history.pushState({}, "", `/course/${slug}-${id}`)
+      } else if (id) {
         window.history.pushState({}, "", `/course/${id}`)
       }
     },
