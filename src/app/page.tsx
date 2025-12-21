@@ -56,9 +56,10 @@ export default function Home() {
       const id = courseIdRef.current;
       if (id && object?.courseTitle) {
         const slug = slugify(object.courseTitle);
-        window.history.pushState({}, "", `/course/${slug}-${id}`)
+        // Use Next.js router to update navigation so the app state and router pathname stay in sync
+        router.replace(`/course/${slug}-${id}`);
       } else if (id) {
-        window.history.pushState({}, "", `/course/${id}`)
+        router.replace(`/course/${id}`);
       }
     },
   })

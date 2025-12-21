@@ -425,3 +425,4 @@ export default async function PublicCoursePage({
 image gen 4 fast gemini for images
 gemini 2.5 fast for tts
 web-search , files and uploads gemini only
+page refresh regen issue

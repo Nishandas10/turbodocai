@@ -6,16 +6,49 @@ import remarkGfm from "remark-gfm";
 import { BookOpen, Headphones, Play, Download } from "lucide-react";
 import { Course } from "@/lib/schema";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function CourseViewer({ course }: { course: Course }) {
   // UI State
   const [activeModuleIdx, setActiveModuleIdx] = useState(0);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const [activeTab, setActiveTab] = useState<"read" | "listen">("read");
+  
+  // Image generation state
+  const [courseImage, setCourseImage] = useState<string | null>(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   // refs for the navigation card and main content so we can scroll selected item into view
   const navRef = useRef<HTMLDivElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
+
+  // Generate course image when course title is available
+  useEffect(() => {
+    if (course?.courseTitle && !courseImage && !isGeneratingImage && !imageError) {
+      setIsGeneratingImage(true);
+      
+      fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: course.courseTitle }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.image) {
+            setCourseImage(data.image);
+          } else {
+            setImageError(true);
+          }
+        })
+        .catch(() => {
+          setImageError(true);
+        })
+        .finally(() => {
+          setIsGeneratingImage(false);
+        });
+    }
+  }, [course?.courseTitle, courseImage, isGeneratingImage, imageError]);
 
   useEffect(() => {
     const nav = navRef.current;
@@ -90,7 +123,23 @@ export default function CourseViewer({ course }: { course: Course }) {
               {/* Course Info */}
               <div className="pb-6 mb-6 border-b border-gray-300">
                 <div className="aspect-video bg-[#F8F6F3] rounded-xl mb-6 relative overflow-hidden flex items-center justify-center">
-                  <span className="text-4xl">🎓</span>
+                  {isGeneratingImage ? (
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400"></div>
+                      <span className="text-sm text-gray-500">Generating image...</span>
+                    </div>
+                  ) : courseImage && !imageError ? (
+                    <Image 
+                      src={`data:image/png;base64,${courseImage}`}
+                      alt={course.courseTitle || "Course thumbnail"}
+                      className="w-full h-full object-cover"
+                      width={1024}
+                      height={576}
+                      unoptimized
+                    />
+                  ) : (
+                    <span className="text-4xl">🎓</span>
+                  )}
                 </div>
                 <h2 className="font-serif font-bold text-xl leading-tight text-[#1A1A1A]">
                   {course.courseTitle || "Generating..."}
@@ -329,7 +378,7 @@ export default function CourseViewer({ course }: { course: Course }) {
                         ),
                       }}
                     >
-                      {currentSection.explanation}
+                      { (currentSection.explanation ?? '').replace(/\\n/g, '\n') }
                     </ReactMarkdown>
                   ) : (
                     // Podcast View
@@ -352,7 +401,7 @@ export default function CourseViewer({ course }: { course: Course }) {
                         </div>
                       </div>
                       <div className="prose prose-sm font-mono text-gray-600 whitespace-pre-line">
-                        {currentSection.podcastScript}
+                        {(currentSection.podcastScript ?? '').replace(/\\n/g, '\n')}
                       </div>
                     </div>
                   )}
