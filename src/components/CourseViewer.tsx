@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -12,6 +12,38 @@ export default function CourseViewer({ course }: { course: Course }) {
   const [activeModuleIdx, setActiveModuleIdx] = useState(0);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const [activeTab, setActiveTab] = useState<"read" | "listen">("read");
+
+  // refs for the navigation card and main content so we can scroll selected item into view
+  const navRef = useRef<HTMLDivElement | null>(null);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const selector = `[data-section="m${activeModuleIdx}-s${activeSectionIdx}"]`;
+    const el = nav.querySelector(selector) as HTMLElement | null;
+    if (el) {
+      // center the selected button in the scrollable nav
+      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    }
+
+    // also scroll the main content area to its top so the selected section starts from the top
+    if (mainContentRef.current) {
+      // compute element top relative to document and subtract sticky header height so content appears just below header
+      const rect = mainContentRef.current.getBoundingClientRect();
+      const headerEl = document.querySelector("header");
+      const headerHeight = headerEl ? (headerEl as HTMLElement).offsetHeight : 0;
+      const top = Math.max(0, window.scrollY + rect.top - headerHeight - 12);
+      window.scrollTo({ top, behavior: "smooth" });
+    }
+  }, [activeModuleIdx, activeSectionIdx]);
+
+  // On mount, scroll the nav card to the top so the first section is visible at the top
+  useEffect(() => {
+    if (navRef.current) {
+      navRef.current.scrollTop = 0;
+    }
+  }, []);
 
   // Safety check for empty streaming data
   const currentModule = course?.modules?.[activeModuleIdx];
@@ -28,9 +60,9 @@ export default function CourseViewer({ course }: { course: Course }) {
     );
 
   return (
-    <div className="flex flex-col h-screen bg-white font-sans text-[#1A1A1A]">
+    <div className="min-h-screen bg-white font-sans text-[#1A1A1A]">
       {/* --- TOP NAVIGATION --- */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white z-20">
+      <header className="flex items-center justify-between px-6 py-4 border-b bg-white sticky top-0 z-50">
         <div className="flex items-center gap-2">
           <Link href="/" className="text-2xl font-serif font-bold tracking-tight">Currio</Link>
         </div>
@@ -50,115 +82,117 @@ export default function CourseViewer({ course }: { course: Course }) {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* --- LEFT SIDEBAR --- */}
-        <aside className="w-80 border-r border-gray-100 bg-white flex flex-col overflow-y-auto">
-          <div className="p-6">
-            {/* Course Card */}
-            <div className="bg-[#F8F6F3] rounded-xl p-4 mb-8">
-              <div className="aspect-video bg-[#E5E5E5] rounded-lg mb-4 relative overflow-hidden flex items-center justify-center">
-                <span className="text-4xl">🎓</span>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
+        <div className="flex flex-col lg:flex-row gap-12">
+          {/* --- LEFT SIDEBAR (Navigation Card) --- */}
+          <aside className="w-full lg:w-80 shrink-0">
+            <div ref={navRef} className="bg-white border border-gray-300 rounded-2xl p-6 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar shadow-sm">
+              {/* Course Info */}
+              <div className="pb-6 mb-6 border-b border-gray-300">
+                <div className="aspect-video bg-[#F8F6F3] rounded-xl mb-6 relative overflow-hidden flex items-center justify-center">
+                  <span className="text-4xl">🎓</span>
+                </div>
+                <h2 className="font-serif font-bold text-xl leading-tight text-[#1A1A1A]">
+                  {course.courseTitle || "Generating..."}
+                </h2>
               </div>
-              <h2 className="font-serif font-bold text-lg leading-tight text-[#1A1A1A]">
-                {course.courseTitle || "Generating..."}
-              </h2>
-            </div>
 
-            {/* Navigation */}
-            <nav className="space-y-8">
-              {course.modules?.map((module, mIdx) => (
-                <div key={mIdx}>
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">
-                    {module.moduleTitle}
-                  </h3>
-                  <div className="space-y-1">
-                    {module.sections?.map((section, sIdx) => {
-                      const isActive =
-                        mIdx === activeModuleIdx && sIdx === activeSectionIdx;
-                      return (
+              {/* Navigation */}
+              <nav className="space-y-6">
+                {course.modules?.map((module, mIdx) => (
+                  <div key={mIdx}>
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">
+                      {module.moduleTitle}
+                    </h3>
+                    <div className="space-y-1">
+                      {module.sections?.map((section, sIdx) => {
+                        const isActive =
+                          mIdx === activeModuleIdx && sIdx === activeSectionIdx;
+                        return (
+                          <button
+                            key={sIdx}
+                            data-section={`m${mIdx}-s${sIdx}`}
+                            onClick={() => {
+                              setActiveModuleIdx(mIdx);
+                              setActiveSectionIdx(sIdx);
+                            }}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${
+                              isActive
+                                ? "bg-[#F8F6F3] text-black font-medium"
+                                : "text-gray-600 hover:bg-gray-50"
+                            }`}
+                          >
+                            {section.title}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </nav>
+            </div>
+          </aside>
+
+          {/* --- MAIN CONTENT --- */}
+          <main className="flex-1 min-w-0">
+              <div ref={mainContentRef} className="max-w-3xl">
+              {/* Course Header in Main Content */}
+              <div className="mb-12 border-b border-gray-300 pb-12">
+                <h1 className="font-serif text-4xl md:text-5xl font-medium text-[#1A1A1A] mb-6 leading-tight">
+                  {course.courseTitle}
+                </h1>
+                <p className="text-lg text-gray-600 leading-relaxed">
+                  {course.courseDescription}
+                </p>
+              </div>
+
+              {currentSection ? (
+                <div className="animate-in fade-in duration-500">
+                  {/* Section Header */}
+                  <div className="mb-8">
+                    <h2 className="font-serif text-3xl font-medium text-[#1A1A1A] mb-8">
+                      {currentSection.title}
+                    </h2>
+
+                    {/* Tabs & Actions */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex gap-8">
                         <button
-                          key={sIdx}
-                          onClick={() => {
-                            setActiveModuleIdx(mIdx);
-                            setActiveSectionIdx(sIdx);
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${
-                            isActive
-                              ? "bg-[#F8F6F3] text-black font-medium"
-                              : "text-gray-600 hover:bg-gray-50"
+                          onClick={() => setActiveTab("read")}
+                          className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
+                            activeTab === "read"
+                              ? "border-black text-black"
+                              : "border-transparent text-gray-500 hover:text-gray-800"
                           }`}
                         >
-                          {section.title}
+                          <BookOpen size={18} /> Explanation
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </nav>
-          </div>
-        </aside>
-
-        {/* --- MAIN CONTENT --- */}
-        <main className="flex-1 overflow-y-auto bg-white">
-          <div className="max-w-3xl mx-auto px-12 py-12 pb-32">
-            {/* Course Header in Main Content */}
-            <div className="mb-16">
-              <h1 className="font-serif text-4xl md:text-5xl font-medium text-[#1A1A1A] mb-6 leading-tight">
-                {course.courseTitle}
-              </h1>
-              <p className="text-lg text-gray-600 leading-relaxed">
-                {course.courseDescription}
-              </p>
-            </div>
-
-            {currentSection ? (
-              <div className="animate-in fade-in duration-500">
-                {/* Section Header */}
-                <div className="mb-8">
-                  <h2 className="font-serif text-3xl font-medium text-[#1A1A1A] mb-8">
-                    {currentSection.title}
-                  </h2>
-
-                  {/* Tabs & Actions */}
-                  <div className="flex items-center justify-between border-b border-gray-200">
-                    <div className="flex gap-8">
-                      <button
-                        onClick={() => setActiveTab("read")}
-                        className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
-                          activeTab === "read"
-                            ? "border-black text-black"
-                            : "border-transparent text-gray-500 hover:text-gray-800"
-                        }`}
-                      >
-                        <BookOpen size={18} /> Explanation
-                      </button>
-                      <button
-                        onClick={() => setActiveTab("listen")}
-                        className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
-                          activeTab === "listen"
-                            ? "border-black text-black"
-                            : "border-transparent text-gray-500 hover:text-gray-800"
-                        }`}
-                      >
-                        <Headphones size={18} /> Podcast
-                      </button>
-                    </div>
-                    <div className="pb-3 flex items-center gap-3">
-                      <button className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
-                        <Download size={18} />
-                      </button>
-                      <span className="text-xs font-medium bg-gray-100 px-3 py-1.5 rounded-full text-gray-600">
-                        2 Sources
-                      </span>
+                        <button
+                          onClick={() => setActiveTab("listen")}
+                          className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
+                            activeTab === "listen"
+                              ? "border-black text-black"
+                              : "border-transparent text-gray-500 hover:text-gray-800"
+                          }`}
+                        >
+                          <Headphones size={18} /> Podcast
+                        </button>
+                      </div>
+                      <div className="pb-3 flex items-center gap-3">
+                        <button className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
+                          <Download size={18} />
+                        </button>
+                        {/* <span className="text-xs font-medium bg-gray-100 px-3 py-1.5 rounded-full text-gray-600">
+                          2 Sources
+                        </span> */}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Content */}
-                <div className="max-w-none">
-                  {activeTab === "read" ? (
-                    <ReactMarkdown
+                  {/* Content */}
+                  <div className="max-w-none">
+                    {activeTab === "read" ? (
+                      <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
                         h1: ({ ...props }) => (
@@ -263,26 +297,26 @@ export default function CourseViewer({ course }: { course: Course }) {
                         ),
                         pre: ({ ...props }) => (
                           <pre
-                            className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 overflow-x-auto"
+                            className="bg-gray-50 border border-gray-300 rounded-lg p-4 mb-6 overflow-x-auto"
                             {...props}
                           />
                         ),
                         hr: ({ ...props }) => (
                           <hr
-                            className="border-t border-gray-200 my-10"
+                            className="border-t border-gray-300 my-10"
                             {...props}
                           />
                         ),
                         table: ({ ...props }) => (
-                          <div className="overflow-x-auto my-8 border border-gray-200 rounded-lg">
-                            <table className="min-w-full divide-y divide-gray-200 text-sm" {...props} />
+                          <div className="overflow-x-auto my-8 border border-gray-300 rounded-lg">
+                            <table className="min-w-full divide-y divide-gray-300 text-sm" {...props} />
                           </div>
                         ),
                         thead: ({ ...props }) => (
                           <thead className="bg-gray-50" {...props} />
                         ),
                         tbody: ({ ...props }) => (
-                          <tbody className="divide-y divide-gray-200 bg-white" {...props} />
+                          <tbody className="divide-y divide-gray-300 bg-white" {...props} />
                         ),
                         tr: ({ ...props }) => (
                           <tr className="transition-colors hover:bg-gray-50/50" {...props} />
@@ -299,7 +333,7 @@ export default function CourseViewer({ course }: { course: Course }) {
                     </ReactMarkdown>
                   ) : (
                     // Podcast View
-                    <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-[#E5E5E5]">
+                    <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-gray-300">
                       <div className="flex items-center gap-5 mb-8">
                         <button className="w-14 h-14 bg-black rounded-full flex items-center justify-center hover:scale-105 transition shadow-lg">
                           <Play
@@ -335,5 +369,6 @@ export default function CourseViewer({ course }: { course: Course }) {
         </main>
       </div>
     </div>
+  </div>
   );
 }
