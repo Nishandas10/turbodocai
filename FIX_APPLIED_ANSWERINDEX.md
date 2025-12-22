@@ -15,8 +15,8 @@ This means the AI generated quiz questions **without the `answerIndex` field**, 
 - Made the prompt **MUCH more explicit** about requiring `answerIndex`
 - Added example and field requirements
 - Emphasized it's a **0-based integer (0-3)**
-
-**Before:**
+- hello
+  **Before:**
 
 ```
 - Give the correct option index (0-based) and a short explanation.
