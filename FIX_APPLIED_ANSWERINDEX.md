@@ -16,7 +16,6 @@ This means the AI generated quiz questions **without the `answerIndex` field**, 
 - Added example and field requirements
 - Emphasized it's a **0-based integer (0-3)**
 - hello
-  **Before:**
 
 ```
 - Give the correct option index (0-based) and a short explanation.
