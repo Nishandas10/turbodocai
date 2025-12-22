@@ -15,40 +15,47 @@ export default function CourseViewer({ course }: { course: Course }) {
   const [activeTab, setActiveTab] = useState<"read" | "listen">("read");
   
   // Image generation state
-  const [courseImage, setCourseImage] = useState<string | null>(null);
+  const [courseImage, setCourseImage] = useState<string | null>(course?.courseImage ?? null);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [imageError, setImageError] = useState(false);
+
+  const courseId = (course as unknown as { id?: string } | undefined)?.id ?? null;
 
   // refs for the navigation card and main content so we can scroll selected item into view
   const navRef = useRef<HTMLDivElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
 
-  // Generate course image when course title is available
+  // Keep local state in sync when navigating between courses.
   useEffect(() => {
-    if (course?.courseTitle && !courseImage && !isGeneratingImage && !imageError) {
+    setCourseImage(course?.courseImage ?? null);
+    setImageError(false);
+    setIsGeneratingImage(false);
+  }, [course?.courseImage]);
+
+  // Generate + persist course image only when missing.
+  useEffect(() => {
+    if (!courseId) return;
+
+    if (!courseImage && !isGeneratingImage && !imageError) {
       setIsGeneratingImage(true);
-      
-      fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: course.courseTitle }),
+
+      fetch("/api/courses/ensure-thumbnail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId }),
       })
-        .then(res => res.json())
-        .then(data => {
-          if (data.success && data.image) {
-            setCourseImage(data.image);
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.success && typeof data?.courseImage === "string" && data.courseImage) {
+            setCourseImage(data.courseImage);
           } else {
             setImageError(true);
           }
         })
-        .catch(() => {
-          setImageError(true);
-        })
-        .finally(() => {
-          setIsGeneratingImage(false);
-        });
+        .catch(() => setImageError(true))
+        .finally(() => setIsGeneratingImage(false));
     }
-  }, [course?.courseTitle, courseImage, isGeneratingImage, imageError]);
+  }, [courseId, courseImage, isGeneratingImage, imageError]);
 
   useEffect(() => {
     const nav = navRef.current;

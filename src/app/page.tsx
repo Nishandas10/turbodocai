@@ -117,7 +117,14 @@ export default function Home() {
   // --- CONDITIONAL RENDERING ---
   // If the AI has started generating (object exists) or is loading, swap the view
   if (object || isLoading) {
-    return <CourseViewer course={object as Course} />
+    // While streaming, the course object may be partial; we inject a stable id (from response headers)
+    // so sub-features like thumbnail generation can start immediately.
+    const enrichedCourse = ({
+      ...(object as Partial<Course>),
+      ...(courseIdRef.current ? { id: courseIdRef.current } : {}),
+    } as unknown) as Course;
+
+    return <CourseViewer course={enrichedCourse} />
   }
 
   return (

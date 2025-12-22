@@ -41,6 +41,10 @@ export async function POST(req: Request) {
   // Generate a unique ID for this course immediately
   const courseId = generateId();
 
+  // Persist minimal metadata immediately so other endpoints (like thumbnail) can work
+  // while the course is still streaming.
+  await redis.set(`course:meta:${courseId}`, { prompt });
+
   // 1. Context Preparation (Simple concatenation for text sources)
   // For production, use Jina.ai for web links or pdf-parse for docs
   const contextBlock = sources
@@ -62,8 +66,29 @@ export async function POST(req: Request) {
     // 3. ON FINISH: Save to Redis for permanent access
     onFinish: async ({ object }) => {
       if (object) {
+        // If the client already generated/persisted a thumbnail during streaming,
+        // don't overwrite it with a potentially different image.
+        const existing = (await redis.get(`course:${courseId}`)) as Record<
+          string,
+          unknown
+        > | null;
+        const existingImage =
+          typeof existing?.courseImage === "string"
+            ? (existing.courseImage as string)
+            : "";
+
+        // IMPORTANT: Do not generate a thumbnail here.
+        // Thumbnails should only be generated during streaming via /api/courses/ensure-thumbnail.
+        const courseImage = existingImage || null;
+        // Attach id so the public course page and client components have a stable identifier.
+        // This enables persistence of additional fields (like courseImage) without guessing.
+        const courseWithId = {
+          ...(object as Record<string, unknown>),
+          id: courseId,
+          ...(courseImage ? { courseImage } : {}),
+        };
         // Expire after 7 days to save space (Guest Policy)
-        await redis.set(`course:${courseId}`, object);
+        await redis.set(`course:${courseId}`, courseWithId);
       }
     },
   });

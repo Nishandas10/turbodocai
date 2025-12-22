@@ -6,6 +6,10 @@ export const courseSchema = z.object({
   courseDescription: z
     .string()
     .describe("Brief summary of what the user will learn"),
+  // Optional: persisted thumbnail for the course.
+  // Stored as a base64-encoded PNG (no data: prefix) returned by /api/generate-image.
+  // This prevents regenerating an image on every page reload.
+  courseImage: z.string().optional(),
   modules: z.array(
     z.object({
       id: z.string(),
