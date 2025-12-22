@@ -193,7 +193,7 @@ export default function CourseViewer({ course }: { course: Course }) {
           <main className="flex-1 min-w-0">
               <div ref={mainContentRef} className="max-w-3xl">
               {/* Course Header in Main Content */}
-              <div className="mb-12 border-b border-gray-300 pb-12">
+              <div className="mb-5 pb-5">
                 <h1 className="font-serif text-4xl md:text-5xl font-medium text-[#1A1A1A] mb-6 leading-tight">
                   {course.courseTitle}
                 </h1>
@@ -206,9 +206,12 @@ export default function CourseViewer({ course }: { course: Course }) {
                 <div className="animate-in fade-in duration-500">
                   {/* Section Header */}
                   <div className="mb-8">
-                    <h2 className="font-serif text-3xl font-medium text-[#1A1A1A] mb-8">
+                    <h2 className="font-serif text-3xl font-medium text-[#1A1A1A] mb-6">
                       {currentSection.title}
                     </h2>
+
+                    {/* Separator Line */}
+                    <div className="border-t border-gray-300 mb-6"></div>
 
                     {/* Tabs & Actions */}
                     <div className="flex items-center justify-between">
@@ -251,12 +254,22 @@ export default function CourseViewer({ course }: { course: Course }) {
                       <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
-                        h1: ({ ...props }) => (
-                          <h1
-                            className="font-serif text-3xl font-medium text-[#1A1A1A] mt-12 mb-6 leading-tight"
-                            {...props}
-                          />
-                        ),
+                        h1: ({ children, ...props }) => {
+                          // Hide the first H1 if it matches the section title
+                          const headingText = typeof children === 'string' ? children : 
+                            Array.isArray(children) ? children.join('') : '';
+                          if (headingText.trim() === currentSection.title.trim()) {
+                            return null;
+                          }
+                          return (
+                            <h1
+                              className="font-serif text-3xl font-medium text-[#1A1A1A] mt-12 mb-6 leading-tight"
+                              {...props}
+                            >
+                              {children}
+                            </h1>
+                          );
+                        },
                         h2: ({ ...props }) => (
                           <h2
                             className="font-serif text-2xl font-medium text-[#1A1A1A] mt-10 mb-5 leading-tight"
