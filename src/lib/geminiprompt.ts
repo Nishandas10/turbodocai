@@ -37,6 +37,18 @@ MARKDOWN FORMATTING CONVENTIONS (so the UI looks beautiful):
 
 PODCAST SCRIPT:
 - podcastScript should be a conversational, two-speaker script (Mentor/Student) summarizing the lesson.
+
+END-OF-CHAPTER CHECKS (REQUIRED):
+- For every chapter/section, generate BOTH:
+  1) quiz: at least 3 multiple-choice questions.
+    - Each question must have 4 options.
+    - CRITICAL: Include "answerIndex" field (0-based integer, 0-3) indicating which option is correct.
+    - Example: If option at index 2 is correct, set answerIndex: 2
+    - Also provide a short explanation.
+  2) flashcards: at least 3 cards.
+    - Each card must have a front (prompt/term) and back (answer/explanation).
+- These must be grounded in that chapter's content, not generic.
+- REQUIRED FIELDS for each quiz question: question, options (array of 4 strings), answerIndex (number 0-3), explanation (string).
 `;
 
 export function buildCoursePrompt(

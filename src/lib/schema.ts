@@ -32,6 +32,30 @@ export const courseSchema = z.object({
             ),
           // Metadata for UI badges
           readingTime: z.string().describe("e.g. '5 min'"),
+
+          // End-of-chapter learning checks (optional for backward compatibility).
+          // If you generate them, keep at least 3 of each.
+          quiz: z
+            .array(
+              z.object({
+                question: z.string(),
+                options: z.array(z.string()).min(2),
+                // Index of the correct option in `options`
+                answerIndex: z.number().int().nonnegative(),
+                explanation: z.string().optional(),
+              })
+            )
+            .min(3)
+            .optional(),
+          flashcards: z
+            .array(
+              z.object({
+                front: z.string(),
+                back: z.string(),
+              })
+            )
+            .min(3)
+            .optional(),
         })
       ),
     })

@@ -17,6 +17,55 @@ const generateId = customAlphabet(
   10
 );
 
+/**
+ * Validate and fix quiz data to ensure answerIndex is present.
+ * If missing, attempt to guess from the question or default to 0.
+ */
+function validateAndFixQuizData(course: unknown): unknown {
+  if (!course || typeof course !== "object") return course;
+
+  const data = course as Record<string, unknown>;
+
+  if (!Array.isArray(data.modules)) return course;
+
+  data.modules.forEach((module: unknown) => {
+    if (!module || typeof module !== "object") return;
+    const mod = module as Record<string, unknown>;
+
+    if (!Array.isArray(mod.sections)) return;
+
+    mod.sections.forEach((section: unknown) => {
+      if (!section || typeof section !== "object") return;
+      const sec = section as Record<string, unknown>;
+
+      if (!Array.isArray(sec.quiz)) return;
+
+      sec.quiz.forEach((question: unknown) => {
+        if (!question || typeof question !== "object") return;
+        const q = question as Record<string, unknown>;
+
+        // Ensure options is an array
+        if (!Array.isArray(q.options)) {
+          q.options = [];
+        }
+
+        // Check if answerIndex is missing or invalid
+        if (typeof q.answerIndex !== "number" || q.answerIndex < 0) {
+          q.answerIndex = 0; // Default to first option
+        }
+
+        // Validate answerIndex is within options bounds
+        const ansIdx = q.answerIndex as number;
+        if (Array.isArray(q.options) && ansIdx >= q.options.length) {
+          q.answerIndex = 0;
+        }
+      });
+    });
+  });
+
+  return data;
+}
+
 type Source = {
   type: string;
   content: string;
@@ -66,6 +115,9 @@ export async function POST(req: Request) {
     // 3. ON FINISH: Save to Redis for permanent access
     onFinish: async ({ object }) => {
       if (object) {
+        // Validate and fix quiz data before saving
+        const validated = validateAndFixQuizData(object);
+
         // If the client already generated/persisted a thumbnail during streaming,
         // don't overwrite it with a potentially different image.
         const existing = (await redis.get(`course:${courseId}`)) as Record<
@@ -83,7 +135,7 @@ export async function POST(req: Request) {
         // Attach id so the public course page and client components have a stable identifier.
         // This enables persistence of additional fields (like courseImage) without guessing.
         const courseWithId = {
-          ...(object as Record<string, unknown>),
+          ...(validated as Record<string, unknown>),
           id: courseId,
           ...(courseImage ? { courseImage } : {}),
         };

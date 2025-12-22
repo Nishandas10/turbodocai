@@ -7,6 +7,7 @@ import { BookOpen, Headphones, Play, Download } from "lucide-react";
 import { Course } from "@/lib/schema";
 import Link from "next/link";
 import Image from "next/image";
+import ChapterChecks from "@/components/ChapterChecks";
 
 export default function CourseViewer({ course }: { course: Course }) {
   // UI State
@@ -251,6 +252,7 @@ export default function CourseViewer({ course }: { course: Course }) {
                   {/* Content */}
                   <div className="max-w-none">
                     {activeTab === "read" ? (
+                      <>
                       <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
@@ -400,6 +402,12 @@ export default function CourseViewer({ course }: { course: Course }) {
                     >
                       { (currentSection.explanation ?? '').replace(/\\n/g, '\n') }
                     </ReactMarkdown>
+                    <ChapterChecks
+                      key={currentSection.id}
+                      quiz={currentSection.quiz}
+                      flashcards={currentSection.flashcards}
+                    />
+                    </>
                   ) : (
                     // Podcast View
                     <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-gray-300">
