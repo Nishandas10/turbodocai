@@ -114,6 +114,58 @@ export default function CourseViewer({
       })
     : undefined;
 
+  // Split markdown content to insert image after 1st paragraph
+  const getMarkdownParts = (content: string) => {
+    if (!content) return { before: '', after: '' };
+    
+    // Split by double newlines to identify paragraphs
+    const lines = content.split('\n');
+    let paragraphCount = 0;
+    let splitIndex = -1;
+    let inCodeBlock = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Track code blocks
+      if (line.startsWith('```')) {
+        inCodeBlock = !inCodeBlock;
+        continue;
+      }
+      
+      // Skip empty lines and lines in code blocks
+      if (!line || inCodeBlock) continue;
+      
+      // Check if this is likely a paragraph (not a heading, list, etc)
+      if (!line.startsWith('#') && !line.startsWith('-') && !line.startsWith('*') && 
+          !line.startsWith('>') && !line.match(/^\d+\./)) {
+        paragraphCount++;
+        
+        // After the 1st paragraph, find the next empty line or end
+        if (paragraphCount === 1) {
+          // Find the next empty line after this paragraph
+          for (let j = i + 1; j < lines.length; j++) {
+            if (!lines[j].trim()) {
+              splitIndex = j;
+              break;
+            }
+          }
+          if (splitIndex === -1) splitIndex = i + 1;
+          break;
+        }
+      }
+    }
+    
+    if (splitIndex > 0) {
+      return {
+        before: lines.slice(0, splitIndex).join('\n'),
+        after: lines.slice(splitIndex).join('\n'),
+      };
+    }
+    
+    return { before: content, after: '' };
+  };
+
   // Navigation helpers
   const goToPreviousSection = () => {
     if (activeSectionIdx > 0) {
@@ -373,165 +425,192 @@ export default function CourseViewer({
                   <div className="max-w-none">
                     {activeTab === "read" ? (
                       <>
-                      {/* Insert Image Component ABOVE the markdown */}
-                      <WikiImage queries={wikiQueryCandidates} />
-                      
-                      <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        h1: ({ children, ...props }) => {
-                          // Hide the first H1 if it matches the section title
-                          const headingText = typeof children === 'string' ? children : 
-                            Array.isArray(children) ? children.join('') : '';
-                          if (headingText.trim() === currentSection.title.trim()) {
-                            return null;
-                          }
-                          return (
-                            <h1
-                              className="font-serif text-3xl font-medium text-[#1A1A1A] mt-12 mb-6 leading-tight"
-                              {...props}
-                            >
-                              {children}
-                            </h1>
-                          );
-                        },
-                        h2: ({ ...props }) => (
-                          <h2
-                            className="font-serif text-2xl font-medium text-[#1A1A1A] mt-10 mb-5 leading-tight"
-                            {...props}
-                          />
-                        ),
-                        h3: ({ ...props }) => (
-                          <h3
-                            className="font-serif text-xl font-medium text-[#1A1A1A] mt-8 mb-4 leading-tight"
-                            {...props}
-                          />
-                        ),
-                        h4: ({ ...props }) => (
-                          <h4
-                            className="font-sans text-lg font-semibold text-[#1A1A1A] mt-6 mb-3"
-                            {...props}
-                          />
-                        ),
-                        p: ({ children, ...props }) => {
-                          return (
-                            <p
-                              className="text-[#1A1A1A] leading-relaxed mb-6 text-[17px]"
-                              {...props}
-                            >
-                              {children}
-                            </p>
-                          );
-                        },
-                        ul: ({ ...props }) => (
-                          <ul
-                            className="list-none mb-8 space-y-3 text-[#1A1A1A]"
-                            {...props}
-                          />
-                        ),
-                        ol: ({ ...props }) => (
-                          <ol
-                            className="list-decimal list-outside ml-6 mb-8 space-y-3 text-[#1A1A1A]"
-                            {...props}
-                          />
-                        ),
-                        li: ({ children, ...props }) => {
-                          // Check if this is a nested list item (definition-style)
-                          const hasNestedContent = React.Children.toArray(children).some(
-                            child => typeof child === 'object'
-                          );
+                        {(() => {
+                          const content = (currentSection.explanation ?? '').replace(/\\n/g, '\n');
+                          const { before, after } = getMarkdownParts(content);
                           
-                          return (
-                            <li 
-                              className={`leading-relaxed text-[17px] ${
-                                hasNestedContent ? 'ml-0' : 'ml-0'
-                              }`}
-                              {...props}
-                            >
-                              <span className="inline-flex items-start">
-                                <span className="mr-3 mt-2 text-gray-400">•</span>
-                                <span className="flex-1">{children}</span>
-                              </span>
-                            </li>
-                          );
-                        },
-                        blockquote: ({ children, ...props }) => {
-                          return (
-                            <blockquote
-                              className="border-l-4 border-[#F7D978] pl-6 pr-4 py-5 my-8 bg-[#fbe7a1] text-[#1A1A1A] rounded-r-lg shadow-sm"
-                              {...props}
-                            >
-                              <div className="space-y-3">
+                          /* eslint-disable @typescript-eslint/no-explicit-any */
+                          const markdownComponents = {
+                            h1: ({ children, ...props }: any) => {
+                              // Hide the first H1 if it matches the section title
+                              const headingText = typeof children === 'string' ? children : 
+                                Array.isArray(children) ? children.join('') : '';
+                              if (headingText.trim() === currentSection.title.trim()) {
+                                return null;
+                              }
+                              return (
+                                <h1
+                                  className="font-serif text-3xl font-medium text-[#1A1A1A] mt-12 mb-6 leading-tight"
+                                  {...props}
+                                >
+                                  {children}
+                                </h1>
+                              );
+                            },
+                            h2: ({ ...props }: any) => (
+                              <h2
+                                className="font-serif text-2xl font-medium text-[#1A1A1A] mt-10 mb-5 leading-tight"
+                                {...props}
+                              />
+                            ),
+                            h3: ({ ...props }: any) => (
+                              <h3
+                                className="font-serif text-xl font-medium text-[#1A1A1A] mt-8 mb-4 leading-tight"
+                                {...props}
+                              />
+                            ),
+                            h4: ({ ...props }: any) => (
+                              <h4
+                                className="font-sans text-lg font-semibold text-[#1A1A1A] mt-6 mb-3"
+                                {...props}
+                              />
+                            ),
+                            p: ({ children, ...props }: any) => (
+                              <p
+                                className="text-[#1A1A1A] leading-relaxed mb-6 text-[17px]"
+                                {...props}
+                              >
                                 {children}
+                              </p>
+                            ),
+                            ul: ({ ...props }: any) => (
+                              <ul
+                                className="list-none mb-8 space-y-3 text-[#1A1A1A]"
+                                {...props}
+                              />
+                            ),
+                            ol: ({ ...props }: any) => (
+                              <ol
+                                className="list-decimal list-outside ml-6 mb-8 space-y-3 text-[#1A1A1A]"
+                                {...props}
+                              />
+                            ),
+                            li: ({ children, ...props }: any) => {
+                              // Check if this is a nested list item (definition-style)
+                              const hasNestedContent = React.Children.toArray(children).some(
+                                child => typeof child === 'object'
+                              );
+                              
+                              return (
+                                <li 
+                                  className={`leading-relaxed text-[17px] ${
+                                    hasNestedContent ? 'ml-0' : 'ml-0'
+                                  }`}
+                                  {...props}
+                                >
+                                  <span className="inline-flex items-start">
+                                    <span className="mr-3 mt-2 text-gray-400">•</span>
+                                    <span className="flex-1">{children}</span>
+                                  </span>
+                                </li>
+                              );
+                            },
+                            blockquote: ({ children, ...props }: any) => {
+                              return (
+                                <blockquote
+                                  className="border-l-4 border-[#F7D978] pl-6 pr-4 py-5 my-8 bg-[#fbe7a1] text-[#1A1A1A] rounded-r-lg shadow-sm"
+                                  {...props}
+                                >
+                                  <div className="space-y-3">
+                                    {children}
+                                  </div>
+                                </blockquote>
+                              );
+                            },
+                            strong: ({ children, ...props }: any) => {
+                              return (
+                                <strong
+                                  className="font-semibold text-[#1A1A1A]"
+                                  {...props}
+                                >
+                                  {children}
+                                </strong>
+                              );
+                            },
+                            em: ({ ...props }: any) => (
+                              <em
+                                className="text-gray-500 text-sm not-italic"
+                                {...props}
+                              />
+                            ),
+                            code: ({ ...props }: any) => (
+                              <code
+                                className="bg-gray-100 text-gray-800 px-2 py-0.5 rounded text-[15px] font-mono"
+                                {...props}
+                              />
+                            ),
+                            pre: ({ ...props }: any) => (
+                              <pre
+                                className="bg-gray-50 border border-gray-300 rounded-lg p-4 mb-6 overflow-x-auto"
+                                {...props}
+                              />
+                            ),
+                            hr: ({ ...props }: any) => (
+                              <hr
+                                className="border-t border-gray-300 my-10"
+                                {...props}
+                              />
+                            ),
+                            table: ({ ...props }: any) => (
+                              <div className="overflow-x-auto my-8 border border-gray-300 rounded-lg">
+                                <table className="min-w-full divide-y divide-gray-300 text-sm" {...props} />
                               </div>
-                            </blockquote>
-                          );
-                        },
-                        strong: ({ children, ...props }) => {
+                            ),
+                            thead: ({ ...props }: any) => (
+                              <thead className="bg-gray-50" {...props} />
+                            ),
+                            tbody: ({ ...props }: any) => (
+                              <tbody className="divide-y divide-gray-300 bg-white" {...props} />
+                            ),
+                            tr: ({ ...props }: any) => (
+                              <tr className="transition-colors hover:bg-gray-50/50" {...props} />
+                            ),
+                            th: ({ ...props }: any) => (
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider font-sans" {...props} />
+                            ),
+                            td: ({ ...props }: any) => (
+                              <td className="px-4 py-3 whitespace-normal text-gray-700" {...props} />
+                            ),
+                          };
+                          /* eslint-enable @typescript-eslint/no-explicit-any */
+
                           return (
-                            <strong
-                              className="font-semibold text-[#1A1A1A]"
-                              {...props}
-                            >
-                              {children}
-                            </strong>
+                            <>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={markdownComponents}
+                              >
+                                {before}
+                              </ReactMarkdown>
+                              
+                              {wikiQueryCandidates && after ? (
+                                <div className="mb-6">
+                                  <WikiImage 
+                                    key={currentSection.id}
+                                    queries={wikiQueryCandidates} 
+                                  />
+                                </div>
+                              ) : null}
+                              
+                              {after ? (
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={markdownComponents}
+                                >
+                                  {after}
+                                </ReactMarkdown>
+                              ) : null}
+                            </>
                           );
-                        },
-                        em: ({ ...props }) => (
-                          <em
-                            className="text-gray-500 text-sm not-italic"
-                            {...props}
-                          />
-                        ),
-                        code: ({ ...props }) => (
-                          <code
-                            className="bg-gray-100 text-gray-800 px-2 py-0.5 rounded text-[15px] font-mono"
-                            {...props}
-                          />
-                        ),
-                        pre: ({ ...props }) => (
-                          <pre
-                            className="bg-gray-50 border border-gray-300 rounded-lg p-4 mb-6 overflow-x-auto"
-                            {...props}
-                          />
-                        ),
-                        hr: ({ ...props }) => (
-                          <hr
-                            className="border-t border-gray-300 my-10"
-                            {...props}
-                          />
-                        ),
-                        table: ({ ...props }) => (
-                          <div className="overflow-x-auto my-8 border border-gray-300 rounded-lg">
-                            <table className="min-w-full divide-y divide-gray-300 text-sm" {...props} />
-                          </div>
-                        ),
-                        thead: ({ ...props }) => (
-                          <thead className="bg-gray-50" {...props} />
-                        ),
-                        tbody: ({ ...props }) => (
-                          <tbody className="divide-y divide-gray-300 bg-white" {...props} />
-                        ),
-                        tr: ({ ...props }) => (
-                          <tr className="transition-colors hover:bg-gray-50/50" {...props} />
-                        ),
-                        th: ({ ...props }) => (
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider font-sans" {...props} />
-                        ),
-                        td: ({ ...props }) => (
-                          <td className="px-4 py-3 whitespace-normal text-gray-700" {...props} />
-                        ),
-                      }}
-                    >
-                      { (currentSection.explanation ?? '').replace(/\\n/g, '\n') }
-                    </ReactMarkdown>
-                    <ChapterChecks
-                      key={currentSection.id}
-                      quiz={currentSection.quiz}
-                      flashcards={currentSection.flashcards}
-                    />
-                    </>
-                  ) : (
+                        })()}
+                        
+                        <ChapterChecks
+                          key={currentSection.id}
+                          quiz={currentSection.quiz}
+                          flashcards={currentSection.flashcards}
+                        />
+                      </>
+                    ) : (
                     // Podcast View
                     <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-gray-300">
                       {audioUrl ? (
