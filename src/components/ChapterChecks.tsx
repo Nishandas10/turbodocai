@@ -25,10 +25,12 @@ export default function ChapterChecks({
   if (activeTab === "flashcards" && !hasFlashcards) activeTab = "quiz";
 
   return (
-    <section className="mt-12 border-t border-gray-300 pt-8">
+    <section className="mt-8 pt-8">
       <h3 className="font-serif text-2xl font-medium text-[#1A1A1A] mb-6">
         Check your understanding
       </h3>
+
+      <div className="border-t border-gray-300 mb-6"></div>
 
       <div className="flex items-center gap-8 mb-6 border-b border-gray-200">
         {hasQuiz && (
