@@ -26,5 +26,7 @@ export default async function PublicCoursePage({
   // Redis returns a JSON object directly if using the SDK
   const course = data as Course;
 
-  return <CourseViewer course={course} />;
+  // We don't currently persist the original user request with the course in Redis.
+  // Pass a light hint so downstream image search can still adapt.
+  return <CourseViewer course={course} userPrompt={course.courseTitle} />;
 }

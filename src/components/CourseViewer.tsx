@@ -9,8 +9,16 @@ import Link from "next/link";
 import Image from "next/image";
 import ChapterChecks from "@/components/ChapterChecks";
 import PodcastPlayer from "@/components/PodcastPlayer";
+import WikiImage from "@/app/components/WikiImage";
+import { buildWikiImageQueryCandidates } from "@/lib/wikiQuery";
 
-export default function CourseViewer({ course }: { course: Course }) {
+export default function CourseViewer({
+  course,
+  userPrompt,
+}: {
+  course: Course;
+  userPrompt?: string;
+}) {
   // UI State
   const [activeModuleIdx, setActiveModuleIdx] = useState(0);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
@@ -96,6 +104,15 @@ export default function CourseViewer({ course }: { course: Course }) {
   // Safety check for empty streaming data
   const currentModule = course?.modules?.[activeModuleIdx];
   const currentSection = currentModule?.sections?.[activeSectionIdx];
+
+  const wikiQueryCandidates = currentSection
+    ? buildWikiImageQueryCandidates({
+        userPrompt,
+        sectionTitle: currentSection.title,
+        sectionImageSearchQuery: currentSection.imageSearchQuery,
+        sectionExplanation: currentSection.explanation,
+      })
+    : undefined;
 
   // Navigation helpers
   const goToPreviousSection = () => {
@@ -356,6 +373,9 @@ export default function CourseViewer({ course }: { course: Course }) {
                   <div className="max-w-none">
                     {activeTab === "read" ? (
                       <>
+                      {/* Insert Image Component ABOVE the markdown */}
+                      <WikiImage queries={wikiQueryCandidates} />
+                      
                       <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{

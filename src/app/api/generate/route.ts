@@ -108,7 +108,7 @@ export async function POST(req: Request) {
 
   // 2. The AI Stream
   const result = await streamObject({
-    model: google("gemini-3-flash-preview"), // Switch to 'gemini-3-flash' if available
+    model: google("gemini-2.5-flash-lite"), // Switch to 'gemini-3-flash' if available
     schema: courseSchema,
     system: COURSE_GENERATION_SYSTEM_PROMPT,
     prompt: buildCoursePrompt(prompt, contextBlock),

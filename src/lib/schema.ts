@@ -32,7 +32,11 @@ export const courseSchema = z.object({
             ),
           // Metadata for UI badges
           readingTime: z.string().describe("e.g. '5 min'"),
-
+          imageSearchQuery: z
+            .string()
+            .describe(
+              "A specific one word search query to find a relevant public domain image for this section from Wikimedia Commons. E.g. 'Steam Engine Diagram 19th Century'"
+            ),
           // End-of-chapter learning checks (optional for backward compatibility).
           // If you generate them, keep at least 3 of each.
           quiz: z
