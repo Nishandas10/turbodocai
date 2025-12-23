@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { BrainCircuit, Layers, ArrowLeft, ArrowRight, RotateCw } from "lucide-react";
 import type { Course } from "@/lib/schema";
 
 type Quiz = NonNullable<NonNullable<Course["modules"]>[number]["sections"]>[number]["quiz"];
@@ -15,8 +16,13 @@ export default function ChapterChecks({
 }) {
   const hasQuiz = Array.isArray(quiz) && quiz.length >= 3;
   const hasFlashcards = Array.isArray(flashcards) && flashcards.length >= 3;
+  const [tab, setTab] = useState<"quiz" | "flashcards">("quiz");
 
   if (!hasQuiz && !hasFlashcards) return null;
+
+  let activeTab = tab;
+  if (activeTab === "quiz" && !hasQuiz) activeTab = "flashcards";
+  if (activeTab === "flashcards" && !hasFlashcards) activeTab = "quiz";
 
   return (
     <section className="mt-12 border-t border-gray-300 pt-8">
@@ -24,9 +30,44 @@ export default function ChapterChecks({
         Check your understanding
       </h3>
 
-      <div className="grid grid-cols-1 gap-8">
-        {hasQuiz ? <QuizBlock quiz={quiz!} /> : null}
-        {hasFlashcards ? <FlashcardsBlock flashcards={flashcards!} /> : null}
+      <div className="flex items-center gap-8 mb-6 border-b border-gray-200">
+        {hasQuiz && (
+          <button
+            onClick={() => setTab("quiz")}
+            className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
+              activeTab === "quiz"
+                ? "border-black text-black"
+                : "border-transparent text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            <BrainCircuit size={18} /> Quiz
+          </button>
+        )}
+        {hasFlashcards && (
+          <button
+            onClick={() => setTab("flashcards")}
+            className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
+              activeTab === "flashcards"
+                ? "border-black text-black"
+                : "border-transparent text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            <Layers size={18} /> Flashcards
+          </button>
+        )}
+      </div>
+
+      <div className="mt-6">
+        {hasQuiz && (
+          <div className={activeTab === "quiz" ? "block" : "hidden"}>
+            <QuizBlock quiz={quiz!} />
+          </div>
+        )}
+        {hasFlashcards && (
+          <div className={activeTab === "flashcards" ? "block" : "hidden"}>
+            <FlashcardsBlock flashcards={flashcards!} />
+          </div>
+        )}
       </div>
     </section>
   );
@@ -184,41 +225,117 @@ function QuizBlock({ quiz }: { quiz: NonNullable<Quiz> }) {
 }
 
 function FlashcardsBlock({ flashcards }: { flashcards: NonNullable<Flashcards> }) {
-  const [flipped, setFlipped] = useState<Record<number, boolean>>({});
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isFlipped, setIsFlipped] = useState(false);
+
+  const currentCard = flashcards[currentIndex];
+  const nextCard = flashcards[currentIndex + 1];
+
+  const handleNext = () => {
+    if (currentIndex < flashcards.length - 1) {
+      setIsFlipped(false);
+      setCurrentIndex((prev) => prev + 1);
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentIndex > 0) {
+      setIsFlipped(false);
+      setCurrentIndex((prev) => prev - 1);
+    }
+  };
 
   return (
-    <div className="rounded-2xl border border-gray-300 bg-white p-6 shadow-sm">
-      <div className="mb-5">
-        <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">
-          Flashcards (min 3)
-        </h4>
-        <p className="text-[#1A1A1A] text-sm">
-          Click a card to flip it.
-        </p>
+    <div className="rounded-2xl border border-gray-300 bg-white p-6 shadow-sm min-h-[400px] flex flex-col">
+      <div className="mb-5 flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">
+            Flashcards
+          </h4>
+          <p className="text-[#1A1A1A] text-sm">
+            Card {currentIndex + 1} of {flashcards.length}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={handlePrev}
+            disabled={currentIndex === 0}
+            className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <button
+            onClick={handleNext}
+            disabled={currentIndex === flashcards.length - 1}
+            className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ArrowRight size={20} />
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {flashcards.map((c, idx) => {
-          const isFlipped = flipped[idx] ?? false;
-          return (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => setFlipped((f) => ({ ...f, [idx]: !isFlipped }))}
-              className="text-left rounded-xl border border-gray-200 bg-[#F8F6F3] hover:bg-[#f3efe9] transition-colors p-5 min-h-[110px]"
-            >
-              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                Card {idx + 1}
+      <div className="flex-1 flex items-center justify-center relative perspective-1000">
+        {/* Stack effect cards behind */}
+        {nextCard && (
+          <div 
+            className="absolute w-full h-full bg-white border border-gray-200 rounded-xl transform scale-95 translate-y-2 -z-10"
+          ></div>
+        )}
+        {flashcards[currentIndex + 2] && (
+          <div 
+            className="absolute w-full h-full bg-white border border-gray-200 rounded-xl transform scale-90 translate-y-4 -z-20"
+          ></div>
+        )}
+
+        {/* Main Card */}
+        <div 
+          className="relative w-full h-full min-h-[280px] cursor-pointer group perspective-1000"
+          onClick={() => setIsFlipped(!isFlipped)}
+        >
+          <div className={`relative w-full h-full transition-all duration-500 transform-style-3d ${isFlipped ? 'rotate-y-180' : ''}`}>
+            {/* Front */}
+            <div className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col justify-between text-center transition-shadow ${isFlipped ? 'invisible' : 'visible'}`}>
+              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Front
               </div>
-              <div className="text-[#1A1A1A] text-sm leading-relaxed">
-                {isFlipped ? c.back : c.front}
+
+              <div className="flex-1 flex items-center justify-center px-4">
+                <div className="text-xl font-medium text-[#1A1A1A] leading-relaxed">
+                  {currentCard.front}
+                </div>
               </div>
-              <div className="mt-3 text-xs text-gray-500">
-                {isFlipped ? "Back" : "Front"} • Click to flip
+
+              <div className="mt-4 text-xs text-gray-400 flex items-center gap-1 justify-center">
+                <RotateCw size={12} /> Click to flip
               </div>
-            </button>
-          );
-        })}
+            </div>
+
+            {/* Back */}
+            <div className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col justify-between text-center transition-shadow rotate-y-180 ${isFlipped ? 'visible' : 'invisible'}`}>
+              <div className="text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                Answer
+              </div>
+
+              <div className="flex-1 flex items-center justify-center px-4">
+                <div className="text-lg text-gray-700 leading-relaxed">
+                  {currentCard.back}
+                </div>
+              </div>
+
+              <div className="mt-4 text-xs text-gray-400 flex items-center gap-1 justify-center">
+                <RotateCw size={12} /> Click to flip back
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Progress bar */}
+      <div className="mt-6 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+        <div 
+          className="h-full bg-black transition-all duration-300"
+          style={{ width: `${((currentIndex + 1) / flashcards.length) * 100}%` }}
+        />
       </div>
     </div>
   );
