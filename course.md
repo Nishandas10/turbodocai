@@ -422,6 +422,5 @@ export default async function PublicCoursePage({
 3. **Streaming UI:** The user sees the sidebar structure _immediately_ while the content is still being typed out.
 4. **Redis Cache:** The public link (`/course/[id]`) loads instantly because it's just reading a static JSON blob, no AI generation required for viewers.
 
-image gen 4 fast gemini for images
 gemini 2.5 fast for tts
 web-search , files and uploads gemini only

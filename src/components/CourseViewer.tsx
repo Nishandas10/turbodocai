@@ -8,12 +8,19 @@ import { Course } from "@/lib/schema";
 import Link from "next/link";
 import Image from "next/image";
 import ChapterChecks from "@/components/ChapterChecks";
+import PodcastPlayer from "@/components/PodcastPlayer";
 
 export default function CourseViewer({ course }: { course: Course }) {
   // UI State
   const [activeModuleIdx, setActiveModuleIdx] = useState(0);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const [activeTab, setActiveTab] = useState<"read" | "listen">("read");
+
+  // On-demand audio generation/playback state (per current section)
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioMimeType, setAudioMimeType] = useState<string | null>(null);
   
   // Image generation state
   const [courseImage, setCourseImage] = useState<string | null>(course?.courseImage ?? null);
@@ -90,6 +97,102 @@ export default function CourseViewer({ course }: { course: Course }) {
   const currentModule = course?.modules?.[activeModuleIdx];
   const currentSection = currentModule?.sections?.[activeSectionIdx];
 
+  // Navigation helpers
+  const goToPreviousSection = () => {
+    if (activeSectionIdx > 0) {
+      setActiveSectionIdx(activeSectionIdx - 1);
+    } else if (activeModuleIdx > 0) {
+      const prevModule = course?.modules?.[activeModuleIdx - 1];
+      if (prevModule?.sections) {
+        setActiveModuleIdx(activeModuleIdx - 1);
+        setActiveSectionIdx(prevModule.sections.length - 1);
+      }
+    }
+  };
+
+  const goToNextSection = () => {
+    if (currentModule?.sections && activeSectionIdx < currentModule.sections.length - 1) {
+      setActiveSectionIdx(activeSectionIdx + 1);
+    } else if (course?.modules && activeModuleIdx < course.modules.length - 1) {
+      setActiveModuleIdx(activeModuleIdx + 1);
+      setActiveSectionIdx(0);
+    }
+  };
+
+  const canGoPrevious = activeModuleIdx > 0 || activeSectionIdx > 0;
+  const canGoNext =
+    (currentModule?.sections && activeSectionIdx < currentModule.sections.length - 1) ||
+    (course?.modules && activeModuleIdx < course.modules.length - 1);
+
+  // Reset audio state when section changes (and release old blob URL)
+  useEffect(() => {
+    setAudioError(null);
+    setIsGeneratingAudio(false);
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    setAudioUrl(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSection?.id]);
+
+  const handlePlayPodcast = async () => {
+    if (!currentSection) return;
+
+    const script = (currentSection.podcastScript ?? "").replace(/\\n/g, "\n").trim();
+    if (!script) {
+      setAudioError("No podcast script available for this section yet.");
+      return;
+    }
+
+    // If already have audio, let user know to use the player at the bottom
+    if (audioUrl) {
+      console.log("[Client] Audio already generated, use player controls");
+      setAudioError(null);
+      return;
+    }
+
+    // Don't start multiple generations
+    if (isGeneratingAudio) {
+      return;
+    }
+
+    setAudioError(null);
+    setIsGeneratingAudio(true);
+
+    try {
+      const res = await fetch("/api/generate-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script,
+          key: `${courseId ?? "course"}:${currentSection.id}`,
+        }),
+      });
+
+      console.log("[Client] API response status:", res.status);
+      console.log("[Client] Response headers:", Object.fromEntries(res.headers.entries()));
+
+      if (!res.ok) {
+        const maybeJson = await res
+          .json()
+          .catch(() => ({ error: `Request failed (${res.status})` }));
+        console.error("[Client] API error response:", maybeJson);
+        throw new Error(maybeJson?.error || `Audio generation failed (${res.status})`);
+      }
+
+      const buf = await res.arrayBuffer();
+      const contentType = res.headers.get("content-type") || "audio/mpeg";
+      const blob = new Blob([buf], { type: contentType });
+      const url = URL.createObjectURL(blob);
+      
+      setAudioUrl(url);
+      setAudioMimeType(contentType);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to generate audio";
+      setAudioError(msg);
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
   if (!course)
     return (
       <div className="flex h-screen items-center justify-center bg-white">
@@ -101,7 +204,7 @@ export default function CourseViewer({ course }: { course: Course }) {
     );
 
   return (
-    <div className="min-h-screen bg-white font-sans text-[#1A1A1A]">
+    <div className="min-h-screen bg-white font-sans text-[#1A1A1A] pb-28">
       {/* --- TOP NAVIGATION --- */}
       <header className="flex items-center justify-between px-6 py-4 border-b bg-white sticky top-0 z-50">
         <div className="flex items-center gap-2">
@@ -411,23 +514,51 @@ export default function CourseViewer({ course }: { course: Course }) {
                   ) : (
                     // Podcast View
                     <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-gray-300">
+                      {audioUrl ? (
+                        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                          <p className="text-sm text-green-700 font-medium">
+                            ✓ Audio ready! Use the player at the bottom of the page to play, pause, and control playback.
+                          </p>
+                        </div>
+                      ) : null}
+                      
                       <div className="flex items-center gap-5 mb-8">
-                        <button className="w-14 h-14 bg-black rounded-full flex items-center justify-center hover:scale-105 transition shadow-lg">
-                          <Play
-                            fill="white"
-                            size={24}
-                            className="ml-1 text-white"
-                          />
+                        <button
+                          onClick={handlePlayPodcast}
+                          disabled={isGeneratingAudio || !!audioUrl}
+                          className={`w-14 h-14 bg-black rounded-full flex items-center justify-center transition shadow-lg ${
+                            isGeneratingAudio || audioUrl ? "opacity-60 cursor-not-allowed" : "hover:scale-105"
+                          }`}
+                          aria-label={audioUrl ? "Audio ready - use player below" : "Generate and play podcast"}
+                        >
+                          {isGeneratingAudio ? (
+                            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Play
+                              fill="white"
+                              size={24}
+                              className="ml-1 text-white"
+                            />
+                          )}
                         </button>
                         <div>
                           <p className="font-bold text-lg text-gray-900">
                             Audio Overview
                           </p>
                           <p className="text-sm text-gray-500">
-                            AI Generated Conversation • {currentSection.readingTime} listen
+                            {isGeneratingAudio
+                              ? "Generating audio…"
+                              : `AI Generated Conversation • ${currentSection.readingTime} listen`}
                           </p>
                         </div>
                       </div>
+
+                      {audioError ? (
+                        <div className="mb-6 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                          {audioError}
+                        </div>
+                      ) : null}
+
                       <div className="prose prose-sm font-mono text-gray-600 whitespace-pre-line">
                         {(currentSection.podcastScript ?? '').replace(/\\n/g, '\n')}
                       </div>
@@ -446,6 +577,19 @@ export default function CourseViewer({ course }: { course: Course }) {
         </main>
       </div>
     </div>
+
+      {/* Persistent Bottom Podcast Player */}
+      <PodcastPlayer
+        audioUrl={audioUrl}
+        audioMimeType={audioMimeType}
+        title={currentSection?.title}
+        thumbnail={courseImage}
+        isLoading={isGeneratingAudio}
+        onPrevious={goToPreviousSection}
+        onNext={goToNextSection}
+        canGoPrevious={canGoPrevious}
+        canGoNext={canGoNext}
+      />
   </div>
   );
 }
