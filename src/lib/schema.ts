@@ -10,6 +10,32 @@ export const courseSchema = z.object({
   // Stored as a base64-encoded PNG (no data: prefix) returned by /api/generate-image.
   // This prevents regenerating an image on every page reload.
   courseImage: z.string().optional(),
+  finalTest: z
+    .object({
+      quiz: z
+        .array(
+          z.object({
+            question: z.string(),
+            options: z.array(z.string()).min(2),
+            // Index of the correct option in `options`
+            answerIndex: z.number().int().nonnegative(),
+            explanation: z.string().optional(),
+          })
+        )
+        .min(1),
+      flashcards: z
+        .array(
+          z.object({
+            front: z.string(),
+            back: z.string(),
+          })
+        )
+        .min(1),
+    })
+    .optional()
+    .describe(
+      "Optional course-wide final test (ideally 15 quiz questions + 15 flashcards)."
+    ),
   modules: z.array(
     z.object({
       id: z.string(),

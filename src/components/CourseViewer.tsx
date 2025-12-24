@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BookOpen, Headphones, Play, Download, StickyNote } from "lucide-react";
+import { BookOpen, Headphones, Play, Download, StickyNote, GraduationCap } from "lucide-react";
 import { Course } from "@/lib/schema";
 import Link from "next/link";
 import Image from "next/image";
@@ -12,6 +12,7 @@ import PodcastPlayer from "@/components/PodcastPlayer";
 import WikiImage from "@/app/components/WikiImage";
 import { buildWikiImageQueryCandidates } from "@/lib/wikiQuery";
 import WebNotes from "@/components/WebNotes";
+import { buildFinalTestFromCourse } from "@/lib/finalTest";
 
 export default function CourseViewer({
   course,
@@ -24,6 +25,9 @@ export default function CourseViewer({
   const [activeModuleIdx, setActiveModuleIdx] = useState(0);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const [activeTab, setActiveTab] = useState<"read" | "listen" | "notes">("read");
+
+  // Final test “virtual section”
+  const [isFinalTestActive, setIsFinalTestActive] = useState(false);
 
   // On-demand audio generation/playback state (per current section)
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
@@ -154,6 +158,24 @@ export default function CourseViewer({
   const currentModule = course?.modules?.[activeModuleIdx];
   const currentSection = currentModule?.sections?.[activeSectionIdx];
 
+  // Aggregate final test content (15 quiz + 15 flashcards) across the full course.
+  const finalTest = React.useMemo<{
+    quiz: NonNullable<Course["finalTest"]>["quiz"];
+    flashcards: NonNullable<Course["finalTest"]>["flashcards"];
+  }>(() => {
+    if (course?.finalTest?.quiz?.length || course?.finalTest?.flashcards?.length) {
+      return {
+        quiz: course.finalTest?.quiz ?? [],
+        flashcards: course.finalTest?.flashcards ?? [],
+      };
+    }
+    try {
+      return buildFinalTestFromCourse(course, 15);
+    } catch {
+      return { quiz: [], flashcards: [] };
+    }
+  }, [course]);
+
   const notesStorageKey = (cid: string | null, sid: string | undefined) => {
     const c = cid ?? "course";
     const s = sid ?? "section";
@@ -261,6 +283,16 @@ export default function CourseViewer({
 
   // Navigation helpers
   const goToPreviousSection = () => {
+    if (isFinalTestActive) {
+      // Go back to the last chapter
+      const lastModuleIdx = Math.max(0, (course?.modules?.length ?? 1) - 1);
+      const lastModule = course?.modules?.[lastModuleIdx];
+      const lastSectionIdx = Math.max(0, (lastModule?.sections?.length ?? 1) - 1);
+      setIsFinalTestActive(false);
+      setActiveModuleIdx(lastModuleIdx);
+      setActiveSectionIdx(lastSectionIdx);
+      return;
+    }
     if (activeSectionIdx > 0) {
       setActiveSectionIdx(activeSectionIdx - 1);
     } else if (activeModuleIdx > 0) {
@@ -273,6 +305,16 @@ export default function CourseViewer({
   };
 
   const goToNextSection = () => {
+    // If we’re on the last chapter, next goes to final test
+    const isLastModule = activeModuleIdx === (course?.modules?.length ?? 1) - 1;
+    const isLastSection =
+      !!currentModule?.sections && activeSectionIdx === currentModule.sections.length - 1;
+
+    if (!isFinalTestActive && isLastModule && isLastSection) {
+      setIsFinalTestActive(true);
+      return;
+    }
+
     if (currentModule?.sections && activeSectionIdx < currentModule.sections.length - 1) {
       setActiveSectionIdx(activeSectionIdx + 1);
     } else if (course?.modules && activeModuleIdx < course.modules.length - 1) {
@@ -281,10 +323,15 @@ export default function CourseViewer({
     }
   };
 
-  const canGoPrevious = activeModuleIdx > 0 || activeSectionIdx > 0;
+  const canGoPrevious = isFinalTestActive || activeModuleIdx > 0 || activeSectionIdx > 0;
   const canGoNext =
-    (currentModule?.sections && activeSectionIdx < currentModule.sections.length - 1) ||
-    (course?.modules && activeModuleIdx < course.modules.length - 1);
+    !isFinalTestActive &&
+    ((currentModule?.sections && activeSectionIdx < currentModule.sections.length - 1) ||
+      (course?.modules && activeModuleIdx < course.modules.length - 1) ||
+      // allow jumping from last section into Take test
+      (activeModuleIdx === (course?.modules?.length ?? 1) - 1 &&
+        !!currentModule?.sections &&
+        activeSectionIdx === currentModule.sections.length - 1));
 
   // Reset audio state when section changes (and release old blob URL)
   useEffect(() => {
@@ -429,12 +476,13 @@ export default function CourseViewer({
                     <div className="space-y-1">
                       {module.sections?.map((section, sIdx) => {
                         const isActive =
-                          mIdx === activeModuleIdx && sIdx === activeSectionIdx;
+                          !isFinalTestActive && mIdx === activeModuleIdx && sIdx === activeSectionIdx;
                         return (
                           <button
                             key={sIdx}
                             data-section={`m${mIdx}-s${sIdx}`}
                             onClick={() => {
+                              setIsFinalTestActive(false);
                               setActiveModuleIdx(mIdx);
                               setActiveSectionIdx(sIdx);
                             }}
@@ -451,6 +499,28 @@ export default function CourseViewer({
                     </div>
                   </div>
                 ))}
+
+                {/* Final course-wide test */}
+                <div>
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">
+                    Final
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsFinalTestActive(true);
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${
+                      isFinalTestActive
+                        ? "bg-[#F8F6F3] text-black font-medium"
+                        : "text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <GraduationCap size={16} /> Take test
+                    </span>
+                  </button>
+                </div>
               </nav>
             </div>
           </aside>
@@ -459,16 +529,35 @@ export default function CourseViewer({
           <main className="flex-1 min-w-0">
               <div ref={mainContentRef} className="max-w-3xl">
               {/* Course Header in Main Content */}
-              <div className="mb-5 pb-5">
-                <h1 className="font-serif text-4xl md:text-5xl font-medium text-[#1A1A1A] mb-6 leading-tight">
-                  {course.courseTitle}
-                </h1>
-                <p className="text-lg text-gray-600 leading-relaxed">
-                  {course.courseDescription}
-                </p>
-              </div>
+              {!isFinalTestActive && (
+                <div className="mb-5 pb-5">
+                  <h1 className="font-serif text-4xl md:text-5xl font-medium text-[#1A1A1A] mb-6 leading-tight">
+                    {course.courseTitle}
+                  </h1>
+                  <p className="text-lg text-gray-600 leading-relaxed">
+                    {course.courseDescription}
+                  </p>
+                </div>
+              )}
 
-              {currentSection ? (
+              {isFinalTestActive ? (
+                <div className="animate-in fade-in duration-500">
+                  <div className="mb-8">
+                    <h2 className="font-serif text-3xl font-medium text-[#1A1A1A] mb-6">
+                      Take test
+                    </h2>
+                    <div className="border-t border-gray-300 mb-6"></div>
+                    <p className="text-gray-600 leading-relaxed">
+                      A course-wide checkpoint: up to <span className="font-medium">15</span> quiz questions and <span className="font-medium">15</span> flashcards pulled from across the full course.
+                    </p>
+                  </div>
+
+                  <ChapterChecks
+                    quiz={finalTest.quiz.slice(0, 15)}
+                    flashcards={finalTest.flashcards.slice(0, 15)}
+                  />
+                </div>
+              ) : currentSection ? (
                 <div className="animate-in fade-in duration-500">
                   {/* Section Header */}
                   <div className="mb-8">
