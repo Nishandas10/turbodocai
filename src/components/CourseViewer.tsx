@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BookOpen, Headphones, Play, Download } from "lucide-react";
+import { BookOpen, Headphones, Play, Download, StickyNote } from "lucide-react";
 import { Course } from "@/lib/schema";
 import Link from "next/link";
 import Image from "next/image";
@@ -11,6 +11,7 @@ import ChapterChecks from "@/components/ChapterChecks";
 import PodcastPlayer from "@/components/PodcastPlayer";
 import WikiImage from "@/app/components/WikiImage";
 import { buildWikiImageQueryCandidates } from "@/lib/wikiQuery";
+import WebNotes from "@/components/WebNotes";
 
 export default function CourseViewer({
   course,
@@ -22,7 +23,7 @@ export default function CourseViewer({
   // UI State
   const [activeModuleIdx, setActiveModuleIdx] = useState(0);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
-  const [activeTab, setActiveTab] = useState<"read" | "listen">("read");
+  const [activeTab, setActiveTab] = useState<"read" | "listen" | "notes">("read");
 
   // On-demand audio generation/playback state (per current section)
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
@@ -152,6 +153,12 @@ export default function CourseViewer({
   // Safety check for empty streaming data
   const currentModule = course?.modules?.[activeModuleIdx];
   const currentSection = currentModule?.sections?.[activeSectionIdx];
+
+  const notesStorageKey = (cid: string | null, sid: string | undefined) => {
+    const c = cid ?? "course";
+    const s = sid ?? "section";
+    return `currio:courseNotes:${c}:${s}`;
+  };
 
   const wikiQueryCandidates = currentSection
     ? buildWikiImageQueryCandidates({
@@ -495,6 +502,16 @@ export default function CourseViewer({
                         >
                           <Headphones size={18} /> Podcast
                         </button>
+                        <button
+                          onClick={() => setActiveTab("notes")}
+                          className={`pb-4 flex items-center gap-2 text-sm font-medium transition-all border-b-2 ${
+                            activeTab === "notes"
+                              ? "border-black text-black"
+                              : "border-transparent text-gray-500 hover:text-gray-800"
+                          }`}
+                        >
+                          <StickyNote size={18} /> Notes
+                        </button>
                       </div>
                       <div className="pb-3 flex items-center gap-3">
                         <button className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
@@ -784,57 +801,62 @@ export default function CourseViewer({
                         />
                       </>
                     ) : (
-                    // Podcast View
-                    <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-gray-300">
-                      {audioUrl ? (
-                        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-                          <p className="text-sm text-green-700 font-medium">
-                            ✓ Audio ready! Use the player at the bottom of the page to play, pause, and control playback.
-                          </p>
-                        </div>
-                      ) : null}
-                      
-                      <div className="flex items-center gap-5 mb-8">
-                        <button
-                          onClick={handlePlayPodcast}
-                          disabled={isGeneratingAudio || !!audioUrl}
-                          className={`w-14 h-14 bg-black rounded-full flex items-center justify-center transition shadow-lg ${
-                            isGeneratingAudio || audioUrl ? "opacity-60 cursor-not-allowed" : "hover:scale-105"
-                          }`}
-                          aria-label={audioUrl ? "Audio ready - use player below" : "Generate and play podcast"}
-                        >
-                          {isGeneratingAudio ? (
-                            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <Play
-                              fill="white"
-                              size={24}
-                              className="ml-1 text-white"
-                            />
-                          )}
-                        </button>
-                        <div>
-                          <p className="font-bold text-lg text-gray-900">
-                            Audio Overview
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            {isGeneratingAudio
-                              ? "Generating audio…"
-                              : `AI Generated Conversation • ${currentSection.readingTime} listen`}
-                          </p>
-                        </div>
-                      </div>
+                      activeTab === "listen" ? (
+                        // Podcast View
+                        <div className="bg-[#F8F6F3] rounded-2xl p-8 border border-gray-300">
+                          {audioUrl ? (
+                            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                              <p className="text-sm text-green-700 font-medium">
+                                ✓ Audio ready! Use the player at the bottom of the page to play, pause, and control playback.
+                              </p>
+                            </div>
+                          ) : null}
+                          
+                          <div className="flex items-center gap-5 mb-8">
+                            <button
+                              onClick={handlePlayPodcast}
+                              disabled={isGeneratingAudio || !!audioUrl}
+                              className={`w-14 h-14 bg-black rounded-full flex items-center justify-center transition shadow-lg ${
+                                isGeneratingAudio || audioUrl ? "opacity-60 cursor-not-allowed" : "hover:scale-105"
+                              }`}
+                              aria-label={audioUrl ? "Audio ready - use player below" : "Generate and play podcast"}
+                            >
+                              {isGeneratingAudio ? (
+                                <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <Play
+                                  fill="white"
+                                  size={24}
+                                  className="ml-1 text-white"
+                                />
+                              )}
+                            </button>
+                            <div>
+                              <p className="font-bold text-lg text-gray-900">
+                                Audio Overview
+                              </p>
+                              <p className="text-sm text-gray-500">
+                                {isGeneratingAudio
+                                  ? "Generating audio…"
+                                  : `AI Generated Conversation • ${currentSection.readingTime} listen`}
+                              </p>
+                            </div>
+                          </div>
 
-                      {audioError ? (
-                        <div className="mb-6 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-                          {audioError}
-                        </div>
-                      ) : null}
+                          {audioError ? (
+                            <div className="mb-6 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                              {audioError}
+                            </div>
+                          ) : null}
 
-                      <div className="prose prose-sm font-mono text-gray-600 whitespace-pre-line">
-                        {(currentSection.podcastScript ?? '').replace(/\\n/g, '\n')}
-                      </div>
-                    </div>
+                          <div className="prose prose-sm font-mono text-gray-600 whitespace-pre-line">
+                            {(currentSection.podcastScript ?? '').replace(/\\n/g, '\n')}
+                          </div>
+                        </div>
+                      ) : (
+                        // Notes View
+                        <WebNotes storageKey={notesStorageKey(courseId, currentSection?.id)} />
+                      )
                   )}
                 </div>
               </div>
