@@ -114,6 +114,44 @@ export default function CourseViewer({
       })
     : undefined;
 
+  // Normalize common “pseudo-headings” into real Markdown headings.
+  // This protects the UI if the model outputs lines like:
+  // "Chapter Title: ...", "Learning Objectives:", "Synthesis:" etc.
+  // Without this, users can see “only paragraphs”.
+  const normalizeCourseMarkdown = (raw: string): string => {
+    let text = (raw ?? "").replace(/\\n/g, "\n").trim();
+    if (!text) return "";
+
+    const lines = text.split("\n");
+    let hasExplicitHeading = false;
+    for (const l of lines) {
+      if (/^\s{0,3}#{1,6}\s+/.test(l)) {
+        hasExplicitHeading = true;
+        break;
+      }
+    }
+
+    // If headings already exist, keep them.
+    if (hasExplicitHeading) return text;
+
+    // Convert common labels into ATX headings.
+    text = text
+      // Chapter title patterns
+      .replace(/^\s*(Chapter\s*Title)\s*:\s*/gim, "# ")
+      // Objectives
+      .replace(/^\s*(Learning\s*Objectives)\s*:?\s*$/gim, "## Learning Objectives")
+      // Synthesis
+      .replace(/^\s*(Synthesis)\s*:?\s*$/gim, "## Synthesis")
+      // Subheadings label
+      .replace(/^\s*(Subheadings?)\s*:\s*$/gim, "## Subheadings")
+      // If a line looks like a standalone title-ish label (ends with ':' and is reasonably short), treat as H2
+      .replace(/^\s*([A-Z][^\n]{0,80})\s*:\s*$/gm, "## $1")
+      // Also handle "Title -" patterns
+      .replace(/^\s*([A-Z][^\n]{0,80})\s*-\s*$/gm, "## $1");
+
+    return text;
+  };
+
   // Split markdown content to insert image after 1st paragraph
   const getMarkdownParts = (content: string) => {
     if (!content) return { before: '', after: '' };
@@ -426,7 +464,7 @@ export default function CourseViewer({
                     {activeTab === "read" ? (
                       <>
                         {(() => {
-                          const content = (currentSection.explanation ?? '').replace(/\\n/g, '\n');
+                          const content = normalizeCourseMarkdown(currentSection.explanation ?? '');
                           const { before, after } = getMarkdownParts(content);
                           
                           /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -674,7 +712,7 @@ export default function CourseViewer({
             )}
           </div>
         </main>
-      </div>
+     </div>
     </div>
 
       {/* Persistent Bottom Podcast Player */}

@@ -17,6 +17,101 @@ const generateId = customAlphabet(
   10
 );
 
+type WebSearchResult = {
+  title?: string;
+  url: string;
+  snippet?: string;
+  displayLink?: string;
+};
+
+function getRequiredEnvVar(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
+}
+
+async function googleWebSearch(
+  query: string,
+  opts?: { num?: number }
+): Promise<{ results: WebSearchResult[] }> {
+  const q = (query ?? "").trim();
+  if (!q) return { results: [] };
+
+  // Uses Google Programmable Search Engine (Custom Search JSON API)
+  // Env vars must be set in the deployment environment.
+  const apiKey = getRequiredEnvVar("GOOGLE_CSE_API_KEY");
+  const cx = getRequiredEnvVar("GOOGLE_CSE_ID");
+  const num = Math.min(Math.max(opts?.num ?? 6, 1), 10);
+
+  const url = new URL("https://www.googleapis.com/customsearch/v1");
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("cx", cx);
+  url.searchParams.set("q", q);
+  url.searchParams.set("num", String(num));
+
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Google search failed (${res.status}): ${text.slice(0, 500)}`
+    );
+  }
+
+  const json = (await res.json().catch(() => null)) as {
+    items?: Array<{
+      title?: string;
+      link?: string;
+      snippet?: string;
+      displayLink?: string;
+    }>;
+  } | null;
+
+  const items = Array.isArray(json?.items) ? json!.items! : [];
+  const results = items
+    .map((it): WebSearchResult | null => {
+      const url = typeof it.link === "string" ? it.link : "";
+      if (!url) return null;
+      return {
+        url,
+        title: typeof it.title === "string" ? it.title.trim() : undefined,
+        snippet: typeof it.snippet === "string" ? it.snippet.trim() : undefined,
+        displayLink:
+          typeof it.displayLink === "string"
+            ? it.displayLink.trim()
+            : undefined,
+      };
+    })
+    .filter((x) => x !== null) as WebSearchResult[];
+
+  return { results };
+}
+
+function formatSearchResultsForPrompt(results: WebSearchResult[]): string {
+  if (!results.length) return "(No search results.)";
+  // Keep it compact: titles + snippets + URLs.
+  return results
+    .slice(0, 10)
+    .map((r, i) => {
+      const title = r.title ? r.title : "(untitled)";
+      const domain = (() => {
+        try {
+          return new URL(r.url).hostname;
+        } catch {
+          return r.displayLink ?? "";
+        }
+      })();
+      const snippet = r.snippet ? `\nSnippet: ${r.snippet}` : "";
+      const domainLine = domain ? ` (${domain})` : "";
+      return `#${i + 1}: ${title}${domainLine}\nURL: ${r.url}${snippet}`;
+    })
+    .join("\n\n");
+}
+
 /**
  * Validate and fix quiz data to ensure answerIndex is present.
  * If missing, attempt to guess from the question or default to 0.
@@ -92,7 +187,10 @@ export async function POST(req: Request) {
 
   // Persist minimal metadata immediately so other endpoints (like thumbnail) can work
   // while the course is still streaming.
-  await redis.set(`course:meta:${courseId}`, { prompt });
+  await redis.set(`course:meta:${courseId}`, {
+    prompt,
+    searchQuery: prompt,
+  });
 
   // 1. Context Preparation (Simple concatenation for text sources)
   // For production, use Jina.ai for web links or pdf-parse for docs
@@ -106,12 +204,40 @@ export async function POST(req: Request) {
     })
     .join("\n\n---\n\n");
 
+  // 1b. Explicit web search FIRST, then generate grounded on these sources.
+  // Required flow:
+  // 1) exact user prompt -> Google Search
+  // 2) collect sources + metadata
+  // 3) generate course using those sources
+  let searchResults: WebSearchResult[] = [];
+  try {
+    const search = await googleWebSearch(prompt, { num: 6 });
+    searchResults = search.results;
+  } catch (e) {
+    // If search fails (missing env, quota, etc.), we still generate using any provided sources.
+    console.warn("googleWebSearch failed:", e);
+  }
+
+  // Persist search metadata so other endpoints / the UI can display citations later.
+  await redis.set(`course:search:${courseId}`, {
+    query: prompt,
+    results: searchResults,
+  });
+
+  const webSearchBlock = formatSearchResultsForPrompt(searchResults);
+  const combinedContext = [
+    contextBlock ? `USER-PROVIDED CONTEXT\n${contextBlock}` : "",
+    `GOOGLE SEARCH RESULTS (authoritative; cite/ground claims using these)\n${webSearchBlock}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+
   // 2. The AI Stream
   const result = await streamObject({
     model: google("gemini-2.5-flash-lite"), // Switch to 'gemini-3-flash' if available
     schema: courseSchema,
     system: COURSE_GENERATION_SYSTEM_PROMPT,
-    prompt: buildCoursePrompt(prompt, contextBlock),
+    prompt: buildCoursePrompt(prompt, combinedContext),
     // 3. ON FINISH: Save to Redis for permanent access
     onFinish: async ({ object }) => {
       if (object) {
