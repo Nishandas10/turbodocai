@@ -35,6 +35,18 @@ export default function CourseViewer({
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [imageError, setImageError] = useState(false);
 
+  // Web sources (Google CSE results) for transparency/citations
+  type WebSource = {
+    url: string;
+    title?: string;
+    snippet?: string;
+    displayLink?: string;
+  };
+  const [sources, setSources] = useState<WebSource[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
+  const [isSourcesOpen, setIsSourcesOpen] = useState(false);
+
   const courseId = (course as unknown as { id?: string } | undefined)?.id ?? null;
 
   // refs for the navigation card and main content so we can scroll selected item into view
@@ -47,6 +59,42 @@ export default function CourseViewer({
     setImageError(false);
     setIsGeneratingImage(false);
   }, [course?.courseImage]);
+
+  // Fetch web sources (best-effort). Only works once we have a stable courseId.
+  useEffect(() => {
+    if (!courseId) return;
+    let cancelled = false;
+
+    setSourcesLoading(true);
+    setSourcesError(null);
+
+    fetch(`/api/courses/sources?courseId=${encodeURIComponent(courseId)}`, {
+      method: "GET",
+      headers: { accept: "application/json" },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.success && Array.isArray(data?.results)) {
+          setSources(data.results as WebSource[]);
+        } else {
+          setSources([]);
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setSourcesError(e instanceof Error ? e.message : "Failed to load sources");
+        setSources([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSourcesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId]);
 
   // Generate + persist course image only when missing.
   useEffect(() => {
@@ -452,12 +500,99 @@ export default function CourseViewer({
                         <button className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
                           <Download size={18} />
                         </button>
-                        {/* <span className="text-xs font-medium bg-gray-100 px-3 py-1.5 rounded-full text-gray-600">
-                          2 Sources
-                        </span> */}
+
+                        <button
+                          type="button"
+                          onClick={() => setIsSourcesOpen(true)}
+                          disabled={sourcesLoading || !courseId}
+                          className={`text-xs font-medium bg-gray-100 px-3 py-1.5 rounded-full transition-colors ${
+                            sourcesLoading || !courseId
+                              ? "text-gray-400 cursor-not-allowed"
+                              : "text-gray-700 hover:bg-gray-200"
+                          }`}
+                          title={
+                            !courseId
+                              ? "Sources will appear once the course is assigned an ID"
+                              : sourcesLoading
+                                ? "Loading sources…"
+                                : "View web sources"
+                          }
+                        >
+                          {sourcesLoading ? "Sources…" : `${sources.length} Sources`}
+                        </button>
                       </div>
                     </div>
                   </div>
+
+                  {/* Sources Modal */}
+                  {isSourcesOpen ? (
+                    <div className="fixed inset-0 z-50">
+                      <button
+                        type="button"
+                        className="absolute inset-0 bg-black/40"
+                        aria-label="Close sources"
+                        onClick={() => setIsSourcesOpen(false)}
+                      />
+                      <div className="absolute left-1/2 top-1/2 w-[min(720px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white border border-gray-200 shadow-xl">
+                        <div className="p-6 border-b border-gray-200 flex items-start justify-between gap-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900">Web sources</h3>
+                            <p className="text-sm text-gray-500 mt-1">
+                              These are the web search results used to ground the course generation.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsSourcesOpen(false)}
+                            className="px-3 py-1.5 rounded-lg text-sm bg-gray-100 hover:bg-gray-200 text-gray-700"
+                          >
+                            Close
+                          </button>
+                        </div>
+
+                        <div className="p-6 max-h-[70vh] overflow-y-auto">
+                          {sourcesError ? (
+                            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                              {sourcesError}
+                            </div>
+                          ) : null}
+
+                          {!sourcesLoading && sources.length === 0 ? (
+                            <div className="text-sm text-gray-600">
+                              No web sources were recorded for this course. (Search might be disabled/misconfigured, or generation happened without search results.)
+                            </div>
+                          ) : null}
+
+                          <div className="space-y-4">
+                            {sources.map((s, idx) => (
+                              <div key={s.url + idx} className="p-4 rounded-xl border border-gray-200 hover:border-gray-300 transition">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="min-w-0">
+                                    <a
+                                      href={s.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-sm font-semibold text-gray-900 hover:underline break-words"
+                                    >
+                                      {s.title || s.url}
+                                    </a>
+                                    <div className="text-xs text-gray-500 mt-1 break-words">
+                                      {s.displayLink || (() => {
+                                        try { return new URL(s.url).hostname; } catch { return s.url; }
+                                      })()}
+                                    </div>
+                                  </div>
+                                </div>
+                                {s.snippet ? (
+                                  <p className="text-sm text-gray-700 mt-3 leading-relaxed">{s.snippet}</p>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {/* Content */}
                   <div className="max-w-none">
